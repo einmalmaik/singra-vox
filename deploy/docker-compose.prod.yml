@@ -1,0 +1,74 @@
+# ╔══════════════════════════════════════════════════════════╗
+# ║  Singra Vox – Docker Compose (Production / TLS)        ║
+# ╚══════════════════════════════════════════════════════════╝
+#
+# Uses Caddy for automatic HTTPS with Let's Encrypt.
+#
+# Usage:
+#   cp .env.example .env
+#   # Set DOMAIN=your.domain.com
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: singravox-db
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/backend.Dockerfile
+    container_name: singravox-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_URL: "mongodb://mongodb:27017"
+      DB_NAME: "${DB_NAME:-singravox}"
+      JWT_SECRET: "${JWT_SECRET}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@singravox.local}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
+      FRONTEND_URL: "https://${DOMAIN}"
+      CORS_ORIGINS: "https://${DOMAIN}"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../deploy/frontend.Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: "https://${DOMAIN}"
+    container_name: singravox-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: singravox-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: "${DOMAIN}"
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  mongo_data:
+  caddy_data:
+  caddy_config:

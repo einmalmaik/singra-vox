@@ -1,0 +1,14 @@
+{$DOMAIN:localhost} {
+    # API + WebSocket → Backend
+    handle /api/* {
+        reverse_proxy backend:8001
+    }
+
+    # Everything else → Frontend
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # TLS is automatic with a real domain
+    # For localhost, Caddy uses self-signed
+}
