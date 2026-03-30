@@ -1016,6 +1016,16 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None)):
                     }, exclude=uid)
             elif data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
+            # ── WebRTC Voice Signaling (P2P relay) ──
+            elif data.get("type") in ("voice_offer", "voice_answer", "voice_ice"):
+                target = data.get("target_user_id")
+                if target:
+                    await ws_mgr.send(target, {
+                        "type": data["type"],
+                        "from_user_id": uid,
+                        "sdp": data.get("sdp"),
+                        "candidate": data.get("candidate"),
+                    })
     except WebSocketDisconnect:
         pass
     except Exception as e:

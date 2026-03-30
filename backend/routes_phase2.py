@@ -470,6 +470,124 @@ async def get_keys(user_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════
+#  GDPR: DATA EXPORT
+# ═══════════════════════════════════════════════════
+@phase2.get("/users/me/export")
+async def export_user_data(request: Request):
+    """DSGVO Art. 15 / Art. 20 – Auskunft & Datenportabilität.
+    Returns all data associated with the requesting user."""
+    user = await _user(request)
+    uid = user["id"]
+
+    profile = await db.users.find_one({"id": uid}, {"_id": 0, "password_hash": 0})
+
+    messages = await db.messages.find(
+        {"author_id": uid, "is_deleted": {"$ne": True}}, {"_id": 0}
+    ).to_list(10000)
+
+    dms_sent = await db.direct_messages.find({"sender_id": uid}, {"_id": 0}).to_list(10000)
+    dms_received = await db.direct_messages.find({"receiver_id": uid}, {"_id": 0}).to_list(10000)
+
+    memberships = await db.server_members.find({"user_id": uid}, {"_id": 0}).to_list(100)
+    for m in memberships:
+        srv = await db.servers.find_one({"id": m["server_id"]}, {"_id": 0, "name": 1})
+        m["server_name"] = srv["name"] if srv else "?"
+
+    group_convos = await db.group_conversations.find({"members": uid}, {"_id": 0}).to_list(100)
+    group_msgs = await db.group_messages.find({"sender_id": uid}, {"_id": 0}).to_list(10000)
+
+    read_states = await db.read_states.find({"user_id": uid}, {"_id": 0}).to_list(500)
+    files = await db.file_uploads.find({"user_id": uid}, {"_id": 0, "data": 0}).to_list(500)
+
+    return {
+        "export_date": _now(),
+        "profile": profile,
+        "server_memberships": memberships,
+        "channel_messages": messages,
+        "direct_messages_sent": dms_sent,
+        "direct_messages_received": dms_received,
+        "group_conversations": group_convos,
+        "group_messages_sent": group_msgs,
+        "read_states": read_states,
+        "file_uploads_metadata": files,
+        "_note": "File content excluded for size. Request individual files via /api/files/{id}."
+    }
+
+
+# ═══════════════════════════════════════════════════
+#  GDPR: ACCOUNT DELETION
+# ═══════════════════════════════════════════════════
+@phase2.delete("/users/me")
+async def delete_account(request: Request):
+    """DSGVO Art. 17 – Recht auf Löschung.
+
+    Deletion policy:
+    - Profile: deleted
+    - Channel messages: author anonymised, content removed
+    - DMs: deleted entirely (both sent & received)
+    - Server memberships: removed
+    - Roles, voice states, read states: cleaned up
+    - Key bundles: deleted
+    - File uploads: deleted
+    - Group conversations: removed from member list
+    - Audit log: actor_id anonymised
+    """
+    user = await _user(request)
+    uid = user["id"]
+
+    # 1. Anonymise channel messages
+    await db.messages.update_many(
+        {"author_id": uid},
+        {"$set": {"author_id": "[deleted]", "content": "[account deleted]", "is_deleted": True, "attachments": []}}
+    )
+
+    # 2. Delete DMs
+    await db.direct_messages.delete_many({"$or": [{"sender_id": uid}, {"receiver_id": uid}]})
+
+    # 3. Remove from servers
+    await db.server_members.delete_many({"user_id": uid})
+
+    # 4. Clean up voice / read / revision data
+    await db.voice_states.delete_many({"user_id": uid})
+    await db.read_states.delete_many({"user_id": uid})
+    await db.message_revisions.update_many({"editor_id": uid}, {"$set": {"editor_id": "[deleted]"}})
+
+    # 5. Delete E2EE keys
+    await db.key_bundles.delete_many({"user_id": uid})
+
+    # 6. Delete file uploads
+    await db.file_uploads.delete_many({"user_id": uid})
+
+    # 7. Remove from group conversations
+    await db.group_conversations.update_many({"members": uid}, {"$pull": {"members": uid}})
+    await db.group_messages.update_many({"sender_id": uid}, {"$set": {"sender_id": "[deleted]", "content": "[account deleted]"}})
+
+    # 8. Anonymise audit log
+    await db.audit_log.update_many({"actor_id": uid}, {"$set": {"actor_id": "[deleted]"}})
+
+    # 9. Delete user
+    await db.users.delete_one({"id": uid})
+
+    # 10. Delete login attempts
+    await db.login_attempts.delete_many({"identifier": {"$regex": user.get("email", "")}})
+
+    return {
+        "ok": True,
+        "deleted": {
+            "profile": True,
+            "messages": "anonymised",
+            "direct_messages": "deleted",
+            "memberships": "removed",
+            "voice_states": "deleted",
+            "e2ee_keys": "deleted",
+            "files": "deleted",
+            "audit_log": "anonymised"
+        }
+    }
+
+
+
+# ═══════════════════════════════════════════════════
 #  STARTUP INDEXES (call from main app)
 # ═══════════════════════════════════════════════════
 async def create_phase2_indexes():

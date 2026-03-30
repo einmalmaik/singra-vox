@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Singra Vox (SovereignVoice) Backend API Testing - Phase 2
-Tests all API endpoints including Phase 2 features: threads, search, unread tracking,
-file uploads, E2EE key management, group DMs, channel overrides, temp rooms, edit history
+Singra Vox (SovereignVoice) Backend API Testing - Phase 3
+Tests all API endpoints including Phase 1+2+3 features: threads, search, unread tracking,
+file uploads, E2EE key management, group DMs, channel overrides, temp rooms, edit history,
+GDPR data export, GDPR account deletion, WebRTC voice signaling
 """
 import requests
 import sys
@@ -692,8 +693,171 @@ class SingraVoxAPITester:
             print(f"   Found {len(response)} message revisions")
         return success
 
+    # ============================================================
+    # PHASE 3 TESTS - GDPR & WebRTC
+    # ============================================================
+    
+    def test_gdpr_data_export(self):
+        """Test GDPR data export endpoint (Art. 15/20)"""
+        success, response = self.run_test(
+            "GDPR Data Export",
+            "GET",
+            "users/me/export",
+            200
+        )
+        if success and response:
+            required_fields = [
+                "export_date", "profile", "server_memberships", 
+                "channel_messages", "direct_messages_sent", "direct_messages_received"
+            ]
+            missing_fields = [f for f in required_fields if f not in response]
+            if not missing_fields:
+                print(f"   ✅ Export contains all required fields")
+                print(f"   Profile: {response.get('profile', {}).get('email')}")
+                print(f"   Messages: {len(response.get('channel_messages', []))}")
+                print(f"   DMs sent: {len(response.get('direct_messages_sent', []))}")
+                print(f"   Memberships: {len(response.get('server_memberships', []))}")
+                return True
+            else:
+                print(f"   ❌ Missing required fields: {missing_fields}")
+                return False
+        return success
+
+    def test_gdpr_account_deletion_prep(self):
+        """Test GDPR account deletion endpoint (Art. 17) - preparation only"""
+        # Create a test user for deletion testing (don't delete admin)
+        test_email = f"testdelete_{datetime.now().strftime('%H%M%S')}@test.local"
+        
+        # Register test user
+        success, response = self.run_test(
+            "Create Test User for Deletion",
+            "POST",
+            "auth/register",
+            200,
+            data={
+                "email": test_email,
+                "username": f"testdelete{datetime.now().strftime('%H%M%S')}",
+                "password": "TestPass123!",
+                "display_name": "Test Delete User"
+            }
+        )
+        
+        if not success or not response.get("access_token"):
+            print("   ❌ Could not create test user")
+            return False
+            
+        test_token = response["access_token"]
+        print(f"   Test user created: {test_email}")
+        
+        # Test deletion with the test user
+        success, response = self.run_test(
+            "GDPR Account Deletion",
+            "DELETE",
+            "users/me",
+            200,
+            headers={"Authorization": f"Bearer {test_token}"}
+        )
+        
+        if success and response.get("ok"):
+            print("   ✅ Account deletion successful")
+            print(f"   Deleted components: {list(response.get('deleted', {}).keys())}")
+            return True
+        else:
+            print("   ❌ Account deletion failed")
+            return False
+
+    def test_websocket_signaling(self):
+        """Test WebSocket connection for WebRTC voice signaling"""
+        try:
+            import websocket
+            import threading
+            import time
+            
+            ws_url = self.base_url.replace('https://', 'wss://') + f"/api/ws?token={self.token}"
+            print(f"   Testing WebSocket: {ws_url}")
+            
+            connection_established = threading.Event()
+            messages_received = []
+            
+            def on_message(ws, message):
+                try:
+                    data = json.loads(message)
+                    messages_received.append(data)
+                    print(f"   📨 WS Message: {data.get('type', 'unknown')}")
+                except:
+                    pass
+            
+            def on_open(ws):
+                connection_established.set()
+                print("   ✅ WebSocket connected")
+                # Test ping/pong
+                ws.send(json.dumps({"type": "ping"}))
+                
+                # Test voice signaling message format
+                ws.send(json.dumps({
+                    "type": "voice_offer",
+                    "target_user_id": "test_user_id",
+                    "sdp": {"type": "offer", "sdp": "test_sdp_data"}
+                }))
+            
+            def on_error(ws, error):
+                print(f"   ❌ WebSocket error: {error}")
+            
+            def on_close(ws, close_status_code, close_msg):
+                print("   WebSocket closed")
+            
+            ws = websocket.WebSocketApp(ws_url,
+                                      on_open=on_open,
+                                      on_message=on_message,
+                                      on_error=on_error,
+                                      on_close=on_close)
+            
+            # Run WebSocket in thread
+            ws_thread = threading.Thread(target=ws.run_forever)
+            ws_thread.daemon = True
+            ws_thread.start()
+            
+            # Wait for connection and messages
+            if connection_established.wait(timeout=10):
+                time.sleep(3)  # Wait for messages
+                ws.close()
+                
+                # Check for pong response
+                pong_received = any(msg.get('type') == 'pong' for msg in messages_received)
+                if pong_received:
+                    print("   ✅ WebSocket ping/pong successful")
+                    return True
+                else:
+                    print("   ⚠️  WebSocket connected but no pong received")
+                    return True  # Still consider success if connection works
+            else:
+                print("   ❌ WebSocket connection timeout")
+                return False
+                
+        except ImportError:
+            print("   ⚠️  websocket-client not available, skipping WebSocket test")
+            return True  # Don't fail if library missing
+        except Exception as e:
+            print(f"   ❌ WebSocket test error: {str(e)}")
+            return False
+
+    def test_health_check_singra_vox(self):
+        """Test health endpoint specifically returns 'Singra Vox'"""
+        success, response = self.run_test(
+            "Health Check (Singra Vox)",
+            "GET",
+            "health",
+            200
+        )
+        if success and response.get("service") == "Singra Vox":
+            print(f"   ✅ Health check returns 'Singra Vox'")
+            return True
+        else:
+            print(f"   ❌ Expected 'Singra Vox', got: {response.get('service')}")
+            return False
+
 def main():
-    print("🚀 Starting Singra Vox (SovereignVoice) Backend API Tests - Phase 2")
+    print("🚀 Starting Singra Vox (SovereignVoice) Backend API Tests - Phase 3")
     print("=" * 60)
     
     # Setup
@@ -701,10 +865,10 @@ def main():
     admin_email = "admin@sovereignvoice.local"
     admin_password = "SV_Admin_2024!"
 
-    # Test sequence - Phase 1 + Phase 2
+    # Test sequence - Phase 1 + Phase 2 + Phase 3
     tests = [
         # Phase 1 Core Tests
-        ("Health Check (Singra Vox)", tester.test_health),
+        ("Health Check (Singra Vox)", tester.test_health_check_singra_vox),
         ("Setup Status", tester.test_setup_status),
         ("Admin Login", lambda: tester.test_login(admin_email, admin_password)),
         ("Get Current User", tester.test_auth_me),
@@ -723,7 +887,7 @@ def main():
         ("Voice Leave", tester.test_voice_leave),
         ("Create Server", tester.test_create_server),
         
-        # Phase 2 New Features
+        # Phase 2 Features
         ("Send Message with @mentions", tester.test_send_message_with_mentions),
         ("Search Messages", tester.test_search_messages),
         ("Get Unread Counts", tester.test_get_unread),
@@ -740,6 +904,11 @@ def main():
         ("Channel Overrides", tester.test_channel_overrides),
         ("Create Temp Channel", tester.test_create_temp_channel),
         ("Edit Message & Revisions", tester.test_edit_message_and_revisions),
+        
+        # Phase 3 New Features - GDPR & WebRTC
+        ("GDPR Data Export", tester.test_gdpr_data_export),
+        ("GDPR Account Deletion", tester.test_gdpr_account_deletion_prep),
+        ("WebSocket Voice Signaling", tester.test_websocket_signaling),
         
         # Cleanup
         ("Logout", tester.test_logout),

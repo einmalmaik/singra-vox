@@ -7,13 +7,15 @@ import ServerSidebar from "@/components/chat/ServerSidebar";
 import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import ChatArea from "@/components/chat/ChatArea";
 import MemberSidebar from "@/components/chat/MemberSidebar";
-import { ShieldCheck } from "@phosphor-icons/react";
+import { ShieldCheck, List, UsersThree, X } from "@phosphor-icons/react";
+import { VoiceEngine } from "@/lib/voiceEngine";
 
 export default function MainLayout() {
   const { user, token, logout } = useAuth();
   const navigate = useNavigate();
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
+  const voiceRef = useRef(null);
 
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
@@ -22,6 +24,10 @@ export default function MainLayout() {
   const [messages, setMessages] = useState([]);
   const [members, setMembers] = useState([]);
   const [roles, setRoles] = useState([]);
+
+  // Mobile responsive
+  const [showChannels, setShowChannels] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
 
   const [view, setView] = useState("server");
   const [dmConversations, setDmConversations] = useState([]);
@@ -252,8 +258,20 @@ export default function MainLayout() {
       case "member_banned":
         setMembers(prev => prev.filter(m => m.user_id !== data.user_id));
         break;
+      // WebRTC voice signaling
+      case "voice_offer":
+      case "voice_answer":
+      case "voice_ice":
+        voiceRef.current?.handleSignal(data);
+        break;
       default:
         break;
+    }
+  }, []);
+
+  const sendSignal = useCallback((data) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(data));
     }
   }, []);
 
@@ -284,7 +302,7 @@ export default function MainLayout() {
       <ServerSidebar
         servers={servers}
         currentServer={currentServer}
-        onSelectServer={selectServer}
+        onSelectServer={(s) => { selectServer(s); setShowChannels(false); }}
         onRefreshServers={loadServers}
         view={view}
         onSwitchToDm={switchToDm}
@@ -295,37 +313,65 @@ export default function MainLayout() {
 
       {view === "server" && currentServer ? (
         <>
-          <ChannelSidebar
-            server={currentServer}
-            channels={channels}
-            currentChannel={currentChannel}
-            onSelectChannel={selectChannel}
-            onRefreshChannels={refreshChannels}
-            user={user}
-            members={members}
-            roles={roles}
-            onRefreshMembers={refreshMembers}
-            unreadMap={unreadMap}
-          />
-          <ChatArea
-            channel={currentChannel}
-            messages={messages}
-            setMessages={setMessages}
-            user={user}
-            serverId={currentServer?.id}
-            onSendTyping={sendTyping}
-            typingUsers={typingUsers[currentChannel?.id] || {}}
-          />
-          <MemberSidebar
-            members={members}
-            roles={roles}
-            serverId={currentServer?.id}
-            user={user}
-            onStartDM={(dmUser) => {
-              switchToDm();
-              selectDmUser(dmUser);
-            }}
-            onRefreshMembers={refreshMembers}
+          {/* Mobile backdrop */}
+          {showChannels && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setShowChannels(false)} />}
+          {showMembers && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setShowMembers(false)} />}
+
+          {/* Channel sidebar: always on desktop, toggle on mobile */}
+          <div className={`${showChannels ? 'fixed left-[72px] top-0 bottom-0 z-50' : 'hidden'} md:relative md:block`}>
+            <ChannelSidebar
+              server={currentServer}
+              channels={channels}
+              currentChannel={currentChannel}
+              onSelectChannel={(ch) => { selectChannel(ch); setShowChannels(false); }}
+              onRefreshChannels={refreshChannels}
+              user={user}
+              members={members}
+              roles={roles}
+              onRefreshMembers={refreshMembers}
+              unreadMap={unreadMap}
+              voiceEngineRef={voiceRef}
+              sendSignal={sendSignal}
+            />
+          </div>
+
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Mobile toolbar */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-[#27272A] md:hidden shrink-0" data-testid="mobile-toolbar">
+              <button onClick={() => setShowChannels(true)} data-testid="toggle-channels-mobile"
+                className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]"><List size={18} /></button>
+              <span className="text-sm font-bold text-white flex-1 truncate" style={{ fontFamily: 'Manrope' }}>
+                {currentChannel ? `# ${currentChannel.name}` : currentServer?.name}
+              </span>
+              <button onClick={() => setShowMembers(true)} data-testid="toggle-members-mobile"
+                className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]"><UsersThree size={18} /></button>
+            </div>
+            <ChatArea
+              channel={currentChannel}
+              messages={messages}
+              setMessages={setMessages}
+              user={user}
+              serverId={currentServer?.id}
+              onSendTyping={sendTyping}
+              typingUsers={typingUsers[currentChannel?.id] || {}}
+            />
+          </div>
+
+          {/* Member sidebar: always on desktop, toggle on mobile */}
+          <div className={`${showMembers ? 'fixed right-0 top-0 bottom-0 z-50' : 'hidden'} md:relative md:block`}>
+            <MemberSidebar
+              members={members}
+              roles={roles}
+              serverId={currentServer?.id}
+              user={user}
+              onStartDM={(dmUser) => {
+                switchToDm();
+                selectDmUser(dmUser);
+                setShowMembers(false);
+              }}
+              onRefreshMembers={refreshMembers}
+            />
+          </div>
           />
         </>
       ) : view === "dm" ? (

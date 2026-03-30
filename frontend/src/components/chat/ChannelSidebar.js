@@ -14,8 +14,9 @@ import api from "@/lib/api";
 import { toast } from "sonner";
 import InviteModal from "@/components/modals/InviteModal";
 import ServerSettingsModal from "@/components/modals/ServerSettingsModal";
+import UserSettingsModal from "@/components/modals/UserSettingsModal";
 
-export default function ChannelSidebar({ server, channels, currentChannel, onSelectChannel, onRefreshChannels, user, members, roles, onRefreshMembers, unreadMap }) {
+export default function ChannelSidebar({ server, channels, currentChannel, onSelectChannel, onRefreshChannels, user, members, roles, onRefreshMembers, unreadMap, voiceEngineRef, sendSignal }) {
   const [showCreate, setShowCreate] = useState(false);
   const [chName, setChName] = useState("");
   const [chType, setChType] = useState("text");
@@ -50,19 +51,39 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
 
   const joinVoice = async (channel) => {
     try {
+      // Initialize WebRTC voice engine
+      const { VoiceEngine } = await import("@/lib/voiceEngine");
+      const engine = new VoiceEngine();
+      await engine.init();
+      if (voiceEngineRef) voiceEngineRef.current = engine;
+
+      // Register in channel via API
       await api.post(`/servers/${server.id}/voice/${channel.id}/join`);
+
+      // Connect to existing peers
+      const existingUsers = (channel.voice_states || [])
+        .filter(s => s.user_id !== user.id)
+        .map(s => s.user_id);
+      engine.joinChannel(channel.id, existingUsers, sendSignal);
+
       setVoiceChannel(channel);
       setIsMuted(false);
       setIsDeafened(false);
       onRefreshChannels();
+      toast.success("Voice connected");
     } catch (err) {
-      toast.error("Failed to join voice channel");
+      console.error("Voice join error:", err);
+      toast.error("Failed to join voice – check microphone permissions");
     }
   };
 
   const leaveVoice = async () => {
     if (!voiceChannel) return;
     try {
+      if (voiceEngineRef?.current) {
+        voiceEngineRef.current.disconnect();
+        voiceEngineRef.current = null;
+      }
       await api.post(`/servers/${server.id}/voice/${voiceChannel.id}/leave`);
       setVoiceChannel(null);
       onRefreshChannels();
@@ -71,7 +92,8 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
 
   const toggleMute = async () => {
     if (!voiceChannel) return;
-    const newMuted = !isMuted;
+    const engine = voiceEngineRef?.current;
+    const newMuted = engine ? engine.toggleMute() : !isMuted;
     setIsMuted(newMuted);
     try {
       await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_muted: newMuted });
@@ -80,7 +102,8 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
 
   const toggleDeafen = async () => {
     if (!voiceChannel) return;
-    const newDeaf = !isDeafened;
+    const engine = voiceEngineRef?.current;
+    const newDeaf = engine ? engine.toggleDeafen() : !isDeafened;
     setIsDeafened(newDeaf);
     try {
       await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_deafened: newDeaf });
@@ -248,6 +271,7 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
           <p className="text-sm font-medium truncate">{user?.display_name}</p>
           <p className="text-[10px] text-[#71717A] truncate">@{user?.username}</p>
         </div>
+        <UserSettingsModal user={user} onLogout={() => window.location.href = '/login'} />
       </div>
     </div>
   );
