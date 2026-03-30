@@ -1,27 +1,38 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { Hash, PaperPlaneRight, Smiley, Paperclip, Pencil, Trash } from "@phosphor-icons/react";
+import { useState, useRef, useEffect } from "react";
+import {
+  Hash, PaperPlaneRight, Paperclip, ChatText, MagnifyingGlass, Pencil, Trash, Image as ImageIcon
+} from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
-import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger
 } from "@/components/ui/tooltip";
+import SearchDialog from "@/components/modals/SearchDialog";
+import ThreadPanel from "@/components/chat/ThreadPanel";
 
-const REACTIONS = ["thumbsup", "heart", "fire", "eyes", "check"];
+const REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{1F440}", "\u{2705}", "\u{1F602}", "\u{1F914}"];
 
 export default function ChatArea({ channel, messages, setMessages, user, serverId, onSendTyping, typingUsers }) {
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editContent, setEditContent] = useState("");
+  const [threadMsgId, setThreadMsgId] = useState(null);
+  const [showReactions, setShowReactions] = useState(null);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
   const typingTimeout = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Mark channel as read when viewing
+  useEffect(() => {
+    if (channel?.id) {
+      api.post(`/channels/${channel.id}/read`).catch(() => {});
+    }
+  }, [channel?.id, messages.length]);
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -31,7 +42,6 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
       const res = await api.post(`/channels/${channel.id}/messages`, {
         content: content.trim(), attachments: []
       });
-      // Message will come via WebSocket, but also add locally as fallback
       setMessages(prev => {
         if (prev.find(m => m.id === res.data.id)) return prev;
         return [...prev, res.data];
@@ -72,9 +82,38 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
 
   const handleReaction = async (msgId, emoji) => {
     try {
-      const res = await api.post(`/messages/${msgId}/reactions/${emoji}`);
+      const res = await api.post(`/messages/${msgId}/reactions/${encodeURIComponent(emoji)}`);
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, reactions: res.data.reactions } : m));
     } catch {}
+    setShowReactions(null);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("File too large (max 10 MB)");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result.split(',')[1];
+      try {
+        const uploadRes = await api.post('/upload', {
+          data: base64, name: file.name, type: file.type
+        });
+        // Send message with attachment
+        const res = await api.post(`/channels/${channel.id}/messages`, {
+          content: file.name,
+          attachments: [{ id: uploadRes.data.id, name: file.name, type: file.type, url: uploadRes.data.url }]
+        });
+        setMessages(prev => [...prev, res.data]);
+      } catch {
+        toast.error("Upload failed");
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const typingNames = Object.values(typingUsers);
@@ -88,168 +127,228 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[#18181B] min-w-0" data-testid="chat-area">
-      {/* Header */}
-      <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0" data-testid="chat-header">
-        <Hash size={20} weight="bold" className="text-[#71717A] mr-2" />
-        <h3 className="text-sm font-bold text-white" style={{ fontFamily: 'Manrope' }}>{channel.name}</h3>
-        {channel.topic && (
-          <span className="ml-3 text-xs text-[#71717A] truncate border-l border-[#27272A] pl-3">{channel.topic}</span>
-        )}
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-2" data-testid="messages-list">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-[#71717A]">
-            <Hash size={48} weight="bold" className="mb-4 opacity-30" />
-            <p className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>Welcome to #{channel.name}</p>
-            <p className="text-sm">This is the start of the channel.</p>
+    <div className="flex-1 flex min-w-0" data-testid="chat-area">
+      <div className="flex-1 flex flex-col bg-[#18181B] min-w-0">
+        {/* Header */}
+        <div className="h-12 flex items-center justify-between px-4 border-b border-[#27272A] shrink-0" data-testid="chat-header">
+          <div className="flex items-center min-w-0">
+            <Hash size={20} weight="bold" className="text-[#71717A] mr-2 shrink-0" />
+            <h3 className="text-sm font-bold text-white truncate" style={{ fontFamily: 'Manrope' }}>{channel.name}</h3>
+            {channel.topic && (
+              <span className="ml-3 text-xs text-[#71717A] truncate border-l border-[#27272A] pl-3 hidden md:inline">{channel.topic}</span>
+            )}
           </div>
-        )}
+          <div className="flex items-center gap-1">
+            <SearchDialog serverId={serverId} />
+          </div>
+        </div>
 
-        {messages.map((msg, i) => {
-          const prevMsg = messages[i - 1];
-          const sameAuthor = prevMsg?.author_id === msg.author_id;
-          const timeDiff = prevMsg ? (new Date(msg.created_at) - new Date(prevMsg.created_at)) / 60000 : 999;
-          const compact = sameAuthor && timeDiff < 5;
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-2" data-testid="messages-list">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-[#71717A]">
+              <Hash size={48} weight="bold" className="mb-4 opacity-30" />
+              <p className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>Welcome to #{channel.name}</p>
+              <p className="text-sm">This is the start of the channel.</p>
+            </div>
+          )}
 
-          return (
-            <div
-              key={msg.id}
-              className={`message-item group relative flex gap-3 py-0.5 px-2 rounded-md ${compact ? 'mt-0' : 'mt-3'}`}
-              data-testid={`message-${msg.id}`}
-            >
-              {!compact ? (
-                <div className="w-10 h-10 rounded-full bg-[#27272A] flex items-center justify-center text-sm font-bold shrink-0 mt-0.5">
-                  {msg.author?.display_name?.[0]?.toUpperCase() || '?'}
-                </div>
-              ) : (
-                <div className="w-10 shrink-0" />
-              )}
-              <div className="flex-1 min-w-0">
-                {!compact && (
-                  <div className="flex items-baseline gap-2 mb-0.5">
-                    <span className="text-sm font-semibold" style={{ color: msg.author?.role === 'admin' ? '#E74C3C' : '#FFFFFF' }}>
-                      {msg.author?.display_name || msg.author?.username || 'Unknown'}
-                    </span>
-                    <span className="text-[10px] text-[#52525B]">
-                      {new Date(msg.created_at).toLocaleString()}
-                    </span>
-                    {msg.edited_at && <span className="text-[10px] text-[#52525B]">(edited)</span>}
-                  </div>
-                )}
+          {messages.map((msg, i) => {
+            const prevMsg = messages[i - 1];
+            const sameAuthor = prevMsg?.author_id === msg.author_id;
+            const timeDiff = prevMsg ? (new Date(msg.created_at) - new Date(prevMsg.created_at)) / 60000 : 999;
+            const compact = sameAuthor && timeDiff < 5;
 
-                {editingId === msg.id ? (
-                  <div className="flex gap-2">
-                    <input
-                      value={editContent}
-                      onChange={e => setEditContent(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleEdit(msg.id); if (e.key === 'Escape') setEditingId(null); }}
-                      className="flex-1 bg-[#27272A] rounded px-2 py-1 text-sm text-white outline-none"
-                      data-testid="edit-message-input"
-                      autoFocus
-                    />
-                    <button onClick={() => handleEdit(msg.id)} className="text-[#6366F1] text-xs">Save</button>
-                    <button onClick={() => setEditingId(null)} className="text-[#71717A] text-xs">Cancel</button>
+            return (
+              <div
+                key={msg.id}
+                className={`message-item group relative flex gap-3 py-0.5 px-2 rounded-md ${compact ? 'mt-0' : 'mt-3'}`}
+                data-testid={`message-${msg.id}`}
+              >
+                {!compact ? (
+                  <div className="w-10 h-10 rounded-full bg-[#27272A] flex items-center justify-center text-sm font-bold shrink-0 mt-0.5">
+                    {msg.author?.display_name?.[0]?.toUpperCase() || '?'}
                   </div>
                 ) : (
-                  <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">{msg.content}</p>
+                  <div className="w-10 shrink-0" />
                 )}
+                <div className="flex-1 min-w-0">
+                  {!compact && (
+                    <div className="flex items-baseline gap-2 mb-0.5">
+                      <span className="text-sm font-semibold" style={{ color: msg.author?.role === 'admin' ? '#E74C3C' : '#FFFFFF' }}>
+                        {msg.author?.display_name || msg.author?.username || 'Unknown'}
+                      </span>
+                      <span className="text-[10px] text-[#52525B]">
+                        {new Date(msg.created_at).toLocaleString()}
+                      </span>
+                      {msg.edited_at && <span className="text-[10px] text-[#52525B]">(edited)</span>}
+                    </div>
+                  )}
 
-                {/* Attachments */}
-                {msg.attachments?.map((att, j) => (
-                  <div key={j} className="mt-2">
-                    {att.type?.startsWith('image/') ? (
-                      <img src={att.data} alt={att.name} className="max-w-md max-h-80 rounded-md" />
-                    ) : (
-                      <div className="bg-[#27272A] rounded px-3 py-2 text-xs text-[#A1A1AA] inline-block">{att.name}</div>
-                    )}
-                  </div>
-                ))}
+                  {editingId === msg.id ? (
+                    <div className="flex gap-2">
+                      <input
+                        value={editContent} onChange={e => setEditContent(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleEdit(msg.id); if (e.key === 'Escape') setEditingId(null); }}
+                        className="flex-1 bg-[#27272A] rounded px-2 py-1 text-sm text-white outline-none"
+                        data-testid="edit-message-input" autoFocus
+                      />
+                      <button onClick={() => handleEdit(msg.id)} className="text-[#6366F1] text-xs font-medium">Save</button>
+                      <button onClick={() => setEditingId(null)} className="text-[#71717A] text-xs">Cancel</button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
+                      {msg.content?.split(/(@\w+)/g).map((part, pi) =>
+                        part.startsWith('@') ?
+                          <span key={pi} className="text-[#6366F1] font-medium bg-[#6366F1]/10 rounded px-0.5">{part}</span> :
+                          <span key={pi}>{part}</span>
+                      )}
+                    </p>
+                  )}
 
-                {/* Reactions */}
-                {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                  <div className="flex gap-1 mt-1 flex-wrap">
-                    {Object.entries(msg.reactions).map(([emoji, users]) => (
-                      <button
-                        key={emoji}
-                        onClick={() => handleReaction(msg.id, emoji)}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors ${
-                          users.includes(user?.id)
-                            ? 'bg-[#6366F1]/20 border-[#6366F1]/40 text-[#6366F1]'
-                            : 'bg-[#27272A] border-[#27272A] text-[#A1A1AA] hover:border-[#6366F1]/40'
-                        }`}
-                        data-testid={`reaction-${emoji}-${msg.id}`}
-                      >
-                        <span>{emoji}</span>
-                        <span>{users.length}</span>
+                  {/* Attachments */}
+                  {msg.attachments?.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {msg.attachments.map((att, j) => (
+                        <div key={j}>
+                          {att.type?.startsWith('image/') ? (
+                            <img src={att.url ? `${process.env.REACT_APP_BACKEND_URL}${att.url}` : att.data} alt={att.name}
+                              className="max-w-md max-h-80 rounded-md border border-[#27272A]" />
+                          ) : (
+                            <a href={att.url ? `${process.env.REACT_APP_BACKEND_URL}${att.url}` : '#'}
+                              className="flex items-center gap-2 bg-[#27272A] rounded px-3 py-2 text-xs text-[#A1A1AA] hover:text-white transition-colors inline-block"
+                              target="_blank" rel="noopener noreferrer">
+                              <Paperclip size={14} /> {att.name}
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Reactions */}
+                  {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                    <div className="flex gap-1 mt-1.5 flex-wrap">
+                      {Object.entries(msg.reactions).map(([emoji, users]) => (
+                        <button
+                          key={emoji} onClick={() => handleReaction(msg.id, emoji)}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors ${
+                            users.includes(user?.id)
+                              ? 'bg-[#6366F1]/20 border-[#6366F1]/40 text-[#6366F1]'
+                              : 'bg-[#27272A] border-[#27272A] text-[#A1A1AA] hover:border-[#6366F1]/40'
+                          }`}
+                        >
+                          <span>{emoji}</span><span>{users.length}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Thread indicator */}
+                  {(msg.thread_count > 0) && (
+                    <button onClick={() => setThreadMsgId(msg.id)} data-testid={`thread-btn-${msg.id}`}
+                      className="flex items-center gap-1.5 mt-1.5 text-[#6366F1] text-xs font-medium hover:text-[#4F46E5] transition-colors">
+                      <ChatText size={14} weight="bold" />
+                      {msg.thread_count} {msg.thread_count === 1 ? 'reply' : 'replies'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Hover actions */}
+                <div className="absolute right-2 -top-3 hidden group-hover:flex bg-[#121212] border border-[#27272A] rounded-md overflow-hidden shadow-lg z-10">
+                  <TooltipProvider delayDuration={100}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={() => setShowReactions(showReactions === msg.id ? null : msg.id)}
+                          className="px-1.5 py-1 hover:bg-[#27272A] transition-colors text-[#A1A1AA] hover:text-white">
+                          <span className="text-xs">+</span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top"><p>React</p></TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button onClick={() => setThreadMsgId(msg.id)} data-testid={`open-thread-${msg.id}`}
+                          className="px-1.5 py-1 hover:bg-[#27272A] transition-colors text-[#A1A1AA] hover:text-white">
+                          <ChatText size={14} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top"><p>Reply in Thread</p></TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  {msg.author_id === user?.id && (
+                    <>
+                      <button onClick={() => { setEditingId(msg.id); setEditContent(msg.content); }}
+                        className="px-1.5 py-1 hover:bg-[#27272A] transition-colors" data-testid={`edit-msg-${msg.id}`}>
+                        <Pencil size={14} className="text-[#A1A1AA]" />
+                      </button>
+                      <button onClick={() => handleDelete(msg.id)}
+                        className="px-1.5 py-1 hover:bg-[#EF4444]/20 transition-colors" data-testid={`delete-msg-${msg.id}`}>
+                        <Trash size={14} className="text-[#EF4444]" />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Emoji picker popover */}
+                {showReactions === msg.id && (
+                  <div className="absolute right-2 top-6 bg-[#121212] border border-[#27272A] rounded-lg p-2 flex gap-1 flex-wrap w-48 z-20 shadow-xl">
+                    {REACTIONS.map(r => (
+                      <button key={r} onClick={() => handleReaction(msg.id, r)}
+                        className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#27272A] text-base transition-colors">
+                        {r}
                       </button>
                     ))}
                   </div>
                 )}
               </div>
+            );
+          })}
+          <div ref={messagesEndRef} />
+        </div>
 
-              {/* Message actions */}
-              <div className="absolute right-2 -top-3 hidden group-hover:flex bg-[#121212] border border-[#27272A] rounded-md overflow-hidden">
-                <TooltipProvider delayDuration={100}>
-                  {REACTIONS.map(r => (
-                    <Tooltip key={r}>
-                      <TooltipTrigger asChild>
-                        <button onClick={() => handleReaction(msg.id, r)}
-                          className="px-1.5 py-1 hover:bg-[#27272A] text-xs transition-colors" data-testid={`react-btn-${r}`}>
-                          {r}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top"><p>{r}</p></TooltipContent>
-                    </Tooltip>
-                  ))}
-                </TooltipProvider>
-                {msg.author_id === user?.id && (
-                  <>
-                    <button onClick={() => { setEditingId(msg.id); setEditContent(msg.content); }}
-                      className="px-1.5 py-1 hover:bg-[#27272A] transition-colors" data-testid={`edit-msg-${msg.id}`}>
-                      <Pencil size={14} className="text-[#A1A1AA]" />
-                    </button>
-                    <button onClick={() => handleDelete(msg.id)}
-                      className="px-1.5 py-1 hover:bg-[#EF4444]/20 transition-colors" data-testid={`delete-msg-${msg.id}`}>
-                      <Trash size={14} className="text-[#EF4444]" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        <div ref={messagesEndRef} />
+        {/* Typing */}
+        {typingNames.length > 0 && (
+          <div className="px-4 py-1 text-xs text-[#71717A]" data-testid="typing-indicator">
+            <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-0.5" />
+            <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-0.5" />
+            <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-2" />
+            {typingNames.join(", ")} {typingNames.length === 1 ? "is" : "are"} typing...
+          </div>
+        )}
+
+        {/* Input */}
+        <form onSubmit={handleSend} className="p-4 pt-2" data-testid="message-form">
+          <div className="flex items-center gap-2 bg-[#27272A] rounded-lg border border-[#27272A]/50 px-3 py-2.5">
+            <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,.pdf,.txt,.zip,.doc,.docx" />
+            <button type="button" onClick={() => fileInputRef.current?.click()} data-testid="file-upload-button"
+              className="text-[#71717A] hover:text-white transition-colors shrink-0">
+              <Paperclip size={18} />
+            </button>
+            <input
+              value={content}
+              onChange={e => { setContent(e.target.value); handleTyping(); }}
+              placeholder={`Message #${channel.name}`}
+              data-testid="message-input"
+              className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none"
+            />
+            <button type="submit" disabled={!content.trim() || sending} data-testid="send-message-button"
+              className="text-[#6366F1] hover:text-[#4F46E5] disabled:text-[#52525B] transition-colors shrink-0">
+              <PaperPlaneRight size={20} weight="fill" />
+            </button>
+          </div>
+        </form>
       </div>
 
-      {/* Typing indicator */}
-      {typingNames.length > 0 && (
-        <div className="px-4 py-1 text-xs text-[#71717A]" data-testid="typing-indicator">
-          <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-0.5" />
-          <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-0.5" />
-          <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-2" />
-          {typingNames.join(", ")} {typingNames.length === 1 ? "is" : "are"} typing...
-        </div>
+      {/* Thread panel */}
+      {threadMsgId && (
+        <ThreadPanel
+          messageId={threadMsgId}
+          channelId={channel.id}
+          onClose={() => setThreadMsgId(null)}
+          user={user}
+        />
       )}
-
-      {/* Message input */}
-      <form onSubmit={handleSend} className="p-4 pt-0" data-testid="message-form">
-        <div className="flex items-center gap-2 bg-[#27272A] rounded-lg border border-[#27272A]/50 px-4 py-2.5">
-          <input
-            value={content}
-            onChange={e => { setContent(e.target.value); handleTyping(); }}
-            placeholder={`Message #${channel.name}`}
-            data-testid="message-input"
-            className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none"
-          />
-          <button type="submit" disabled={!content.trim() || sending} data-testid="send-message-button"
-            className="text-[#6366F1] hover:text-[#4F46E5] disabled:text-[#52525B] transition-colors">
-            <PaperPlaneRight size={20} weight="fill" />
-          </button>
-        </div>
-      </form>
     </div>
   );
 }

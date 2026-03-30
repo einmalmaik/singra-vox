@@ -43,7 +43,7 @@ export default function LoginPage() {
           <div className="flex items-center justify-center gap-3 mb-6">
             <ShieldCheck size={48} weight="fill" className="text-[#6366F1]" />
             <h1 className="text-5xl font-extrabold tracking-tight" style={{ fontFamily: 'Manrope' }}>
-              SovereignVoice
+              Singra Vox
             </h1>
           </div>
           <p className="text-[#A1A1AA] text-lg max-w-md">
@@ -56,7 +56,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="flex items-center gap-2 mb-8 lg:hidden">
             <ShieldCheck size={32} weight="fill" className="text-[#6366F1]" />
-            <h1 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>SovereignVoice</h1>
+            <h1 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>Singra Vox</h1>
           </div>
 
           <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>Welcome back</h2>

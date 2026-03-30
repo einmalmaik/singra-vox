@@ -12,7 +12,7 @@ import {
 import api from "@/lib/api";
 import { toast } from "sonner";
 
-export default function ServerSidebar({ servers, currentServer, onSelectServer, onRefreshServers, view, onSwitchToDm, user, onLogout }) {
+export default function ServerSidebar({ servers, currentServer, onSelectServer, onRefreshServers, view, onSwitchToDm, user, onLogout, dmUnread }) {
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -43,11 +43,16 @@ export default function ServerSidebar({ servers, currentServer, onSelectServer, 
             <button
               onClick={onSwitchToDm}
               data-testid="dm-button"
-              className={`server-icon w-12 h-12 rounded-3xl flex items-center justify-center transition-all ${
+              className={`server-icon w-12 h-12 rounded-3xl flex items-center justify-center transition-all relative ${
                 view === "dm" ? 'active bg-[#6366F1] rounded-xl' : 'bg-[#121212] hover:bg-[#6366F1]'
               }`}
             >
               <ChatCircleDots size={24} weight={view === "dm" ? "fill" : "bold"} className="text-white" />
+              {dmUnread > 0 && (
+                <span className="absolute -top-1 -right-1 bg-[#EF4444] text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
+                  {dmUnread > 9 ? '9+' : dmUnread}
+                </span>
+              )}
             </button>
           </TooltipTrigger>
           <TooltipContent side="right"><p>Direct Messages</p></TooltipContent>

@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
+import { toast } from "sonner";
 import ServerSidebar from "@/components/chat/ServerSidebar";
 import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import ChatArea from "@/components/chat/ChatArea";
 import MemberSidebar from "@/components/chat/MemberSidebar";
-import { toast } from "sonner";
+import { ShieldCheck } from "@phosphor-icons/react";
 
 export default function MainLayout() {
   const { user, token, logout } = useAuth();
@@ -27,6 +28,9 @@ export default function MainLayout() {
   const [currentDmUser, setCurrentDmUser] = useState(null);
   const [dmMessages, setDmMessages] = useState([]);
   const [typingUsers, setTypingUsers] = useState({});
+  const [unreadMap, setUnreadMap] = useState({});
+  const [dmUnread, setDmUnread] = useState(0);
+  const [groupDms, setGroupDms] = useState([]);
 
   // State refs for WebSocket callback
   const currentChannelRef = useRef(currentChannel);
@@ -36,10 +40,40 @@ export default function MainLayout() {
   useEffect(() => { currentDmUserRef.current = currentDmUser; }, [currentDmUser]);
   useEffect(() => { currentServerRef.current = currentServer; }, [currentServer]);
 
-  // Load servers on mount
+  // Load servers on mount + init E2EE keys + start unread polling
   useEffect(() => {
     loadServers();
+    initE2EEKeys();
+    const unreadInterval = setInterval(fetchUnread, 15000);
+    fetchUnread();
+    return () => clearInterval(unreadInterval);
   }, []);
+
+  const initE2EEKeys = async () => {
+    try {
+      const { generateKeyPair, storeKeyPair, loadKeyPair } = await import("@/lib/crypto");
+      let kp = loadKeyPair();
+      if (!kp) {
+        kp = await generateKeyPair();
+        storeKeyPair(kp);
+        await api.post("/keys/bundle", {
+          identity_key: JSON.stringify(kp.publicKey),
+          signed_pre_key: JSON.stringify(kp.publicKey),
+          one_time_pre_keys: []
+        });
+      }
+    } catch (e) {
+      console.warn("E2EE key init:", e);
+    }
+  };
+
+  const fetchUnread = async () => {
+    try {
+      const res = await api.get("/unread");
+      setUnreadMap(res.data.channels || {});
+      setDmUnread(res.data.dm_total || 0);
+    } catch {}
+  };
 
   const loadServers = async () => {
     try {
@@ -109,6 +143,14 @@ export default function MainLayout() {
   const switchToDm = () => {
     setView("dm");
     loadDmConversations();
+    loadGroupDms();
+  };
+
+  const loadGroupDms = async () => {
+    try {
+      const res = await api.get("/groups");
+      setGroupDms(res.data);
+    } catch {}
   };
 
   // WebSocket
@@ -248,6 +290,7 @@ export default function MainLayout() {
         onSwitchToDm={switchToDm}
         user={user}
         onLogout={logout}
+        dmUnread={dmUnread}
       />
 
       {view === "server" && currentServer ? (
@@ -262,6 +305,7 @@ export default function MainLayout() {
             members={members}
             roles={roles}
             onRefreshMembers={refreshMembers}
+            unreadMap={unreadMap}
           />
           <ChatArea
             channel={currentChannel}
@@ -342,8 +386,14 @@ export default function MainLayout() {
                         <span className="text-sm font-semibold">{msg.sender?.display_name}</span>
                         <span className="text-[10px] text-[#71717A]">{new Date(msg.created_at).toLocaleTimeString()}</span>
                       </div>
-                      <p className="text-sm text-[#E4E4E7] mt-0.5">{msg.content}</p>
-                      {msg.is_encrypted && <span className="text-[10px] text-[#6366F1]">E2EE</span>}
+                      <p className="text-sm text-[#E4E4E7] mt-0.5">
+                        {msg.is_encrypted ? (
+                          <span className="flex items-center gap-1">
+                            <ShieldCheck size={12} weight="fill" className="text-[#6366F1]" />
+                            <DecryptedContent msg={msg} currentUserId={user?.id} />
+                          </span>
+                        ) : msg.content}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -368,13 +418,47 @@ export default function MainLayout() {
 function DmInput({ userId, onSent }) {
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [e2eeReady, setE2eeReady] = useState(false);
+  const sharedKeyRef = useRef(null);
+
+  useEffect(() => {
+    initE2EE();
+  }, [userId]);
+
+  const initE2EE = async () => {
+    try {
+      const { loadKeyPair, deriveSharedKey } = await import("@/lib/crypto");
+      const kp = loadKeyPair();
+      if (!kp) { setE2eeReady(false); return; }
+      const res = await api.get(`/keys/${userId}/bundle`);
+      if (res.data.identity_key) {
+        const recipientKey = JSON.parse(res.data.identity_key);
+        const shared = await deriveSharedKey(kp.privateKey, recipientKey);
+        sharedKeyRef.current = shared;
+        setE2eeReady(true);
+      }
+    } catch {
+      setE2eeReady(false);
+    }
+  };
 
   const send = async (e) => {
     e.preventDefault();
     if (!content.trim() || sending) return;
     setSending(true);
     try {
-      const res = await api.post(`/dm/${userId}`, { content: content.trim() });
+      let payload = { content: content.trim(), is_encrypted: false };
+      if (e2eeReady && sharedKeyRef.current) {
+        const { encryptMessage } = await import("@/lib/crypto");
+        const encrypted = await encryptMessage(sharedKeyRef.current, content.trim());
+        payload = {
+          content: "[E2EE encrypted message]",
+          encrypted_content: encrypted.ciphertext,
+          nonce: encrypted.nonce,
+          is_encrypted: true
+        };
+      }
+      const res = await api.post(`/dm/${userId}`, payload);
       onSent(res.data);
       setContent("");
     } catch {
@@ -389,7 +473,7 @@ function DmInput({ userId, onSent }) {
       <div className="flex gap-2">
         <input
           value={content} onChange={e => setContent(e.target.value)}
-          placeholder="Send a message..." data-testid="dm-message-input"
+          placeholder={e2eeReady ? "Encrypted message..." : "Send a message..."} data-testid="dm-message-input"
           className="flex-1 bg-[#27272A] border border-[#27272A]/50 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#52525B] outline-none focus:border-[#6366F1]/50"
         />
         <button
@@ -399,6 +483,45 @@ function DmInput({ userId, onSent }) {
           Send
         </button>
       </div>
+      {e2eeReady && (
+        <p className="text-[10px] text-[#6366F1] mt-1 flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" /> End-to-end encrypted
+        </p>
+      )}
     </form>
   );
+}
+
+
+function DecryptedContent({ msg, currentUserId }) {
+  const [text, setText] = useState(null);
+
+  useEffect(() => {
+    if (msg.is_encrypted && msg.encrypted_content && msg.nonce) {
+      decrypt();
+    }
+  }, [msg.id]);
+
+  const decrypt = async () => {
+    try {
+      const { loadKeyPair, deriveSharedKey, decryptMessage } = await import("@/lib/crypto");
+      const kp = loadKeyPair();
+      if (!kp) { setText("[Cannot decrypt - no keys]"); return; }
+      const otherId = msg.sender_id === currentUserId ? msg.receiver_id : msg.sender_id;
+      const res = await api.get(`/keys/${otherId}/bundle`);
+      if (res.data.identity_key) {
+        const otherPub = JSON.parse(res.data.identity_key);
+        const shared = await deriveSharedKey(kp.privateKey, otherPub);
+        const plain = await decryptMessage(shared, msg.encrypted_content, msg.nonce);
+        setText(plain);
+      } else {
+        setText("[Cannot decrypt]");
+      }
+    } catch {
+      setText("[Encrypted message]");
+    }
+  };
+
+  if (!msg.is_encrypted) return msg.content;
+  return <span className="italic text-[#A1A1AA]">{text || "Decrypting..."}</span>;
 }

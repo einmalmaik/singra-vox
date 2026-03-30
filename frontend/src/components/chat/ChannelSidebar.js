@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import InviteModal from "@/components/modals/InviteModal";
 import ServerSettingsModal from "@/components/modals/ServerSettingsModal";
 
-export default function ChannelSidebar({ server, channels, currentChannel, onSelectChannel, onRefreshChannels, user, members, roles, onRefreshMembers }) {
+export default function ChannelSidebar({ server, channels, currentChannel, onSelectChannel, onRefreshChannels, user, members, roles, onRefreshMembers, unreadMap }) {
   const [showCreate, setShowCreate] = useState(false);
   const [chName, setChName] = useState("");
   const [chType, setChType] = useState("text");
@@ -114,12 +114,19 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
             onClick={() => onSelectChannel(ch)}
             data-testid={`channel-${ch.name}`}
             className={`channel-item w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${
-              currentChannel?.id === ch.id ? 'active text-white' : 'text-[#A1A1AA]'
+              currentChannel?.id === ch.id ? 'active text-white' : unreadMap?.[ch.id] ? 'text-white font-semibold' : 'text-[#A1A1AA]'
             }`}
           >
             {ch.is_private ? <Lock size={16} weight="bold" className="text-[#71717A] shrink-0" /> :
               <Hash size={16} weight="bold" className="text-[#71717A] shrink-0" />}
-            <span className="truncate">{ch.name}</span>
+            <span className="truncate flex-1">{ch.name}</span>
+            {unreadMap?.[ch.id]?.count > 0 && currentChannel?.id !== ch.id && (
+              <span className={`shrink-0 min-w-[18px] h-[18px] rounded-full text-[10px] font-bold flex items-center justify-center ${
+                unreadMap[ch.id].mentions > 0 ? 'bg-[#EF4444] text-white' : 'bg-[#6366F1] text-white'
+              }`}>
+                {unreadMap[ch.id].count > 99 ? '99+' : unreadMap[ch.id].count}
+              </span>
+            )}
           </button>
         ))}
 

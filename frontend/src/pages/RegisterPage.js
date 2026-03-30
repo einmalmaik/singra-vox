@@ -37,7 +37,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2 mb-8">
           <ShieldCheck size={32} weight="fill" className="text-[#6366F1]" />
-          <h1 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>SovereignVoice</h1>
+          <h1 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>Singra Vox</h1>
         </div>
 
         <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>Create account</h2>

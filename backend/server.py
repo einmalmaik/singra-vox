@@ -41,7 +41,7 @@ db = client[db_name]
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="SovereignVoice", version="0.1.0")
+app = FastAPI(title="Singra Vox", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -725,12 +725,20 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     if member and member.get("muted_until"):
         if datetime.fromisoformat(member["muted_until"]) > datetime.now(timezone.utc):
             raise HTTPException(403, "You are muted")
+    import re
+    mention_names = re.findall(r'@(\w+)', inp.content)
+    mention_ids = []
+    for mn in mention_names:
+        mu = await db.users.find_one({"username": mn.lower()}, {"_id": 0, "id": 1})
+        if mu:
+            mention_ids.append(mu["id"])
     msg = {
         "id": new_id(), "channel_id": channel_id, "author_id": user["id"],
         "content": inp.content, "type": "text",
         "attachments": inp.attachments, "edited_at": None,
         "is_deleted": False, "reactions": {},
-        "reply_to_id": inp.reply_to_id, "created_at": now_utc()
+        "reply_to_id": inp.reply_to_id, "mention_ids": mention_ids,
+        "thread_id": None, "thread_count": 0, "created_at": now_utc()
     }
     await db.messages.insert_one(msg)
     msg.pop("_id", None)
@@ -752,7 +760,13 @@ async def edit_message(message_id: str, request: Request):
         raise HTTPException(404, "Message not found")
     if msg["author_id"] != user["id"]:
         raise HTTPException(403, "Not your message")
-    await db.messages.update_one({"id": message_id}, {"$set": {"content": body.get("content", msg["content"]), "edited_at": now_utc()}})
+    old_content = msg["content"]
+    new_content = body.get("content", old_content)
+    await db.messages.update_one({"id": message_id}, {"$set": {"content": new_content, "edited_at": now_utc()}})
+    await db.message_revisions.insert_one({
+        "id": new_id(), "message_id": message_id, "content": old_content,
+        "editor_id": user["id"], "edited_at": now_utc()
+    })
     msg = await db.messages.find_one({"id": message_id}, {"_id": 0})
     msg["author"] = user
     ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
@@ -962,7 +976,11 @@ app.include_router(users_r)
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "SovereignVoice"}
+    return {"status": "ok", "service": "Singra Vox"}
+
+# Phase 2 routes
+from routes_phase2 import phase2, create_phase2_indexes
+app.include_router(phase2)
 
 # ============================================================
 # WebSocket
@@ -1028,6 +1046,7 @@ async def startup():
     await db.voice_states.create_index("user_id")
     await db.audit_log.create_index([("server_id", 1), ("created_at", -1)])
     await db.login_attempts.create_index("identifier")
+    await create_phase2_indexes()
 
     admin_exists = await db.users.find_one({"email": admin_email}, {"_id": 0})
     if not admin_exists:
@@ -1047,7 +1066,7 @@ async def startup():
         f.write(f"# Test Credentials\n\n## Admin\n- Email: {admin_email}\n- Password: {admin_password}\n- Role: admin\n\n")
         f.write("## Auth Endpoints\n- POST /api/auth/register\n- POST /api/auth/login\n- POST /api/auth/logout\n- GET /api/auth/me\n- POST /api/auth/refresh\n")
 
-    logger.info("SovereignVoice backend started")
+    logger.info("Singra Vox backend started")
 
 @app.on_event("shutdown")
 async def shutdown():
