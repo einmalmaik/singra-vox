@@ -1,34 +1,66 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* SovereignVoice Custom Styles */
+
+/* Server icon animations */
+.server-icon {
+  transition: border-radius 0.2s ease, background-color 0.2s ease;
+}
+.server-icon:hover {
+  border-radius: 12px !important;
+}
+.server-icon.active {
+  border-radius: 12px !important;
+  background-color: #6366F1 !important;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+/* Message hover */
+.message-item:hover {
+  background-color: rgba(255, 255, 255, 0.02);
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+/* Channel item */
+.channel-item {
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.channel-item:hover {
+  background-color: #27272A;
+  color: #FFFFFF;
+}
+.channel-item.active {
+  background-color: #27272A;
+  color: #FFFFFF;
 }
 
-.App-link {
-    color: #61dafb;
+/* Typing animation */
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; }
+  30% { opacity: 1; }
+}
+.typing-dot {
+  animation: typing-dot 1.4s infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Voice status pulse */
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(99, 102, 241, 0); }
+}
+.voice-active {
+  animation: voice-pulse 2s infinite;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+/* Fade in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Member status dot */
+.status-online { background-color: #22C55E; }
+.status-offline { background-color: #71717A; }
+.status-away { background-color: #F59E0B; }
+.status-dnd { background-color: #EF4444; }
