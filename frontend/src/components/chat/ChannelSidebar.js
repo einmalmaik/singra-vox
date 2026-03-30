@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import InviteModal from "@/components/modals/InviteModal";
 import ServerSettingsModal from "@/components/modals/ServerSettingsModal";
 import UserSettingsModal from "@/components/modals/UserSettingsModal";
+import UserStatusPanel from "@/components/chat/UserStatusPanel";
 
 export default function ChannelSidebar({ server, channels, currentChannel, onSelectChannel, onRefreshChannels, user, members, roles, onRefreshMembers, unreadMap, voiceEngineRef, sendSignal }) {
   const [showCreate, setShowCreate] = useState(false);
@@ -136,6 +137,7 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
             key={ch.id}
             onClick={() => onSelectChannel(ch)}
             data-testid={`channel-${ch.name}`}
+            style={{ paddingLeft: ch.parent_id ? '28px' : undefined }}
             className={`channel-item w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${
               currentChannel?.id === ch.id ? 'active text-white' : unreadMap?.[ch.id] ? 'text-white font-semibold' : 'text-[#A1A1AA]'
             }`}
@@ -143,6 +145,7 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
             {ch.is_private ? <Lock size={16} weight="bold" className="text-[#71717A] shrink-0" /> :
               <Hash size={16} weight="bold" className="text-[#71717A] shrink-0" />}
             <span className="truncate flex-1">{ch.name}</span>
+            {ch.is_temporary && <span className="text-[8px] text-[#71717A] bg-[#27272A] rounded px-1">tmp</span>}
             {unreadMap?.[ch.id]?.count > 0 && currentChannel?.id !== ch.id && (
               <span className={`shrink-0 min-w-[18px] h-[18px] rounded-full text-[10px] font-bold flex items-center justify-center ${
                 unreadMap[ch.id].mentions > 0 ? 'bg-[#EF4444] text-white' : 'bg-[#6366F1] text-white'
@@ -263,13 +266,9 @@ export default function ChannelSidebar({ server, channels, currentChannel, onSel
       )}
 
       {/* User bar */}
-      <div className="h-[52px] flex items-center gap-2 px-3 border-t border-[#27272A] bg-[#0A0A0A] shrink-0" data-testid="user-bar">
-        <div className="w-8 h-8 rounded-full bg-[#6366F1] flex items-center justify-center text-white text-sm font-bold">
-          {user?.display_name?.[0]?.toUpperCase() || '?'}
-        </div>
+      <div className="flex items-center gap-1 px-2 py-1.5 border-t border-[#27272A] bg-[#0A0A0A] shrink-0" data-testid="user-bar">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium truncate">{user?.display_name}</p>
-          <p className="text-[10px] text-[#71717A] truncate">@{user?.username}</p>
+          <UserStatusPanel user={user} voiceEngineRef={voiceEngineRef} />
         </div>
         <UserSettingsModal user={user} onLogout={() => window.location.href = '/login'} />
       </div>
