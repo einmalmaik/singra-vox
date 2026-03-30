@@ -112,7 +112,8 @@ DEFAULT_PERMISSIONS = {
     "send_messages": True, "read_messages": True, "manage_messages": False,
     "attach_files": True, "mention_everyone": False,
     "join_voice": True, "speak": True, "mute_members": False,
-    "deafen_members": False, "priority_speaker": False, "create_invites": True
+    "deafen_members": False, "priority_speaker": False, "create_invites": True,
+    "pin_messages": False, "manage_emojis": False, "manage_webhooks": False
 }
 
 async def check_permission(user_id: str, server_id: str, permission: str) -> bool:
@@ -744,6 +745,11 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     msg.pop("_id", None)
     msg["author"] = user
     await ws_mgr.broadcast_server(ch["server_id"], {"type": "new_message", "message": msg, "channel_id": channel_id})
+    # Create notifications for mentioned users
+    for mid in mention_ids:
+        if mid != user["id"]:
+            await create_notification(mid, "mention", f"@{user['display_name']} mentioned you",
+                inp.content[:100], f"/channel/{channel_id}", user["id"])
     return msg
 
 # ============================================================
@@ -873,6 +879,10 @@ async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
     msg.pop("_id", None)
     msg["sender"] = {k: v for k, v in user.items() if k != "password_hash"}
     await ws_mgr.send(other_user_id, {"type": "dm_message", "message": msg})
+    # DM notification
+    await create_notification(other_user_id, "dm", f"DM from {user['display_name']}",
+        inp.content[:100] if not inp.is_encrypted else "[Encrypted message]",
+        f"/dm/{user['id']}", user["id"])
     return msg
 
 # ============================================================
@@ -982,6 +992,10 @@ async def health():
 from routes_phase2 import phase2, create_phase2_indexes
 app.include_router(phase2)
 
+# Phase 3 routes
+from routes_phase3 import phase3, create_phase3_indexes, _notify as create_notification
+app.include_router(phase3)
+
 # ============================================================
 # WebSocket
 # ============================================================
@@ -1057,6 +1071,7 @@ async def startup():
     await db.audit_log.create_index([("server_id", 1), ("created_at", -1)])
     await db.login_attempts.create_index("identifier")
     await create_phase2_indexes()
+    await create_phase3_indexes()
 
     admin_exists = await db.users.find_one({"email": admin_email}, {"_id": 0})
     if not admin_exists:

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  Hash, PaperPlaneRight, Paperclip, ChatText, MagnifyingGlass, Pencil, Trash, Image as ImageIcon
+  Hash, PaperPlaneRight, Paperclip, ChatText, Pencil, Trash, PushPin, PushPinSlash
 } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -9,6 +9,8 @@ import {
 } from "@/components/ui/tooltip";
 import SearchDialog from "@/components/modals/SearchDialog";
 import ThreadPanel from "@/components/chat/ThreadPanel";
+import PinnedMessagesPanel from "@/components/chat/PinnedMessagesPanel";
+import NotificationPanel from "@/components/chat/NotificationPanel";
 
 const REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{1F440}", "\u{2705}", "\u{1F602}", "\u{1F914}"];
 
@@ -19,6 +21,9 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
   const [editContent, setEditContent] = useState("");
   const [threadMsgId, setThreadMsgId] = useState(null);
   const [showReactions, setShowReactions] = useState(null);
+  const [showPins, setShowPins] = useState(false);
+  const [editingTopic, setEditingTopic] = useState(false);
+  const [topicDraft, setTopicDraft] = useState("");
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingTimeout = useRef(null);
@@ -88,6 +93,29 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
     setShowReactions(null);
   };
 
+  const handlePin = async (msgId) => {
+    try {
+      await api.post(`/messages/${msgId}/pin`);
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, is_pinned: true } : m));
+      toast.success("Message pinned");
+    } catch { toast.error("Failed to pin"); }
+  };
+
+  const handleUnpin = async (msgId) => {
+    try {
+      await api.delete(`/messages/${msgId}/pin`);
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, is_pinned: false } : m));
+    } catch {}
+  };
+
+  const saveTopic = async () => {
+    try {
+      await api.put(`/channels/${channel.id}/topic`, { topic: topicDraft });
+      toast.success("Topic updated");
+      setEditingTopic(false);
+    } catch { toast.error("Failed to update topic"); }
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -131,14 +159,43 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
       <div className="flex-1 flex flex-col bg-[#18181B] min-w-0">
         {/* Header */}
         <div className="h-12 flex items-center justify-between px-4 border-b border-[#27272A] shrink-0" data-testid="chat-header">
-          <div className="flex items-center min-w-0">
+          <div className="flex items-center min-w-0 flex-1">
             <Hash size={20} weight="bold" className="text-[#71717A] mr-2 shrink-0" />
-            <h3 className="text-sm font-bold text-white truncate" style={{ fontFamily: 'Manrope' }}>{channel.name}</h3>
-            {channel.topic && (
-              <span className="ml-3 text-xs text-[#71717A] truncate border-l border-[#27272A] pl-3 hidden md:inline">{channel.topic}</span>
+            <h3 className="text-sm font-bold text-white shrink-0" style={{ fontFamily: 'Manrope' }}>{channel.name}</h3>
+            {editingTopic ? (
+              <div className="flex items-center gap-1 ml-3 border-l border-[#27272A] pl-3 flex-1 min-w-0">
+                <input value={topicDraft} onChange={e => setTopicDraft(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveTopic(); if (e.key === 'Escape') setEditingTopic(false); }}
+                  className="flex-1 bg-[#27272A] rounded px-2 py-0.5 text-xs text-white outline-none" autoFocus data-testid="topic-edit-input" />
+                <button onClick={saveTopic} className="text-[#6366F1] text-xs font-medium">Save</button>
+                <button onClick={() => setEditingTopic(false)} className="text-[#71717A] text-xs">Cancel</button>
+              </div>
+            ) : channel.topic ? (
+              <button onClick={() => { setTopicDraft(channel.topic); setEditingTopic(true); }}
+                className="ml-3 text-xs text-[#71717A] truncate border-l border-[#27272A] pl-3 hidden md:inline hover:text-[#A1A1AA] transition-colors"
+                data-testid="topic-display">
+                {channel.topic}
+              </button>
+            ) : (
+              <button onClick={() => { setTopicDraft(""); setEditingTopic(true); }}
+                className="ml-3 text-xs text-[#52525B] border-l border-[#27272A] pl-3 hidden md:inline hover:text-[#71717A] transition-colors">
+                Set a topic...
+              </button>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button onClick={() => setShowPins(!showPins)} data-testid="pins-button"
+                    className={`p-1.5 rounded hover:bg-[#27272A] transition-colors ${showPins ? 'text-[#F59E0B]' : 'text-[#71717A] hover:text-white'}`}>
+                    <PushPin size={16} weight={showPins ? "fill" : "bold"} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p>Pinned Messages</p></TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <NotificationPanel />
             <SearchDialog serverId={serverId} />
           </div>
         </div>
@@ -197,7 +254,13 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
                       <button onClick={() => setEditingId(null)} className="text-[#71717A] text-xs">Cancel</button>
                     </div>
                   ) : (
-                    <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
+                    <>
+                      {msg.is_pinned && (
+                        <div className="flex items-center gap-1 text-[10px] text-[#F59E0B] mb-0.5">
+                          <PushPin size={10} weight="fill" /> Pinned
+                        </div>
+                      )}
+                      <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
                       {msg.content?.split(/(@\w+)/g).map((part, pi) =>
                         part.startsWith('@') ?
                           <span key={pi} className="text-[#6366F1] font-medium bg-[#6366F1]/10 rounded px-0.5">{part}</span> :
@@ -252,6 +315,8 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
                       {msg.thread_count} {msg.thread_count === 1 ? 'reply' : 'replies'}
                     </button>
                   )}
+                    </>
+                  )}
                 </div>
 
                 {/* Hover actions */}
@@ -288,6 +353,11 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
                       </button>
                     </>
                   )}
+                  <button onClick={() => msg.is_pinned ? handleUnpin(msg.id) : handlePin(msg.id)}
+                    data-testid={`pin-msg-${msg.id}`}
+                    className={`px-1.5 py-1 hover:bg-[#27272A] transition-colors ${msg.is_pinned ? 'text-[#F59E0B]' : 'text-[#A1A1AA]'}`}>
+                    {msg.is_pinned ? <PushPinSlash size={14} /> : <PushPin size={14} />}
+                  </button>
                 </div>
 
                 {/* Emoji picker popover */}
@@ -339,6 +409,11 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
           </div>
         </form>
       </div>
+
+      {/* Pinned messages panel */}
+      {showPins && (
+        <PinnedMessagesPanel channelId={channel.id} onClose={() => setShowPins(false)} />
+      )}
 
       {/* Thread panel */}
       {threadMsgId && (

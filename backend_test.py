@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Singra Vox (SovereignVoice) Backend API Testing - Phase 3
-Tests all API endpoints including Phase 1+2+3 features: threads, search, unread tracking,
+Singra Vox (SovereignVoice) Backend API Testing - Phase 4
+Tests all API endpoints including Phase 1+2+3+4 features: threads, search, unread tracking,
 file uploads, E2EE key management, group DMs, channel overrides, temp rooms, edit history,
-GDPR data export, GDPR account deletion, WebRTC voice signaling
+GDPR data export, GDPR account deletion, WebRTC voice signaling, message pinning, 
+notifications, custom emoji, webhooks, and bot tokens
 """
 import requests
 import sys
@@ -24,6 +25,10 @@ class SingraVoxAPITester:
         self.message_id = None  # For thread testing
         self.file_id = None     # For file upload testing
         self.group_id = None    # For group DM testing
+        self.webhook_id = None  # For webhook testing
+        self.webhook_token = None # For webhook execution testing
+        self.emoji_id = None    # For emoji testing
+        self.bot_token_id = None # For bot token testing
         self.tests_run = 0
         self.tests_passed = 0
         self.session = requests.Session()
@@ -694,6 +699,334 @@ class SingraVoxAPITester:
         return success
 
     # ============================================================
+    # PHASE 4 TESTS - Message Pinning, Notifications, Custom Emoji, Webhooks, Bot Tokens
+    # ============================================================
+    
+    def test_pin_message(self):
+        """Test message pinning endpoint"""
+        if not self.message_id:
+            print("❌ No message ID available for pin test")
+            return False
+            
+        success, response = self.run_test(
+            "Pin Message",
+            "POST",
+            f"messages/{self.message_id}/pin",
+            200
+        )
+        if success:
+            print("   Message pinned successfully")
+        return success
+
+    def test_unpin_message(self):
+        """Test message unpinning endpoint"""
+        if not self.message_id:
+            print("❌ No message ID available for unpin test")
+            return False
+            
+        success, response = self.run_test(
+            "Unpin Message",
+            "DELETE",
+            f"messages/{self.message_id}/pin",
+            200
+        )
+        if success:
+            print("   Message unpinned successfully")
+        return success
+
+    def test_get_pinned_messages(self):
+        """Test get pinned messages endpoint"""
+        if not self.channel_id:
+            print("❌ No channel ID available for pinned messages test")
+            return False
+            
+        success, response = self.run_test(
+            "Get Pinned Messages",
+            "GET",
+            f"channels/{self.channel_id}/pins",
+            200
+        )
+        if success:
+            print(f"   Found {len(response)} pinned messages")
+        return success
+
+    def test_update_channel_topic(self):
+        """Test channel topic update endpoint"""
+        if not self.channel_id:
+            print("❌ No channel ID available for topic update test")
+            return False
+            
+        test_topic = f"Updated topic at {datetime.now().strftime('%H:%M:%S')}"
+        success, response = self.run_test(
+            "Update Channel Topic",
+            "PUT",
+            f"channels/{self.channel_id}/topic",
+            200,
+            data={"topic": test_topic}
+        )
+        if success:
+            print(f"   Topic updated: {test_topic}")
+        return success
+
+    def test_get_notifications(self):
+        """Test get notifications endpoint"""
+        success, response = self.run_test(
+            "Get Notifications",
+            "GET",
+            "notifications",
+            200
+        )
+        if success:
+            notifications = response.get('notifications', [])
+            unread_count = response.get('unread_count', 0)
+            print(f"   Found {len(notifications)} notifications, {unread_count} unread")
+        return success
+
+    def test_mark_notification_read(self):
+        """Test mark notification as read endpoint"""
+        # First get notifications to find one to mark as read
+        success, response = self.run_test(
+            "Get Notifications for Read Test",
+            "GET",
+            "notifications?limit=1",
+            200
+        )
+        if not success or not response.get('notifications'):
+            print("   No notifications to mark as read")
+            return True  # Not a failure if no notifications exist
+            
+        notif_id = response['notifications'][0]['id']
+        success, response = self.run_test(
+            "Mark Notification Read",
+            "POST",
+            f"notifications/{notif_id}/read",
+            200
+        )
+        if success:
+            print("   Notification marked as read")
+        return success
+
+    def test_mark_all_notifications_read(self):
+        """Test mark all notifications as read endpoint"""
+        success, response = self.run_test(
+            "Mark All Notifications Read",
+            "POST",
+            "notifications/read-all",
+            200
+        )
+        if success:
+            print("   All notifications marked as read")
+        return success
+
+    def test_upload_custom_emoji(self):
+        """Test custom emoji upload endpoint"""
+        if not self.server_id:
+            print("❌ No server ID available for emoji upload test")
+            return False
+            
+        # Create a small test emoji (base64 encoded PNG)
+        # This is a minimal 1x1 transparent PNG
+        test_emoji_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChAI9jU77zgAAAABJRU5ErkJggg=="
+        
+        success, response = self.run_test(
+            "Upload Custom Emoji",
+            "POST",
+            f"servers/{self.server_id}/emojis",
+            200,
+            data={
+                "name": f"test_emoji_{datetime.now().strftime('%H%M%S')}",
+                "data": test_emoji_data
+            }
+        )
+        if success and response:
+            self.emoji_id = response.get('id')
+            print(f"   Emoji uploaded: {response.get('name')} (ID: {self.emoji_id})")
+        return success
+
+    def test_list_server_emojis(self):
+        """Test list server emojis endpoint"""
+        if not self.server_id:
+            print("❌ No server ID available for emoji list test")
+            return False
+            
+        success, response = self.run_test(
+            "List Server Emojis",
+            "GET",
+            f"servers/{self.server_id}/emojis",
+            200
+        )
+        if success:
+            print(f"   Found {len(response)} server emojis")
+        return success
+
+    def test_get_emoji_image(self):
+        """Test get emoji image endpoint"""
+        if not self.emoji_id:
+            print("❌ No emoji ID available for emoji image test")
+            return False
+            
+        # Use requests directly for image download
+        url = f"{self.base_url}/api/emojis/{self.emoji_id}"
+        
+        self.tests_run += 1
+        print(f"\n🔍 Testing Get Emoji Image...")
+        print(f"   URL: GET {url}")
+        
+        try:
+            response = self.session.get(url)
+            if response.status_code == 200:
+                self.tests_passed += 1
+                print(f"✅ Passed - Status: {response.status_code}")
+                print(f"   Emoji image retrieved: {len(response.content)} bytes")
+                return True
+            else:
+                print(f"❌ Failed - Expected 200, got {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            return False
+
+    def test_delete_custom_emoji(self):
+        """Test delete custom emoji endpoint"""
+        if not self.server_id or not self.emoji_id:
+            print("❌ No server/emoji ID available for emoji deletion test")
+            return False
+            
+        success, response = self.run_test(
+            "Delete Custom Emoji",
+            "DELETE",
+            f"servers/{self.server_id}/emojis/{self.emoji_id}",
+            200
+        )
+        if success:
+            print("   Custom emoji deleted successfully")
+        return success
+
+    def test_create_webhook(self):
+        """Test create webhook endpoint"""
+        if not self.server_id or not self.channel_id:
+            print("❌ No server/channel ID available for webhook creation test")
+            return False
+            
+        success, response = self.run_test(
+            "Create Webhook",
+            "POST",
+            f"servers/{self.server_id}/webhooks",
+            200,
+            data={
+                "name": f"Test Webhook {datetime.now().strftime('%H%M%S')}",
+                "channel_id": self.channel_id,
+                "avatar_url": ""
+            }
+        )
+        if success and response:
+            self.webhook_id = response.get('id')
+            self.webhook_token = response.get('token')
+            print(f"   Webhook created: {response.get('name')} (ID: {self.webhook_id})")
+        return success
+
+    def test_list_webhooks(self):
+        """Test list webhooks endpoint"""
+        if not self.server_id:
+            print("❌ No server ID available for webhook list test")
+            return False
+            
+        success, response = self.run_test(
+            "List Webhooks",
+            "GET",
+            f"servers/{self.server_id}/webhooks",
+            200
+        )
+        if success:
+            print(f"   Found {len(response)} webhooks")
+        return success
+
+    def test_execute_webhook(self):
+        """Test webhook execution endpoint (no auth required)"""
+        if not self.webhook_token:
+            print("❌ No webhook token available for execution test")
+            return False
+            
+        # Temporarily remove auth token for webhook execution
+        original_token = self.token
+        self.token = None
+        
+        success, response = self.run_test(
+            "Execute Webhook",
+            "POST",
+            f"webhooks/exec/{self.webhook_token}",
+            200,
+            data={
+                "content": f"Test webhook message at {datetime.now().strftime('%H:%M:%S')}",
+                "username": "Test Bot"
+            }
+        )
+        
+        # Restore auth token
+        self.token = original_token
+        
+        if success:
+            print("   Webhook executed successfully")
+        return success
+
+    def test_create_bot_token(self):
+        """Test create bot token endpoint"""
+        if not self.server_id:
+            print("❌ No server ID available for bot token creation test")
+            return False
+            
+        success, response = self.run_test(
+            "Create Bot Token",
+            "POST",
+            f"servers/{self.server_id}/bot-tokens",
+            200,
+            data={
+                "name": f"Test Bot {datetime.now().strftime('%H%M%S')}",
+                "permissions": {"send_messages": True, "read_messages": True}
+            }
+        )
+        if success and response:
+            self.bot_token_id = response.get('id')
+            print(f"   Bot token created: {response.get('name')} (ID: {self.bot_token_id})")
+        return success
+
+    def test_list_bot_tokens(self):
+        """Test list bot tokens endpoint"""
+        if not self.server_id:
+            print("❌ No server ID available for bot token list test")
+            return False
+            
+        success, response = self.run_test(
+            "List Bot Tokens",
+            "GET",
+            f"servers/{self.server_id}/bot-tokens",
+            200
+        )
+        if success:
+            print(f"   Found {len(response)} bot tokens")
+            # Check that tokens are masked
+            for token in response:
+                if token.get('token') and not token['token'].endswith('...'):
+                    print("   ⚠️  Bot token not properly masked in list")
+        return success
+
+    def test_delete_bot_token(self):
+        """Test delete bot token endpoint"""
+        if not self.server_id or not self.bot_token_id:
+            print("❌ No server/bot token ID available for bot token deletion test")
+            return False
+            
+        success, response = self.run_test(
+            "Delete Bot Token",
+            "DELETE",
+            f"servers/{self.server_id}/bot-tokens/{self.bot_token_id}",
+            200
+        )
+        if success:
+            print("   Bot token deleted successfully")
+        return success
+
+    # ============================================================
     # PHASE 3 TESTS - GDPR & WebRTC
     # ============================================================
     
@@ -857,7 +1190,7 @@ class SingraVoxAPITester:
             return False
 
 def main():
-    print("🚀 Starting Singra Vox (SovereignVoice) Backend API Tests - Phase 3")
+    print("🚀 Starting Singra Vox (SovereignVoice) Backend API Tests - Phase 4")
     print("=" * 60)
     
     # Setup
@@ -904,6 +1237,25 @@ def main():
         ("Channel Overrides", tester.test_channel_overrides),
         ("Create Temp Channel", tester.test_create_temp_channel),
         ("Edit Message & Revisions", tester.test_edit_message_and_revisions),
+        
+        # Phase 4 Features - Message Pinning, Notifications, Custom Emoji, Webhooks, Bot Tokens
+        ("Pin Message", tester.test_pin_message),
+        ("Get Pinned Messages", tester.test_get_pinned_messages),
+        ("Unpin Message", tester.test_unpin_message),
+        ("Update Channel Topic", tester.test_update_channel_topic),
+        ("Get Notifications", tester.test_get_notifications),
+        ("Mark Notification Read", tester.test_mark_notification_read),
+        ("Mark All Notifications Read", tester.test_mark_all_notifications_read),
+        ("Upload Custom Emoji", tester.test_upload_custom_emoji),
+        ("List Server Emojis", tester.test_list_server_emojis),
+        ("Get Emoji Image", tester.test_get_emoji_image),
+        ("Delete Custom Emoji", tester.test_delete_custom_emoji),
+        ("Create Webhook", tester.test_create_webhook),
+        ("List Webhooks", tester.test_list_webhooks),
+        ("Execute Webhook", tester.test_execute_webhook),
+        ("Create Bot Token", tester.test_create_bot_token),
+        ("List Bot Tokens", tester.test_list_bot_tokens),
+        ("Delete Bot Token", tester.test_delete_bot_token),
         
         # Phase 3 New Features - GDPR & WebRTC
         ("GDPR Data Export", tester.test_gdpr_data_export),
