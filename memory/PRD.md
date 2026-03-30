@@ -1,98 +1,68 @@
-# SovereignVoice - Product Requirements Document
+# Singra Vox - Product Requirements Document
 
 ## Original Problem Statement
-Build a production-ready, privacy-first, self-hosted communication platform (Discord/TeamSpeak alternative) called SovereignVoice. GDPR-oriented, E2EE for DMs, voice channels, text messaging, roles/permissions, moderation tools.
+Build a production-ready, privacy-first, self-hosted communication platform (Discord/TeamSpeak alternative) called Singra Vox. GDPR-oriented, E2EE for DMs, voice channels, text messaging, roles/permissions, moderation tools.
 
 ## Architecture
 - **Current**: React + FastAPI (Python) + MongoDB
 - **Target**: Rust (Axum) + PostgreSQL + LiveKit + Tauri 2
 
-## User Personas
-1. **Server Admin**: Self-hosts the platform, manages server settings, roles, channels, moderation
-2. **Community Member**: Joins servers, chats in text/voice channels, sends DMs
-3. **Moderator**: Manages members, applies bans/mutes/kicks
+## What's Been Implemented
 
-## Core Requirements (Static)
-- Self-hosted first, no central platform dependency
-- GDPR-compliant by design
-- No telemetry, no third-party analytics
-- E2EE for DMs (ECDH + AES-GCM)
-- Privacy by default
-- Granular roles and permissions
-- Voice channels (UI status in MVP, real audio in Phase 2)
-- Text channels with message history
-- Direct messages with encryption
-- Moderation tools (ban, kick, mute, timeout)
-- Invite system
-- Audit logging
-- Server bootstrap on first run
+### Phase 1 (2026-03-30) - Core MVP
+- JWT Auth with bcrypt, brute force protection
+- Server CRUD, Channel CRUD (text/voice/private)
+- Real-time messaging via WebSocket
+- DMs, Member management, Roles (17 permissions)
+- Moderation (ban/kick/mute), Invites, Voice UI, Audit Log
+- Discord-inspired 4-pane dark theme layout
 
-## What's Been Implemented (2026-03-30)
-### Backend (FastAPI + MongoDB)
-- [x] JWT Authentication with bcrypt password hashing
-- [x] Admin user seeding on startup
-- [x] Brute force login protection
-- [x] Server CRUD (create, read, update)
-- [x] Channel CRUD (text, voice, private)
-- [x] Message CRUD with reactions
-- [x] Direct Messages with E2EE field support
-- [x] Roles & Permissions system (17 granular permissions)
-- [x] Moderation: ban, unban, mute, unmute, kick
-- [x] Invite system with expiry and max uses
-- [x] Voice state management (join/leave/mute/deafen)
-- [x] WebSocket for real-time messaging
-- [x] Audit logging
-- [x] User profile management
-- [x] User search
+### Phase 2 (2026-03-30) - Enhanced Features
+- **Threads/Replies**: Reply to messages, thread panel, reply count
+- **Message Search**: Full-text search across channels
+- **Unread Tracking**: Per-channel unread counts + mention tracking
+- **File Uploads**: Base64 upload/download with file attachments
+- **@Mentions**: Parse @username, highlight in indigo, track mention_ids
+- **Edit History**: Message revisions stored, admin can view history
+- **Channel Overrides**: Per-channel permission overrides for roles/users
+- **Private Room Access**: Access control lists for private channels
+- **Temporary Rooms**: Auto-created temp channels
+- **Group DMs**: Create groups, send messages, manage members
+- **E2EE Key Management**: Key bundle upload/fetch, ECDH key exchange
+- **Real E2EE for DMs**: Client-side encryption (ECDH P-256 + AES-256-GCM)
+- **Emoji Reactions**: Full emoji picker with toggle reactions
+- **Rename**: SovereignVoice → Singra Vox
 
-### Frontend (React + Tailwind + Shadcn)
-- [x] Login & Registration pages
-- [x] Server bootstrap/setup page
-- [x] 4-pane Discord-like layout (server sidebar, channel sidebar, chat area, member sidebar)
-- [x] Server creation & switching
-- [x] Channel list with text/voice categories
-- [x] Real-time messaging with WebSocket
-- [x] Message editing & deletion
-- [x] Emoji reactions
-- [x] Voice channel UI (join/leave/mute/deafen)
-- [x] Voice participant display
-- [x] Member sidebar with online/offline status
-- [x] Member context menu (DM, mute, kick, ban)
-- [x] Server settings modal (general, roles, members, audit)
-- [x] Role creation with granular permission toggles
-- [x] Invite link generation
-- [x] Direct Messages view
-- [x] E2EE crypto utilities (Web Crypto API)
-- [x] Toast notifications
-- [x] Typing indicators (via WebSocket)
+## API Endpoints (36 total, 100% passing)
+### Auth: register, login, logout, me, refresh
+### Setup: status, bootstrap
+### Servers: list, create, get, update
+### Channels: list, create, update, delete, messages (GET/POST)
+### Messages: edit, delete, reactions, thread, revisions
+### DMs: conversations, get/send messages
+### Members: list, update, kick
+### Roles: list, create, update, delete
+### Moderation: ban, unban, mute, unmute, audit-log
+### Invites: create, get, accept
+### Voice: join, leave, state update
+### Users: search, profile, public-key
+### Phase 2: search, unread, read, upload, files, overrides, access, temp, groups, keys
 
 ## Prioritized Backlog
-### P0 (Critical - Next Sprint)
-- [ ] File/Image upload for messages
-- [ ] Message search functionality
-- [ ] Unread message indicators
-- [ ] @mentions parsing & notification
-- [ ] User profile editing UI
-
-### P1 (Important)
-- [ ] Thread/reply display in chat
-- [ ] Private rooms/channels with access control
-- [ ] Channel topic editing in-place
-- [ ] Mobile responsive layout
-- [ ] Password reset flow
-
-### P2 (Nice to Have)
-- [ ] Docker Compose deployment setup
+### P0
+- [ ] Docker Compose deployment
 - [ ] Self-hosting documentation
+- [ ] Mobile responsive layout
+
+### P1
+- [ ] WebRTC P2P voice for 2-4 users
 - [ ] Data export functionality
 - [ ] Account deletion
-- [ ] Emoji picker UI
+- [ ] Emoji picker UI improvements
 - [ ] Message pinning
-- [ ] User status (away/DND) selector
 
-## Next Tasks
-1. File upload support (base64 for MVP, S3 for production)
-2. Message search with full-text index
-3. Unread indicators per channel
-4. Docker Compose configuration
-5. Self-hosting README
+### P2
+- [ ] Tauri 2 desktop client scaffold
+- [ ] MLS group E2EE for channels
+- [ ] Push notifications
+- [ ] User status selector (away/DND)
