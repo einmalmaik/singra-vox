@@ -1,51 +1,49 @@
 # Singra Vox – PRD
 
-## Implemented Features (Phases 1-3.5)
+## Implemented (Phases 1-4, 56 API Endpoints, 100% passing)
 
-### Backend (39 API Endpoints, 100% passing)
-- Auth (JWT + bcrypt), brute force protection, admin seeding
-- Server/Channel/Message CRUD, DMs with E2EE, Group DMs
-- Threads, Search, Unread Tracking, File Upload
-- Roles (17 permissions) + Channel Overrides
-- Moderation (ban/kick/mute), Invites, Voice (WebRTC P2P + status), Audit Log
-- GDPR: Data Export + Account Deletion
-- User status (online/away/DND/invisible)
-- WebRTC voice signaling relay via WebSocket
-- E2EE key bundle management
+### Core Communication
+- Text Channels: messages, threads, reactions, @mentions, file upload, search, pins
+- Voice Channels: WebRTC P2P (2-6 users), mute/deafen/PTT, audio device selection
+- DMs: 1:1 with real E2EE (ECDH + AES-GCM), group DMs
+- Channel topic inline editing, unread tracking, message edit history
 
-### Frontend (React + Tailwind + Shadcn + Phosphor)
-- Discord-inspired 4-pane dark theme (responsive)
-- Threads, @mentions, file upload, search (Ctrl+K), emoji reactions
-- Unread badges, E2EE DMs, group DMs
-- Voice channel UI with WebRTC P2P engine
-- User status selector (online/away/DND/invisible)
-- Push-to-Talk toggle + key binding
-- Audio device selection
-- Sub-channel hierarchy, temp channel badges
-- GDPR: Data export + Account deletion UI
-- Mobile responsive (sidebar toggles, hamburger menu)
-- Server settings (roles, members, audit log)
-- Moderation (ban/kick/mute from member context menu)
+### Server Administration
+- Roles (20 permissions incl. pin_messages, manage_emojis, manage_webhooks)
+- Channel overrides, private rooms, temp rooms, sub-channels
+- Moderation: ban/kick/mute/timeout, audit log
+- Invite system with expiry
+
+### Platform Features
+- Custom Emoji: upload/manage per server (50 limit, admin-controlled)
+- Webhooks: create per channel, external exec endpoint, rate-limited (30/min)
+- Bot Tokens: API tokens for integrations with scoped permissions
+- In-App Notifications: mentions, DMs, with bell icon + badge
+- Message Pinning: pin/unpin per channel with dedicated panel
+
+### Privacy & Security
+- E2EE for DMs (ECDH P-256 + AES-256-GCM), key bundle management
+- MLS Group E2EE architecture documented (docs/mls-group-e2ee.md)
+- GDPR: data export + account deletion
+- No telemetry, minimal logging, brute force protection
+- User status: online/away/DND/invisible
 
 ### Infrastructure
-- Docker: backend.Dockerfile, frontend.Dockerfile
-- docker-compose.yml (dev) + docker-compose.prod.yml (Caddy + TLS)
-- nginx reverse proxy (API routing + WebSocket upgrade)
-- Tauri 2 desktop scaffolding (Cargo.toml, main.rs, tauri.conf.json)
+- Docker: backend + frontend Dockerfiles, compose (dev + prod/Caddy)
+- nginx reverse proxy with WebSocket support
+- Tauri 2 desktop scaffold (Cargo.toml, main.rs with tray/hotkeys/keychain)
 - CI/CD: GitHub Actions (lint, build, Docker push)
-- .env.example files for all components
-- Comprehensive docs: architecture, deployment-linux, docker-setup, tauri-guide
+- Responsive mobile layout
 
 ## Backlog
 ### P0
-- [ ] Message pinning
-- [ ] Channel topic inline editing
-- [ ] Notification system (in-app)
+- [ ] Emoji picker enhancement with custom emoji in reactions
+- [ ] Webhook management UI in server settings
 ### P1
-- [ ] Tauri 2 desktop build + distribution
-- [ ] MLS group E2EE for channels
-- [ ] Custom emoji support
+- [ ] Tauri desktop build & test
+- [ ] MLS implementation (pending openmls-wasm stability)
+- [ ] Push notifications for Tauri desktop
 ### P2
 - [ ] Federation protocol
-- [ ] Bot/Webhook system
-- [ ] Admin dashboard with analytics
+- [ ] Admin analytics dashboard
+- [ ] Message scheduling
