@@ -511,10 +511,10 @@ export default function ChannelSidebar({
     const childIds = channelOrganization.childIdsByCategory[category.id] || [];
 
     return (
-      <div key={category.id} className="mt-1">
+      <div key={category.id} className="rounded-lg border border-[#202027] bg-[#101114]/70 px-1 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
         {renderChannelRow(category)}
         {!collapsed && (
-          <div className="space-y-1">
+          <div className="space-y-1 border-t border-[#202027] pt-1">
             {canDropIntoCategory && (
               <ChannelContainerDropZone
                 id={getContainerDropId(category.id)}
@@ -534,9 +534,9 @@ export default function ChannelSidebar({
                 )}
               </ChannelContainerDropZone>
             )}
-            <SortableContext items={childIds} strategy={verticalListSortingStrategy}>
-              {childIds.map((channelId) => {
-                const childChannel = channelOrganization.byId[channelId];
+              <SortableContext items={childIds} strategy={verticalListSortingStrategy}>
+                {childIds.map((channelId) => {
+                  const childChannel = channelOrganization.byId[channelId];
                 if (!childChannel) {
                   return null;
                 }
@@ -549,7 +549,7 @@ export default function ChannelSidebar({
               })}
             </SortableContext>
             {childIds.length === 0 && !canDropIntoCategory && (
-              <div className="px-7 py-1 text-[11px] text-[#52525B]">No channels yet</div>
+              <div className="px-7 py-1 text-[11px] text-[#5A5A63]">No channels yet</div>
             )}
           </div>
         )}
@@ -698,7 +698,7 @@ export default function ChannelSidebar({
             <ContextMenu>
               <ContextMenuTrigger asChild>
                 <div className="flex-1 min-h-0 overflow-y-auto py-2 px-2">
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <SortableContext items={channelOrganization.rootIds} strategy={verticalListSortingStrategy}>
                       {channelOrganization.rootIds.map((channelId) => {
                         const channel = channelOrganization.byId[channelId];

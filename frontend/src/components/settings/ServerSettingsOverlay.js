@@ -426,10 +426,10 @@ export default function ServerSettingsOverlay({
     const isCollapsed = Boolean(collapsedCategories[category.id]);
 
     return (
-      <div key={category.id} className="space-y-1">
+      <div key={category.id} className="space-y-1 rounded-lg border border-[#27272A] bg-[#101113] p-1.5">
         {renderChannelTreeRow(category)}
         {!isCollapsed && (
-          <div className="space-y-1">
+          <div className="space-y-1 border-t border-[#27272A] pt-1">
             {/* Categories expose an explicit container drop zone so dropping a
                 channel "into" a category is distinct from reordering the
                 category itself at the top level. */}
@@ -646,7 +646,7 @@ export default function ServerSettingsOverlay({
               >
                 <ContextMenu>
                   <ContextMenuTrigger asChild>
-                    <div className="space-y-1 rounded-lg">
+                    <div className="space-y-2 rounded-lg">
                       <SortableContext items={channelOrganization.rootIds} strategy={verticalListSortingStrategy}>
                         {channelOrganization.rootIds.map((channelId) => {
                           const channel = channelOrganization.byId[channelId];
