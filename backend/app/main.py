@@ -259,6 +259,123 @@ async def build_member_payload(server_id: str, user_id: str) -> Optional[dict]:
     return member
 
 
+async def hydrate_message_mentions(message: dict) -> dict:
+    message["mentions_everyone"] = bool(message.get("mentions_everyone"))
+
+    user_ids = list(dict.fromkeys(message.get("mentioned_user_ids") or message.get("mention_ids") or []))
+    role_ids = list(dict.fromkeys(message.get("mentioned_role_ids") or []))
+
+    if user_ids:
+        mentioned_users = await db.users.find(
+            {"id": {"$in": user_ids}},
+            {"_id": 0, "password_hash": 0, "id": 1, "username": 1, "display_name": 1},
+        ).to_list(len(user_ids))
+        mentioned_users_by_id = {entry["id"]: sanitize_user(entry) for entry in mentioned_users}
+        message["mentioned_users"] = [
+            mentioned_users_by_id[user_id]
+            for user_id in user_ids
+            if user_id in mentioned_users_by_id
+        ]
+    else:
+        message["mentioned_users"] = []
+
+    if role_ids:
+        mentioned_roles = await db.roles.find(
+            {"id": {"$in": role_ids}},
+            {"_id": 0, "id": 1, "name": 1, "color": 1, "mentionable": 1, "is_default": 1},
+        ).to_list(len(role_ids))
+        mentioned_roles_by_id = {entry["id"]: entry for entry in mentioned_roles}
+        message["mentioned_roles"] = [
+            mentioned_roles_by_id[role_id]
+            for role_id in role_ids
+            if role_id in mentioned_roles_by_id
+        ]
+    else:
+        message["mentioned_roles"] = []
+
+    return message
+
+
+async def resolve_message_mentions(
+    *,
+    server_id: str,
+    actor_id: str,
+    content: str,
+    mentioned_user_ids: Optional[List[str]] = None,
+    mentioned_role_ids: Optional[List[str]] = None,
+    mentions_everyone: bool = False,
+) -> dict:
+    member_docs = await db.server_members.find(
+        {"server_id": server_id, "is_banned": {"$ne": True}},
+        {"_id": 0, "user_id": 1, "roles": 1},
+    ).to_list(2000)
+    member_map = {member["user_id"]: member for member in member_docs}
+
+    can_mention_everyone = await check_permission(actor_id, server_id, "mention_everyone")
+
+    valid_user_ids: List[str] = []
+    provided_user_ids = list(dict.fromkeys(mentioned_user_ids or []))
+    if provided_user_ids:
+        valid_user_ids = [user_id for user_id in provided_user_ids if user_id in member_map and user_id != actor_id]
+    else:
+        import re
+        fallback_names = re.findall(r'@(\w+)', content or "")
+        if fallback_names:
+            matching_users = await db.users.find(
+                {"username": {"$in": [entry.lower() for entry in fallback_names]}},
+                {"_id": 0, "id": 1, "username": 1},
+            ).to_list(len(fallback_names))
+            username_map = {entry["username"]: entry["id"] for entry in matching_users}
+            valid_user_ids = [
+                username_map[name.lower()]
+                for name in fallback_names
+                if username_map.get(name.lower()) in member_map and username_map.get(name.lower()) != actor_id
+            ]
+        valid_user_ids = list(dict.fromkeys(valid_user_ids))
+
+    provided_role_ids = list(dict.fromkeys(mentioned_role_ids or []))
+    valid_role_ids: List[str] = []
+    if provided_role_ids:
+        server_roles = await db.roles.find(
+            {"server_id": server_id, "id": {"$in": provided_role_ids}},
+            {"_id": 0, "id": 1, "mentionable": 1, "is_default": 1},
+        ).to_list(len(provided_role_ids))
+        roles_by_id = {role["id"]: role for role in server_roles}
+        for role_id in provided_role_ids:
+            role = roles_by_id.get(role_id)
+            if not role:
+                continue
+            if role.get("is_default"):
+                if can_mention_everyone:
+                    mentions_everyone = True
+                continue
+            if role.get("mentionable") or can_mention_everyone:
+                valid_role_ids.append(role_id)
+
+    normalized_everyone = bool(mentions_everyone)
+    lowered_content = (content or "").lower()
+    if ("@everyone" in lowered_content or "@here" in lowered_content) and can_mention_everyone:
+        normalized_everyone = True
+    if normalized_everyone and not can_mention_everyone:
+        normalized_everyone = False
+
+    notification_targets = set(valid_user_ids)
+    if valid_role_ids:
+        for member in member_docs:
+            if any(role_id in (member.get("roles") or []) for role_id in valid_role_ids):
+                notification_targets.add(member["user_id"])
+    if normalized_everyone:
+        notification_targets.update(member_map.keys())
+    notification_targets.discard(actor_id)
+
+    return {
+        "mentioned_user_ids": valid_user_ids,
+        "mentioned_role_ids": valid_role_ids,
+        "mentions_everyone": normalized_everyone,
+        "notify_user_ids": list(notification_targets),
+    }
+
+
 async def create_default_community(owner: dict, name: str, description: str = "") -> dict:
     sid = new_id()
     general_channel_id = new_id()
@@ -314,16 +431,18 @@ async def create_default_community(owner: dict, name: str, description: str = ""
             "permissions": {key: True for key in DEFAULT_PERMISSIONS},
             "position": 100,
             "is_default": False,
+            "mentionable": False,
             "created_at": now_utc(),
         },
         {
             "id": member_role_id,
             "server_id": sid,
-            "name": "Member",
+            "name": "@everyone",
             "color": "#99AAB5",
             "permissions": DEFAULT_PERMISSIONS,
             "position": 0,
             "is_default": True,
+            "mentionable": False,
             "created_at": now_utc(),
         },
     ])
@@ -394,6 +513,9 @@ class MessageCreateInput(BaseModel):
     content: str
     reply_to_id: Optional[str] = None
     attachments: List[dict] = []
+    mentioned_user_ids: List[str] = []
+    mentioned_role_ids: List[str] = []
+    mentions_everyone: bool = False
 
 class DMCreateInput(BaseModel):
     content: str
@@ -405,10 +527,11 @@ class RoleCreateInput(BaseModel):
     name: str
     color: str = "#99AAB5"
     permissions: dict = {}
+    mentionable: bool = False
 
 class InviteCreateInput(BaseModel):
-    max_uses: int = 0
-    expires_hours: int = 24
+    max_uses: int = Field(default=0, ge=0)
+    expires_hours: int = Field(default=24, ge=0)
 
 class ModerationInput(BaseModel):
     user_id: str
@@ -930,7 +1053,7 @@ async def create_role(server_id: str, inp: RoleCreateInput, request: Request):
         "id": new_id(), "server_id": server_id, "name": inp.name,
         "color": inp.color, "permissions": {**DEFAULT_PERMISSIONS, **inp.permissions},
         "position": await db.roles.count_documents({"server_id": server_id}),
-        "is_default": False, "created_at": now_utc()
+        "is_default": False, "mentionable": bool(inp.mentionable), "created_at": now_utc()
     }
     await db.roles.insert_one(role)
     role.pop("_id", None)
@@ -942,8 +1065,17 @@ async def update_role(server_id: str, role_id: str, request: Request):
     user = await current_user(request)
     if not await check_permission(user["id"], server_id, "manage_roles"):
         raise HTTPException(403, "No permission")
+    role = await db.roles.find_one({"id": role_id, "server_id": server_id}, {"_id": 0})
+    if not role:
+        raise HTTPException(404, "Role not found")
     body = await request.json()
-    updates = {k: v for k, v in body.items() if k in ("name", "color", "permissions", "position")}
+    allowed_keys = ("permissions",) if role.get("is_default") else ("name", "color", "permissions", "position", "mentionable")
+    updates = {k: v for k, v in body.items() if k in allowed_keys}
+    if "permissions" in updates:
+        updates["permissions"] = {**DEFAULT_PERMISSIONS, **updates["permissions"]}
+    if role.get("is_default"):
+        updates["name"] = "@everyone"
+        updates["mentionable"] = False
     if updates:
         await db.roles.update_one({"id": role_id, "server_id": server_id}, {"$set": updates})
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
@@ -1299,7 +1431,12 @@ async def delete_channel(channel_id: str, request: Request):
 
 @channels_r.get("/{channel_id}/messages")
 async def get_messages(channel_id: str, request: Request, before: str = None, limit: int = 50):
-    await current_user(request)
+    user = await current_user(request)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+        raise HTTPException(403, "No permission")
     query = {"channel_id": channel_id, "is_deleted": {"$ne": True}}
     if before:
         query["created_at"] = {"$lt": before}
@@ -1308,6 +1445,7 @@ async def get_messages(channel_id: str, request: Request, before: str = None, li
     for msg in messages:
         author = await db.users.find_one({"id": msg["author_id"]}, {"_id": 0, "password_hash": 0})
         msg["author"] = author
+        await hydrate_message_mentions(msg)
     return messages
 
 @channels_r.post("/{channel_id}/messages")
@@ -1322,27 +1460,33 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     if member and member.get("muted_until"):
         if datetime.fromisoformat(member["muted_until"]) > datetime.now(timezone.utc):
             raise HTTPException(403, "You are muted")
-    import re
-    mention_names = re.findall(r'@(\w+)', inp.content)
-    mention_ids = []
-    for mn in mention_names:
-        mu = await db.users.find_one({"username": mn.lower()}, {"_id": 0, "id": 1})
-        if mu:
-            mention_ids.append(mu["id"])
+    mention_data = await resolve_message_mentions(
+        server_id=ch["server_id"],
+        actor_id=user["id"],
+        content=inp.content,
+        mentioned_user_ids=inp.mentioned_user_ids,
+        mentioned_role_ids=inp.mentioned_role_ids,
+        mentions_everyone=inp.mentions_everyone,
+    )
     msg = {
         "id": new_id(), "channel_id": channel_id, "author_id": user["id"],
         "content": inp.content, "type": "text",
         "attachments": inp.attachments, "edited_at": None,
         "is_deleted": False, "reactions": {},
-        "reply_to_id": inp.reply_to_id, "mention_ids": mention_ids,
+        "reply_to_id": inp.reply_to_id, "mention_ids": mention_data["mentioned_user_ids"],
+        "mentioned_user_ids": mention_data["mentioned_user_ids"],
+        "mentioned_role_ids": mention_data["mentioned_role_ids"],
+        "mentions_everyone": mention_data["mentions_everyone"],
         "thread_id": None, "thread_count": 0, "created_at": now_utc()
     }
     await db.messages.insert_one(msg)
     msg.pop("_id", None)
     msg["author"] = user
+    await hydrate_message_mentions(msg)
     await ws_mgr.broadcast_server(ch["server_id"], {"type": "new_message", "message": msg, "channel_id": channel_id})
-    # Create notifications for mentioned users
-    for mid in mention_ids:
+    # Notifications are deduplicated across direct mentions, role mentions and
+    # @everyone so a user only receives one notification per message.
+    for mid in mention_data["notify_user_ids"]:
         if mid != user["id"]:
             await create_notification(mid, "mention", f"@{user['display_name']} mentioned you",
                 inp.content[:100], f"/channel/{channel_id}", user["id"])
@@ -1364,14 +1508,34 @@ async def edit_message(message_id: str, request: Request):
         raise HTTPException(403, "Not your message")
     old_content = msg["content"]
     new_content = body.get("content", old_content)
-    await db.messages.update_one({"id": message_id}, {"$set": {"content": new_content, "edited_at": now_utc()}})
+    ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0}) if msg.get("channel_id") else None
+    mention_data = await resolve_message_mentions(
+        server_id=ch["server_id"],
+        actor_id=user["id"],
+        content=new_content,
+        mentioned_user_ids=[],
+        mentioned_role_ids=[],
+        mentions_everyone=False,
+    ) if ch else {
+        "mentioned_user_ids": [],
+        "mentioned_role_ids": [],
+        "mentions_everyone": False,
+    }
+    await db.messages.update_one({"id": message_id}, {"$set": {
+        "content": new_content,
+        "edited_at": now_utc(),
+        "mention_ids": mention_data["mentioned_user_ids"],
+        "mentioned_user_ids": mention_data["mentioned_user_ids"],
+        "mentioned_role_ids": mention_data["mentioned_role_ids"],
+        "mentions_everyone": mention_data["mentions_everyone"],
+    }})
     await db.message_revisions.insert_one({
         "id": new_id(), "message_id": message_id, "content": old_content,
         "editor_id": user["id"], "edited_at": now_utc()
     })
     msg = await db.messages.find_one({"id": message_id}, {"_id": 0})
     msg["author"] = user
-    ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
+    await hydrate_message_mentions(msg)
     if ch:
         await ws_mgr.broadcast_server(ch["server_id"], {"type": "message_edit", "message": msg})
     return msg
@@ -1391,6 +1555,27 @@ async def delete_message(message_id: str, request: Request):
     if ch:
         await ws_mgr.broadcast_server(ch["server_id"], {"type": "message_delete", "message_id": message_id, "channel_id": msg["channel_id"]})
     return {"ok": True}
+
+@messages_r.get("/{message_id}")
+async def get_message(message_id: str, request: Request):
+    user = await current_user(request)
+    msg = await db.messages.find_one({"id": message_id, "is_deleted": {"$ne": True}}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Message not found")
+
+    channel = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+        raise HTTPException(403, "No permission")
+
+    # The jump-to-message flow reuses the same hydrated payload shape as the
+    # channel timeline, so the frontend can merge a fetched message without
+    # having to special-case authors or deleted states.
+    author = await db.users.find_one({"id": msg["author_id"]}, {"_id": 0, "password_hash": 0})
+    msg["author"] = sanitize_user(author) if author else None
+    await hydrate_message_mentions(msg)
+    return msg
 
 @messages_r.post("/{message_id}/reactions/{emoji}")
 async def toggle_reaction(message_id: str, emoji: str, request: Request):
@@ -1486,14 +1671,26 @@ async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
 # ============================================================
 invites_r = APIRouter(prefix="/api/invites", tags=["Invites"])
 
+
+def invite_is_expired(invite: dict) -> bool:
+    expires_at = invite.get("expires_at")
+    return bool(expires_at and datetime.fromisoformat(expires_at) < datetime.now(timezone.utc))
+
+
+def invite_is_exhausted(invite: dict) -> bool:
+    max_uses = int(invite.get("max_uses") or 0)
+    if max_uses <= 0:
+        return False
+    return int(invite.get("uses") or 0) >= max_uses
+
 @invites_r.get("/{code}")
 async def get_invite(code: str):
     invite = await db.invites.find_one({"code": code}, {"_id": 0})
     if not invite:
         raise HTTPException(404, "Invite not found")
-    if invite.get("expires_at") and datetime.fromisoformat(invite["expires_at"]) < datetime.now(timezone.utc):
+    if invite_is_expired(invite):
         raise HTTPException(410, "Invite expired")
-    if invite.get("max_uses") and invite["uses"] >= invite["max_uses"]:
+    if invite_is_exhausted(invite):
         raise HTTPException(410, "Invite exhausted")
     server = await db.servers.find_one({"id": invite["server_id"]}, {"_id": 0})
     return {"invite": invite, "server": server}
@@ -1504,20 +1701,36 @@ async def accept_invite(code: str, request: Request):
     invite = await db.invites.find_one({"code": code}, {"_id": 0})
     if not invite:
         raise HTTPException(404, "Invite not found")
-    if invite.get("expires_at") and datetime.fromisoformat(invite["expires_at"]) < datetime.now(timezone.utc):
+    if invite_is_expired(invite):
         raise HTTPException(410, "Invite expired")
     existing = await db.server_members.find_one({"server_id": invite["server_id"], "user_id": user["id"]}, {"_id": 0})
     if existing:
         if existing.get("is_banned"):
             raise HTTPException(403, "You are banned")
         return {"ok": True, "server_id": invite["server_id"]}
-    default_role = await db.roles.find_one({"server_id": invite["server_id"], "is_default": True}, {"_id": 0})
+    if invite_is_exhausted(invite):
+        raise HTTPException(410, "Invite exhausted")
     await db.server_members.insert_one({
         "server_id": invite["server_id"], "user_id": user["id"],
-        "roles": [default_role["id"]] if default_role else [],
+        # The default @everyone permissions are applied implicitly through
+        # check_permission, so memberships only store explicit extra roles.
+        "roles": [],
         "nickname": "", "joined_at": now_utc(), "muted_until": None, "is_banned": False, "ban_reason": ""
     })
-    await db.invites.update_one({"code": code}, {"$inc": {"uses": 1}})
+    # The invite usage counter is incremented atomically so concurrent accepts
+    # cannot bypass a finite max-use limit.
+    usage_query = {"code": code}
+    if invite.get("max_uses"):
+        usage_query["uses"] = {"$lt": invite["max_uses"]}
+    invite_after_increment = await db.invites.find_one_and_update(
+        usage_query,
+        {"$inc": {"uses": 1}},
+        return_document=ReturnDocument.AFTER,
+        projection={"_id": 0},
+    )
+    if not invite_after_increment:
+        await db.server_members.delete_one({"server_id": invite["server_id"], "user_id": user["id"]})
+        raise HTTPException(410, "Invite exhausted")
     ws_mgr.add_server(user["id"], invite["server_id"])
     member_payload = await build_member_payload(invite["server_id"], user["id"])
     await ws_mgr.broadcast_server(
@@ -1637,6 +1850,27 @@ async def migrate_legacy_instance_state():
         )
     logger.info("Migrated legacy instance state into instance_settings")
 
+
+async def migrate_default_roles():
+    default_roles = await db.roles.find({"is_default": True}, {"_id": 0}).to_list(500)
+    for role in default_roles:
+        await db.roles.update_one(
+            {"id": role["id"]},
+            {
+                "$set": {
+                    "name": "@everyone",
+                    "mentionable": False,
+                    "permissions": {**DEFAULT_PERMISSIONS, **(role.get("permissions") or {})},
+                }
+            },
+        )
+        await db.server_members.update_many(
+            {"server_id": role["server_id"], "roles": role["id"]},
+            {"$pull": {"roles": role["id"]}},
+        )
+    if default_roles:
+        logger.info("Normalized default roles to @everyone")
+
 # ============================================================
 # WebSocket
 # ============================================================
@@ -1718,6 +1952,7 @@ async def startup():
     await create_phase3_indexes()
 
     await migrate_legacy_instance_state()
+    await migrate_default_roles()
 
     Path("/app/memory").mkdir(exist_ok=True)
     with open("/app/memory/test_credentials.md", "w") as f:

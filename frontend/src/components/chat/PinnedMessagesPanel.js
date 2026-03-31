@@ -1,16 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { PushPin, X } from "@phosphor-icons/react";
 import api from "@/lib/api";
+import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 
-export default function PinnedMessagesPanel({ channelId, onClose }) {
+export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessage, refreshKey }) {
   const [pins, setPins] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (channelId) loadPins();
-  }, [channelId]);
-
-  const loadPins = async () => {
+  const loadPins = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get(`/channels/${channelId}/pins`);
@@ -20,7 +17,13 @@ export default function PinnedMessagesPanel({ channelId, onClose }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [channelId]);
+
+  useEffect(() => {
+    if (channelId) {
+      loadPins();
+    }
+  }, [channelId, loadPins, refreshKey]);
 
   const unpin = async (msgId) => {
     try {
@@ -69,8 +72,28 @@ export default function PinnedMessagesPanel({ channelId, onClose }) {
                   <X size={12} />
                 </button>
               </div>
-              <p className="text-sm text-[#E4E4E7] break-words">{pin.content}</p>
-              <p className="text-[9px] text-[#52525B] mt-1.5">{new Date(pin.created_at).toLocaleString()}</p>
+              <div className="space-y-2">
+                <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">{pin.content}</p>
+                {pin.reply_to_id && (
+                  <MessageReferencePreview
+                    message={null}
+                    placeholder="Reply reference available in channel"
+                    className="bg-[#111214]"
+                  />
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[9px] text-[#52525B]">{new Date(pin.pinned_at || pin.created_at).toLocaleString()}</p>
+                  {typeof onJumpToMessage === "function" && (
+                    <button
+                      type="button"
+                      onClick={() => onJumpToMessage(pin.id)}
+                      className="rounded-md border border-[#3F3F46] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#D4D4D8] transition-colors hover:border-[#6366F1] hover:text-white"
+                    >
+                      Jump
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           ))
         )}

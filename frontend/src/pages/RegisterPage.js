@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
-import { formatError } from "@/lib/api";
+import api, { formatError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ShieldCheck } from "@phosphor-icons/react";
+import { toast } from "sonner";
+import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
@@ -18,6 +20,7 @@ export default function RegisterPage() {
   const { register } = useAuth();
   const { setupStatus } = useRuntime();
   const navigate = useNavigate();
+  const pendingInvite = useMemo(() => loadPendingInvite(), []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -26,6 +29,21 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       await register(email, username, password, displayName || username);
+      if (pendingInvite?.code) {
+        try {
+          const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
+          clearPendingInvite();
+          rememberPreferredServer(inviteResponse.data.server_id);
+          toast.success("Joined community");
+          navigate("/", { replace: true });
+          return;
+        } catch (inviteError) {
+          clearPendingInvite();
+          toast.error(formatError(inviteError.response?.data?.detail));
+          navigate(`/invite/${pendingInvite.code}`, { replace: true, state: { skipAutoAccept: true } });
+          return;
+        }
+      }
       navigate("/");
     } catch (err) {
       setError(formatError(err.response?.data?.detail) || err.message);
@@ -46,6 +64,11 @@ export default function RegisterPage() {
         <p className="text-[#71717A] text-sm mb-8">
           Join {setupStatus?.instance_name || "this privacy-first communication platform"}
         </p>
+        {pendingInvite?.code ? (
+          <div className="mb-6 rounded-md border border-[#27272A] bg-[#121212] px-4 py-3 text-sm text-[#D4D4D8]">
+            Your account will join the invite automatically after registration.
+          </div>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (

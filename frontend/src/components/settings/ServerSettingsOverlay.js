@@ -13,7 +13,6 @@ import {
   ClipboardText,
   CaretDown,
   CaretRight,
-  Copy,
   Folder,
   GearSix,
   Hash,
@@ -48,6 +47,7 @@ import {
 } from "@/lib/channelOrganization";
 import SortableChannelItem from "@/components/channels/SortableChannelItem";
 import ChannelContainerDropZone from "@/components/channels/ChannelContainerDropZone";
+import InviteGeneratorPanel from "@/components/invites/InviteGeneratorPanel";
 
 const SECTION_CONFIG = [
   { id: "general", label: "General", icon: <GearSix size={16} /> },
@@ -69,7 +69,7 @@ const PERMISSION_LABELS = {
   read_messages: "Read Messages",
   manage_messages: "Manage Messages",
   attach_files: "Attach Files",
-  mention_everyone: "Mention Everyone",
+  mention_everyone: "Mention @everyone and all roles",
   join_voice: "Join Voice",
   speak: "Speak",
   mute_members: "Mute Members",
@@ -93,7 +93,7 @@ export default function ServerSettingsOverlay({
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [newRoleName, setNewRoleName] = useState("");
   const [newRoleColor, setNewRoleColor] = useState("#6366F1");
-  const [inviteCode, setInviteCode] = useState("");
+  const [newRoleMentionable, setNewRoleMentionable] = useState(false);
   const [auditLogs, setAuditLogs] = useState([]);
   const [newChannelType, setNewChannelType] = useState("text");
   const [newChannelName, setNewChannelName] = useState("");
@@ -101,7 +101,7 @@ export default function ServerSettingsOverlay({
   const [activeDragId, setActiveDragId] = useState(null);
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [channelDraft, setChannelDraft] = useState({ name: "", topic: "", is_private: false, parent_id: "__root__", type: "text" });
-  const [roleDraft, setRoleDraft] = useState({ name: "", color: "#6366F1", permissions: {} });
+  const [roleDraft, setRoleDraft] = useState({ name: "", color: "#6366F1", permissions: {}, mentionable: false });
   const channelOrganization = useMemo(
     () => buildChannelOrganization(channels || []),
     [channels],
@@ -177,7 +177,7 @@ export default function ServerSettingsOverlay({
 
   useEffect(() => {
     if (!selectedRole) {
-      setRoleDraft({ name: "", color: "#6366F1", permissions: {} });
+      setRoleDraft({ name: "", color: "#6366F1", permissions: {}, mentionable: false });
       return;
     }
 
@@ -185,6 +185,7 @@ export default function ServerSettingsOverlay({
       name: selectedRole.name || "",
       color: selectedRole.color || "#6366F1",
       permissions: { ...(selectedRole.permissions || {}) },
+      mentionable: !!selectedRole.mentionable,
     });
   }, [selectedRole]);
 
@@ -476,8 +477,10 @@ export default function ServerSettingsOverlay({
       const res = await api.post(`/servers/${server.id}/roles`, {
         name: newRoleName.trim(),
         color: newRoleColor,
+        mentionable: newRoleMentionable,
       });
       setNewRoleName("");
+      setNewRoleMentionable(false);
       setSelectedRoleId(res.data.id);
       toast.success("Role created");
     } catch (error) {
@@ -488,11 +491,15 @@ export default function ServerSettingsOverlay({
   const saveRole = async () => {
     if (!selectedRole) return;
     try {
-      await api.put(`/servers/${server.id}/roles/${selectedRole.id}`, {
-        name: roleDraft.name,
-        color: roleDraft.color,
-        permissions: roleDraft.permissions,
-      });
+      const payload = selectedRole.is_default
+        ? { permissions: roleDraft.permissions }
+        : {
+            name: roleDraft.name,
+            color: roleDraft.color,
+            permissions: roleDraft.permissions,
+            mentionable: roleDraft.mentionable,
+          };
+      await api.put(`/servers/${server.id}/roles/${selectedRole.id}`, payload);
       toast.success("Role updated");
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
@@ -550,25 +557,6 @@ export default function ServerSettingsOverlay({
       );
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail || `Failed to ${action} member`));
-    }
-  };
-
-  const generateInvite = async () => {
-    try {
-      const res = await api.post(`/servers/${server.id}/invites`, { max_uses: 0, expires_hours: 24 });
-      setInviteCode(`${window.location.origin}/invite/${res.data.code}`);
-      toast.success("Invite created");
-    } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
-    }
-  };
-
-  const copyInvite = async () => {
-    try {
-      await navigator.clipboard.writeText(inviteCode);
-      toast.success("Invite copied");
-    } catch {
-      toast.error("Failed to copy invite");
     }
   };
 
@@ -807,6 +795,13 @@ export default function ServerSettingsOverlay({
                 className="h-10 w-10 rounded-md border border-[#27272A] bg-[#0A0A0A]"
               />
             </div>
+            <div className="mb-4 flex items-center justify-between rounded-lg border border-[#27272A] bg-[#0A0A0A] px-3 py-2.5">
+              <div>
+                <p className="text-sm text-white">Allow role mentions</p>
+                <p className="text-xs text-[#71717A]">Members can ping this role without elevated mention rights.</p>
+              </div>
+              <Switch checked={newRoleMentionable} onCheckedChange={setNewRoleMentionable} />
+            </div>
             <Button onClick={createRole} disabled={!newRoleName.trim()} className="mb-4 w-full bg-[#6366F1] hover:bg-[#4F46E5]">
               <Plus size={14} className="mr-2" />
               Create Role
@@ -847,6 +842,7 @@ export default function ServerSettingsOverlay({
                     <Input
                       value={roleDraft.name}
                       onChange={(event) => setRoleDraft((previous) => ({ ...previous, name: event.target.value }))}
+                      disabled={selectedRole.is_default}
                       className="bg-[#0A0A0A] border-[#27272A] text-white"
                     />
                   </div>
@@ -856,10 +852,29 @@ export default function ServerSettingsOverlay({
                       type="color"
                       value={roleDraft.color}
                       onChange={(event) => setRoleDraft((previous) => ({ ...previous, color: event.target.value }))}
+                      disabled={selectedRole.is_default}
                       className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A]"
                     />
                   </div>
                 </div>
+
+                {selectedRole.is_default ? (
+                  <div className="mt-4 rounded-lg border border-[#3F3F46] bg-[#0A0A0A] px-4 py-3">
+                    <p className="text-sm text-white">@everyone is the fixed default role</p>
+                    <p className="mt-1 text-xs text-[#71717A]">You can adjust its base permissions, but not rename, recolor or delete it.</p>
+                  </div>
+                ) : (
+                  <div className="mt-4 flex items-center justify-between rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3">
+                    <div>
+                      <p className="text-sm text-white">Allow role mentions</p>
+                      <p className="text-xs text-[#71717A]">Members can ping this role without global mention rights.</p>
+                    </div>
+                    <Switch
+                      checked={!!roleDraft.mentionable}
+                      onCheckedChange={(checked) => setRoleDraft((previous) => ({ ...previous, mentionable: checked }))}
+                    />
+                  </div>
+                )}
 
                 <Button onClick={saveRole} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">Save Role</Button>
 
@@ -931,23 +946,17 @@ export default function ServerSettingsOverlay({
         </section>
       )}
 
-      {activeSection === "invites" && (
-        <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-          <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Invites</h3>
-          <p className="mt-1 text-sm text-[#71717A]">Generate a shareable invite link for this community.</p>
-          <div className="mt-5 flex gap-2">
-            <Button onClick={generateInvite} className="bg-[#6366F1] hover:bg-[#4F46E5]">
-              <UserPlus size={14} className="mr-2" />
-              Generate Invite
-            </Button>
-            <Button onClick={copyInvite} disabled={!inviteCode} variant="outline" className="border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]">
-              <Copy size={14} className="mr-2" />
-              Copy
-            </Button>
-          </div>
-          <Input value={inviteCode} readOnly className="mt-4 bg-[#0A0A0A] border-[#27272A] text-white" />
-        </section>
-      )}
+        {activeSection === "invites" && (
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Invites</h3>
+            <p className="mt-1 text-sm text-[#71717A]">
+              Generate shareable invite links with expiry and usage limits.
+            </p>
+            <div className="mt-5">
+              <InviteGeneratorPanel serverId={server.id} />
+            </div>
+          </section>
+        )}
 
       {activeSection === "audit" && (
         <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">

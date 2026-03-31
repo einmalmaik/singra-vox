@@ -1,29 +1,52 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { X, PaperPlaneRight } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 
-export default function ThreadPanel({ messageId, channelId, onClose, user }) {
+export default function ThreadPanel({ messageId, channelId, onClose, user, onReplySent }) {
   const [thread, setThread] = useState(null);
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [highlightParent, setHighlightParent] = useState(false);
   const endRef = useRef(null);
+  const parentRef = useRef(null);
+  const parentHighlightTimeout = useRef(null);
 
-  useEffect(() => {
-    if (messageId) loadThread();
-  }, [messageId]);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [thread]);
-
-  const loadThread = async () => {
+  const loadThread = useCallback(async () => {
     try {
       const res = await api.get(`/messages/${messageId}/thread`);
       setThread(res.data);
     } catch {
       toast.error("Failed to load thread");
     }
+  }, [messageId]);
+
+  useEffect(() => {
+    if (messageId) {
+      loadThread();
+    }
+  }, [messageId, loadThread]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [thread]);
+
+  useEffect(() => () => {
+    if (parentHighlightTimeout.current) {
+      clearTimeout(parentHighlightTimeout.current);
+    }
+  }, []);
+
+  const focusParentMessage = () => {
+    parentRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (parentHighlightTimeout.current) {
+      clearTimeout(parentHighlightTimeout.current);
+    }
+    setHighlightParent(true);
+    parentHighlightTimeout.current = setTimeout(() => {
+      setHighlightParent(false);
+    }, 1800);
   };
 
   const sendReply = async (e) => {
@@ -31,8 +54,9 @@ export default function ThreadPanel({ messageId, channelId, onClose, user }) {
     if (!content.trim() || sending) return;
     setSending(true);
     try {
-      await api.post(`/channels/${channelId}/messages/${messageId}/reply`, { content: content.trim() });
+      const response = await api.post(`/channels/${channelId}/messages/${messageId}/reply`, { content: content.trim() });
       setContent("");
+      onReplySent?.(response.data, messageId);
       loadThread();
     } catch {
       toast.error("Failed to send reply");
@@ -60,7 +84,12 @@ export default function ThreadPanel({ messageId, channelId, onClose, user }) {
       </div>
 
       {/* Parent message */}
-      <div className="px-4 py-3 border-b border-[#27272A]/50 bg-[#0A0A0A]/50">
+      <div
+        ref={parentRef}
+        className={`px-4 py-3 border-b border-[#27272A]/50 bg-[#0A0A0A]/50 transition-[background-color,box-shadow] ${
+          highlightParent ? 'bg-[#221A10] shadow-[0_0_0_1px_rgba(245,158,11,0.32),0_0_22px_rgba(245,158,11,0.1)]' : ''
+        }`}
+      >
         <div className="flex items-baseline gap-2 mb-1">
           <span className="text-sm font-semibold text-white">{thread.parent?.author?.display_name}</span>
           <span className="text-[10px] text-[#52525B]">{new Date(thread.parent?.created_at).toLocaleString()}</span>
@@ -81,6 +110,15 @@ export default function ThreadPanel({ messageId, channelId, onClose, user }) {
                 <span className="text-xs font-semibold text-white">{reply.author?.display_name}</span>
                 <span className="text-[10px] text-[#52525B]">{new Date(reply.created_at).toLocaleTimeString()}</span>
               </div>
+              {reply.reply_to_id && (
+                <div className="mt-1.5 mb-1.5 max-w-[250px]">
+                  <MessageReferencePreview
+                    message={thread.parent}
+                    onClick={focusParentMessage}
+                    className="bg-[#101114]"
+                  />
+                </div>
+              )}
               <p className="text-sm text-[#E4E4E7] mt-0.5 break-words">{reply.content}</p>
             </div>
           </div>

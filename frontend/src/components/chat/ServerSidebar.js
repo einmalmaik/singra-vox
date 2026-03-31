@@ -13,7 +13,17 @@ import api, { formatError } from "@/lib/api";
 import { toast } from "sonner";
 import { canCreateCommunity } from "@/lib/workspacePermissions";
 
-export default function ServerSidebar({ servers, currentServer, onSelectServer, onRefreshServers, view, onSwitchToDm, user, dmUnread }) {
+export default function ServerSidebar({
+  servers,
+  currentServer,
+  onSelectServer,
+  onRefreshServers,
+  view,
+  onSwitchToDm,
+  user,
+  dmUnread,
+  serverUnreadMap = {},
+}) {
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -66,19 +76,35 @@ export default function ServerSidebar({ servers, currentServer, onSelectServer, 
         {servers.map(server => (
           <Tooltip key={server.id}>
             <TooltipTrigger asChild>
-              <button
-                onClick={() => onSelectServer(server)}
-                data-testid={`server-icon-${server.id}`}
-                className={`server-icon w-12 h-12 rounded-3xl flex items-center justify-center text-white font-bold text-lg transition-all overflow-hidden ${
-                  currentServer?.id === server.id && view === "server" ? 'active bg-[#6366F1] rounded-xl' : 'bg-[#121212] hover:bg-[#6366F1]'
-                }`}
-              >
-                {server.icon_url ? (
-                  <img src={server.icon_url} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  server.name.charAt(0).toUpperCase()
+              <div className="relative flex items-center">
+                {serverUnreadMap?.[server.id]?.count > 0 && !(currentServer?.id === server.id && view === "server") && (
+                  <span
+                    className={`absolute -left-2 h-5 rounded-r-full transition-all ${
+                      serverUnreadMap?.[server.id]?.mentions > 0 ? "w-2.5 bg-[#EF4444] animate-pulse" : "w-1.5 bg-white/90"
+                    }`}
+                  />
                 )}
-              </button>
+                <button
+                  onClick={() => onSelectServer(server)}
+                  data-testid={`server-icon-${server.id}`}
+                  className={`server-icon relative w-12 h-12 rounded-3xl flex items-center justify-center text-white font-bold text-lg transition-all overflow-hidden ${
+                    currentServer?.id === server.id && view === "server" ? 'active bg-[#6366F1] rounded-xl' : 'bg-[#121212] hover:bg-[#6366F1]'
+                  }`}
+                >
+                  {server.icon_url ? (
+                    <img src={server.icon_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    server.name.charAt(0).toUpperCase()
+                  )}
+                  {serverUnreadMap?.[server.id]?.count > 0 && !(currentServer?.id === server.id && view === "server") && (
+                    <span className={`absolute -bottom-1 -right-1 min-w-[18px] h-[18px] rounded-full px-1 text-[9px] font-bold flex items-center justify-center ${
+                      serverUnreadMap?.[server.id]?.mentions > 0 ? "bg-[#EF4444] text-white" : "bg-[#6366F1] text-white"
+                    }`}>
+                      {serverUnreadMap?.[server.id]?.count > 99 ? "99+" : serverUnreadMap?.[server.id]?.count}
+                    </span>
+                  )}
+                </button>
+              </div>
             </TooltipTrigger>
             <TooltipContent side="right"><p>{server.name}</p></TooltipContent>
           </Tooltip>

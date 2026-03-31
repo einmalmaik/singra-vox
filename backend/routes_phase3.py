@@ -110,7 +110,10 @@ async def unpin_message(message_id: str, request: Request):
 
 @phase3.get("/channels/{channel_id}/pins")
 async def get_pins(channel_id: str, request: Request):
-    await _user(request)
+    user = await _user(request)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel or not await _perm(user["id"], channel["server_id"], "read_messages"):
+        raise HTTPException(403, "No permission")
     pins = await db.messages.find(
         {"channel_id": channel_id, "is_pinned": True, "is_deleted": {"$ne": True}}, {"_id": 0}
     ).sort("pinned_at", -1).to_list(50)

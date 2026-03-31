@@ -411,6 +411,8 @@ export default function ChannelSidebar({
   const renderChannelRow = (channel, { nested = false } = {}) => {
     const unread = unreadMap?.[channel.id];
     const categoryCollapsed = Boolean(collapsedCategories[channel.id]);
+    const hasUnread = Boolean(unread?.count) && currentChannel?.id !== channel.id && channel.type === "text";
+    const hasMentionUnread = hasUnread && unread?.mentions > 0;
     return (
       <ContextMenu key={channel.id}>
         <SortableChannelItem
@@ -447,10 +449,23 @@ export default function ChannelSidebar({
                   }
                 }}
                 className={`channel-item w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm touch-none ${
-                  currentChannel?.id === channel.id ? "active text-white" : unread ? "text-white font-semibold" : "text-[#A1A1AA]"
+                  currentChannel?.id === channel.id
+                    ? "active text-white"
+                    : hasMentionUnread
+                      ? "bg-[#2A1616] text-white font-semibold"
+                      : hasUnread
+                        ? "text-white font-semibold"
+                        : "text-[#A1A1AA]"
                 } ${isOver ? "ring-1 ring-[#6366F1] bg-[#18181B]" : ""} ${isDragging ? "opacity-60" : ""}`}
                 data-testid={`channel-${channel.name}`}
               >
+                {hasUnread && (
+                  <span
+                    className={`h-5 rounded-r-full transition-all ${
+                      hasMentionUnread ? "w-2 bg-[#EF4444] animate-pulse" : "w-1 bg-white/90"
+                    }`}
+                  />
+                )}
                 {channel.type === "category" ? (
                   <>
                     {categoryCollapsed ? (

@@ -10,6 +10,15 @@ async function getInvoke() {
   return mod.invoke;
 }
 
+async function getDeepLinkPlugin() {
+  if (!isDesktopApp()) return null;
+  try {
+    return await import("@tauri-apps/plugin-deep-link");
+  } catch {
+    return null;
+  }
+}
+
 export async function getDesktopSecret(key) {
   const invoke = await getInvoke();
   if (!invoke) return null;
@@ -36,3 +45,18 @@ export async function deleteDesktopSecret(key) {
   }
 }
 
+export async function getCurrentDeepLinks() {
+  const plugin = await getDeepLinkPlugin();
+  if (!plugin?.getCurrent) return [];
+  try {
+    return (await plugin.getCurrent()) || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function onDesktopDeepLinkOpen(handler) {
+  const plugin = await getDeepLinkPlugin();
+  if (!plugin?.onOpenUrl) return null;
+  return plugin.onOpenUrl((urls) => handler(urls || []));
+}

@@ -103,10 +103,13 @@ phase2 = APIRouter(prefix="/api", tags=["Phase2"])
 # ═══════════════════════════════════════════════════
 @phase2.get("/messages/{message_id}/thread")
 async def get_thread(message_id: str, request: Request):
-    await _user(request)
+    user = await _user(request)
     parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
     if not parent:
         raise HTTPException(404, "Message not found")
+    channel = await db.channels.find_one({"id": parent["channel_id"]}, {"_id": 0})
+    if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages"):
+        raise HTTPException(403, "No permission")
     author = await db.users.find_one({"id": parent["author_id"]}, {"_id": 0, "password_hash": 0})
     parent["author"] = author
     replies = await db.messages.find(
@@ -179,11 +182,13 @@ async def search_messages(request: Request, q: str = "", server_id: str = None, 
 async def get_all_unread(request: Request):
     user = await _user(request)
     memberships = await db.server_members.find(
-        {"user_id": user["id"], "is_banned": {"$ne": True}}, {"_id": 0, "server_id": 1}
+        {"user_id": user["id"], "is_banned": {"$ne": True}}, {"_id": 0, "server_id": 1, "roles": 1}
     ).to_list(100)
     unread = {}
+    server_unread = {}
     for m in memberships:
         chs = await db.channels.find({"server_id": m["server_id"], "type": "text"}, {"_id": 0, "id": 1}).to_list(100)
+        member_role_ids = m.get("roles", [])
         for ch in chs:
             rs = await db.read_states.find_one({"user_id": user["id"], "channel_id": ch["id"]}, {"_id": 0})
             last = rs["last_read_at"] if rs else "1970-01-01T00:00:00"
@@ -191,14 +196,29 @@ async def get_all_unread(request: Request):
                 "channel_id": ch["id"], "created_at": {"$gt": last},
                 "author_id": {"$ne": user["id"]}, "is_deleted": {"$ne": True}
             })
+            mention_conditions = [
+                {"mention_ids": user["id"]},
+                {"mentioned_user_ids": user["id"]},
+            ]
+            if member_role_ids:
+                mention_conditions.append({"mentioned_role_ids": {"$in": member_role_ids}})
+            mention_conditions.append({"mentions_everyone": True})
             mcnt = await db.messages.count_documents({
-                "channel_id": ch["id"], "created_at": {"$gt": last},
-                "mention_ids": user["id"], "is_deleted": {"$ne": True}
+                "channel_id": ch["id"],
+                "created_at": {"$gt": last},
+                "author_id": {"$ne": user["id"]},
+                "is_deleted": {"$ne": True},
+                "$or": mention_conditions,
             })
             if cnt > 0:
                 unread[ch["id"]] = {"count": cnt, "mentions": mcnt}
+                previous_server_unread = server_unread.get(m["server_id"], {"count": 0, "mentions": 0})
+                server_unread[m["server_id"]] = {
+                    "count": previous_server_unread["count"] + cnt,
+                    "mentions": previous_server_unread["mentions"] + mcnt,
+                }
     dm_unread = await db.direct_messages.count_documents({"receiver_id": user["id"], "read": False})
-    return {"channels": unread, "dm_total": dm_unread}
+    return {"channels": unread, "servers": server_unread, "dm_total": dm_unread}
 
 
 @phase2.post("/channels/{channel_id}/read")

@@ -7,7 +7,9 @@ import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
 import SetupPage from "@/pages/SetupPage";
 import OnboardingPage from "@/pages/OnboardingPage";
+import InvitePage from "@/pages/InvitePage";
 import MainLayout from "@/pages/MainLayout";
+import DesktopInviteBridge from "@/components/invites/DesktopInviteBridge";
 import "@/App.css";
 
 function LoadingScreen({ label = "Connecting..." }) {
@@ -75,8 +77,8 @@ function AppRoutes() {
               : <RegisterPage />
         }
       />
+      <Route path="/invite/:code" element={<InvitePage />} />
       <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
-      <Route path="/invite/:code" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
       <Route path="/*" element={<ProtectedRoute><MainLayout /></ProtectedRoute>} />
     </Routes>
   );
@@ -92,6 +94,7 @@ function AppShell() {
           style: { background: "#18181B", border: "1px solid #27272A", color: "#FFFFFF" },
         }}
       />
+      <DesktopInviteBridge />
       <AppRoutes />
     </>
   );
@@ -110,4 +113,3 @@ function App() {
 }
 
 export default App;
-

@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
-  Hash, PaperPlaneRight, Paperclip, ChatText, Pencil, Trash, PushPin, PushPinSlash, X
+  Hash, PaperPlaneRight, Paperclip, ChatText, Pencil, Trash, PushPin, PushPinSlash, X, At
 } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -11,19 +11,48 @@ import SearchDialog from "@/components/modals/SearchDialog";
 import ThreadPanel from "@/components/chat/ThreadPanel";
 import PinnedMessagesPanel from "@/components/chat/PinnedMessagesPanel";
 import NotificationPanel from "@/components/chat/NotificationPanel";
+import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
+import {
+  applyMentionSuggestion,
+  buildMentionPayload,
+  buildMentionSuggestions,
+  findActiveMention,
+  normalizeSelectedMentions,
+  renderMessageContent,
+} from "@/lib/messageMentions";
 
 const REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{1F440}", "\u{2705}", "\u{1F602}", "\u{1F914}"];
+const MESSAGE_HIGHLIGHT_DURATION = 2200;
 
-function renderMessageParts(content = "") {
-  return content.split(/(@\w+)/g).map((part, index) => (
-    part.startsWith("@")
-      ? <span key={`${part}-${index}`} className="text-[#6366F1] font-medium bg-[#6366F1]/10 rounded px-0.5">{part}</span>
-      : <span key={`${part}-${index}`}>{part}</span>
+function mergeMessageIntoTimeline(previousMessages, nextMessage) {
+  if (!nextMessage) {
+    return previousMessages;
+  }
+
+  const mergedMessages = previousMessages.some((message) => message.id === nextMessage.id)
+    ? previousMessages.map((message) => (message.id === nextMessage.id ? { ...message, ...nextMessage } : message))
+    : [...previousMessages, nextMessage];
+
+  return mergedMessages.slice().sort((left, right) => (
+    new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
   ));
 }
 
-export default function ChatArea({ channel, messages, setMessages, user, serverId, onSendTyping, typingUsers }) {
+export default function ChatArea({
+  channel,
+  messages,
+  setMessages,
+  user,
+  server,
+  serverId,
+  members = [],
+  roles = [],
+  onSendTyping,
+  typingUsers,
+  onChannelRead,
+}) {
   const { config } = useRuntime();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
@@ -35,29 +64,132 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
   const [showPins, setShowPins] = useState(false);
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState("");
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+  const [replyTargets, setReplyTargets] = useState({});
+  const [selectedMentions, setSelectedMentions] = useState([]);
+  const [activeMention, setActiveMention] = useState(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const composerInputRef = useRef(null);
   const typingTimeout = useRef(null);
+  const messageRefs = useRef({});
+  const fetchedReplyIds = useRef(new Set());
+  const pendingJumpMessageId = useRef(null);
+  const highlightTimeout = useRef(null);
+  const suppressAutoScroll = useRef(false);
+  const workspacePermissions = useMemo(
+    () => buildWorkspaceCapabilities({ user, server, members, roles }).permissions,
+    [members, roles, server, user],
+  );
+  const mentionSuggestions = useMemo(
+    () => buildMentionSuggestions({
+      query: activeMention?.query || "",
+      members,
+      roles,
+      permissions: workspacePermissions,
+    }),
+    [activeMention?.query, members, roles, workspacePermissions],
+  );
 
   useEffect(() => {
+    if (suppressAutoScroll.current) {
+      suppressAutoScroll.current = false;
+      return;
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => () => {
+    if (typingTimeout.current) {
+      clearTimeout(typingTimeout.current);
+    }
+    if (highlightTimeout.current) {
+      clearTimeout(highlightTimeout.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    setSelectedMentions([]);
+    setActiveMention(null);
+    setActiveMentionIndex(0);
+  }, [channel?.id]);
+
+  useEffect(() => {
+    if (!pendingJumpMessageId.current) {
+      return;
+    }
+
+    const targetId = pendingJumpMessageId.current;
+    if (!focusMessage(targetId)) {
+      return;
+    }
+
+    pendingJumpMessageId.current = null;
+  }, [messages]);
+
+  useEffect(() => {
+    const missingReplyIds = [...new Set(
+      messages
+        .map((message) => message.reply_to_id)
+        .filter(Boolean)
+        .filter((replyId) => (
+          !messages.some((message) => message.id === replyId)
+          && !Object.prototype.hasOwnProperty.call(replyTargets, replyId)
+          && !fetchedReplyIds.current.has(replyId)
+        )),
+    )];
+
+    if (missingReplyIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    missingReplyIds.forEach((replyId) => fetchedReplyIds.current.add(replyId));
+
+    (async () => {
+      const results = await Promise.allSettled(
+        missingReplyIds.map((replyId) => api.get(`/messages/${replyId}`)),
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setReplyTargets((previous) => {
+        const nextTargets = { ...previous };
+        missingReplyIds.forEach((replyId, index) => {
+          const result = results[index];
+          nextTargets[replyId] = result.status === "fulfilled" ? result.value.data : null;
+        });
+        return nextTargets;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, replyTargets]);
 
   // Mark channel as read when viewing
   useEffect(() => {
     if (channel?.id) {
-      api.post(`/channels/${channel.id}/read`).catch(() => {});
+      api.post(`/channels/${channel.id}/read`)
+        .then(() => onChannelRead?.())
+        .catch(() => {});
     }
-  }, [channel?.id, messages.length]);
+  }, [channel?.id, messages.length, onChannelRead]);
 
   const handleSend = async (e) => {
     e.preventDefault();
     if ((!content.trim() && pendingAttachments.length === 0) || !channel || sending) return;
     setSending(true);
     try {
+      const mentionPayload = buildMentionPayload(selectedMentions, content);
       const res = await api.post(`/channels/${channel.id}/messages`, {
         content: content.trim(),
         attachments: pendingAttachments,
+        ...mentionPayload,
       });
       setMessages(prev => {
         if (prev.find(m => m.id === res.data.id)) return prev;
@@ -65,6 +197,9 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
       });
       setContent("");
       setPendingAttachments([]);
+      setSelectedMentions([]);
+      setActiveMention(null);
+      setActiveMentionIndex(0);
     } catch (err) {
       toast.error("Failed to send message");
     } finally {
@@ -155,9 +290,95 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
     e.target.value = '';
   };
 
+  const updateActiveMention = (nextContent, cursorPosition = nextContent.length) => {
+    const nextMention = findActiveMention(nextContent, cursorPosition);
+    if (!nextMention) {
+      setActiveMention(null);
+      setActiveMentionIndex(0);
+      return;
+    }
+
+    setActiveMention(nextMention);
+    setActiveMentionIndex(0);
+  };
+
   const typingNames = Object.values(typingUsers);
   const removePendingAttachment = (attachmentId) => {
     setPendingAttachments(prev => prev.filter((attachment) => attachment.id !== attachmentId));
+  };
+
+  const focusMessage = (messageId) => {
+    const targetNode = messageRefs.current[messageId];
+    if (!targetNode) {
+      return false;
+    }
+
+    targetNode.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    if (highlightTimeout.current) {
+      clearTimeout(highlightTimeout.current);
+    }
+    setHighlightedMessageId(messageId);
+    highlightTimeout.current = setTimeout(() => {
+      setHighlightedMessageId((current) => (current === messageId ? null : current));
+    }, MESSAGE_HIGHLIGHT_DURATION);
+
+    return true;
+  };
+
+  const pinRefreshKey = messages
+    .filter((message) => message.is_pinned)
+    .map((message) => message.id)
+    .sort()
+    .join(":");
+
+  const getReplyTarget = (message) => {
+    if (!message?.reply_to_id) {
+      return null;
+    }
+
+    return messages.find((entry) => entry.id === message.reply_to_id) || replyTargets[message.reply_to_id] || null;
+  };
+
+  const revealMessage = async (messageId) => {
+    if (!messageId) {
+      return;
+    }
+
+    if (focusMessage(messageId)) {
+      return;
+    }
+
+    try {
+      suppressAutoScroll.current = true;
+      pendingJumpMessageId.current = messageId;
+      const response = await api.get(`/messages/${messageId}`);
+      setMessages((previous) => mergeMessageIntoTimeline(previous, response.data));
+    } catch {
+      pendingJumpMessageId.current = null;
+      suppressAutoScroll.current = false;
+      toast.error("Original message not available");
+    }
+  };
+
+  const insertMention = (suggestion) => {
+    if (!activeMention) {
+      return;
+    }
+
+    const { nextContent, nextCursorPosition } = applyMentionSuggestion(content, activeMention, suggestion);
+    setContent(nextContent);
+    setSelectedMentions((previous) => normalizeSelectedMentions([
+      ...previous.filter((entry) => entry.key !== suggestion.key),
+      suggestion,
+    ], nextContent));
+    setActiveMention(null);
+    setActiveMentionIndex(0);
+
+    window.requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+      composerInputRef.current?.setSelectionRange(nextCursorPosition, nextCursorPosition);
+    });
   };
 
   if (!channel) {
@@ -229,11 +450,26 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
             const sameAuthor = prevMsg?.author_id === msg.author_id;
             const timeDiff = prevMsg ? (new Date(msg.created_at) - new Date(prevMsg.created_at)) / 60000 : 999;
             const compact = sameAuthor && timeDiff < 5;
+            const replyTarget = getReplyTarget(msg);
+            const isHighlighted = highlightedMessageId === msg.id;
 
             return (
               <div
                 key={msg.id}
-                className={`message-item group relative flex gap-3 py-0.5 px-2 rounded-md ${compact ? 'mt-0' : 'mt-3'}`}
+                ref={(node) => {
+                  if (node) {
+                    messageRefs.current[msg.id] = node;
+                  } else {
+                    delete messageRefs.current[msg.id];
+                  }
+                }}
+                className={`message-item group relative flex gap-3 rounded-md px-2 py-1 transition-[background-color,box-shadow,border-color] ${
+                  compact ? 'mt-0' : 'mt-3'
+                } ${
+                  isHighlighted
+                    ? 'bg-[#221A10] shadow-[0_0_0_1px_rgba(245,158,11,0.35),0_0_32px_rgba(245,158,11,0.12)]'
+                    : ''
+                }`}
                 data-testid={`message-${msg.id}`}
               >
                 {!compact ? (
@@ -269,6 +505,15 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
                     </div>
                   ) : (
                     <>
+                      {msg.reply_to_id && (
+                        <div className="mb-2 max-w-[540px]">
+                          <MessageReferencePreview
+                            message={replyTarget}
+                            placeholder="Original message unavailable"
+                            onClick={replyTarget?.id ? () => revealMessage(replyTarget.id) : undefined}
+                          />
+                        </div>
+                      )}
                       {msg.is_pinned && (
                         <div className="flex items-center gap-1 text-[10px] text-[#F59E0B] mb-0.5">
                           <PushPin size={10} weight="fill" /> Pinned
@@ -276,7 +521,7 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
                       )}
                       {msg.content ? (
                         <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
-                          {renderMessageParts(msg.content)}
+                          {renderMessageContent(msg.content, msg)}
                         </p>
                       ) : null}
 
@@ -425,8 +670,46 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
               <Paperclip size={18} />
             </button>
             <input
+              ref={composerInputRef}
               value={content}
-              onChange={e => { setContent(e.target.value); handleTyping(); }}
+              onChange={(e) => {
+                const nextContent = e.target.value;
+                setContent(nextContent);
+                setSelectedMentions((previous) => normalizeSelectedMentions(previous, nextContent));
+                updateActiveMention(nextContent, e.target.selectionStart ?? nextContent.length);
+                handleTyping();
+              }}
+              onClick={(e) => updateActiveMention(content, e.currentTarget.selectionStart ?? content.length)}
+              onBlur={() => {
+                window.setTimeout(() => {
+                  setActiveMention(null);
+                  setActiveMentionIndex(0);
+                }, 120);
+              }}
+              onKeyDown={(e) => {
+                if (!activeMention || mentionSuggestions.length === 0) {
+                  return;
+                }
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setActiveMentionIndex((previous) => (previous + 1) % mentionSuggestions.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setActiveMentionIndex((previous) => (previous - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  insertMention(mentionSuggestions[activeMentionIndex] || mentionSuggestions[0]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  setActiveMention(null);
+                  setActiveMentionIndex(0);
+                }
+              }}
               placeholder={`Message #${channel.name}`}
               data-testid="message-input"
               className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none"
@@ -436,12 +719,46 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
               <PaperPlaneRight size={20} weight="fill" />
             </button>
           </div>
+          {activeMention && mentionSuggestions.length > 0 && (
+            <div className="mt-2 overflow-hidden rounded-lg border border-[#27272A] bg-[#121212] shadow-xl">
+              {mentionSuggestions.map((suggestion, index) => (
+                <button
+                  key={suggestion.key}
+                  type="button"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => insertMention(suggestion)}
+                  className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                    index === activeMentionIndex ? "bg-[#1C1D22]" : "hover:bg-[#18191D]"
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm text-white">
+                      <At size={13} className="text-[#818CF8]" />
+                      <span className="truncate">@{suggestion.label}</span>
+                    </div>
+                    <div className="truncate text-[11px] text-[#71717A]">{suggestion.description}</div>
+                  </div>
+                  {suggestion.type === "role" && (
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: suggestion.color }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </form>
       </div>
 
       {/* Pinned messages panel */}
       {showPins && (
-        <PinnedMessagesPanel channelId={channel.id} onClose={() => setShowPins(false)} />
+        <PinnedMessagesPanel
+          channelId={channel.id}
+          onClose={() => setShowPins(false)}
+          onJumpToMessage={async (messageId) => {
+            setShowPins(false);
+            await revealMessage(messageId);
+          }}
+          refreshKey={pinRefreshKey}
+        />
       )}
 
       {/* Thread panel */}
@@ -451,6 +768,16 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
           channelId={channel.id}
           onClose={() => setThreadMsgId(null)}
           user={user}
+          onReplySent={(replyMessage, parentMessageId) => {
+            setMessages((previous) => {
+              const timelineWithReply = mergeMessageIntoTimeline(previous, replyMessage);
+              return timelineWithReply.map((message) => (
+                message.id === parentMessageId
+                  ? { ...message, thread_count: Math.max(1, (message.thread_count || 0) + 1) }
+                  : message
+              ));
+            });
+          }}
         />
       )}
     </div>

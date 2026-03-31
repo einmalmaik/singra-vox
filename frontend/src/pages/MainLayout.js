@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import api from "@/lib/api";
+import { consumePreferredServer } from "@/lib/inviteLinks";
 import ServerSidebar from "@/components/chat/ServerSidebar";
 import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import ChatArea from "@/components/chat/ChatArea";
@@ -104,6 +105,7 @@ export default function MainLayout() {
   const [dmMessages, setDmMessages] = useState([]);
   const [typingUsers, setTypingUsers] = useState({});
   const [unreadMap, setUnreadMap] = useState({});
+  const [serverUnreadMap, setServerUnreadMap] = useState({});
   const [dmUnread, setDmUnread] = useState(0);
 
   useEffect(() => {
@@ -122,6 +124,7 @@ export default function MainLayout() {
     try {
       const res = await api.get("/unread");
       setUnreadMap(res.data.channels || {});
+      setServerUnreadMap(res.data.servers || {});
       setDmUnread(res.data.dm_total || 0);
     } catch {
       // Keep the last unread snapshot on transient failures.
@@ -196,11 +199,18 @@ export default function MainLayout() {
         setChannels([]);
         setMembers([]);
         setRoles([]);
+        setUnreadMap({});
+        setServerUnreadMap({});
         navigate("/onboarding");
         return;
       }
 
-      const activeServer = nextServers.find((server) => server.id === currentServerRef.current?.id) || nextServers[0];
+      // Invite accepts can hint which community should open next.
+      const preferredServerId = consumePreferredServer();
+      const activeServer =
+        nextServers.find((server) => server.id === preferredServerId)
+        || nextServers.find((server) => server.id === currentServerRef.current?.id)
+        || nextServers[0];
       await selectServer(activeServer);
     } catch (error) {
       if (error.response?.status === 401) {
@@ -502,6 +512,7 @@ export default function MainLayout() {
         user={user}
         onLogout={logout}
         dmUnread={dmUnread}
+        serverUnreadMap={serverUnreadMap}
       />
 
       {view === "server" && currentServer ? (
@@ -546,9 +557,13 @@ export default function MainLayout() {
               messages={messages}
               setMessages={setMessages}
               user={user}
+              server={currentServer}
               serverId={currentServer?.id}
+              members={members}
+              roles={roles}
               onSendTyping={sendTyping}
               typingUsers={typingUsers[currentChannel?.id] || {}}
+              onChannelRead={refreshUnread}
             />
           </div>
 
