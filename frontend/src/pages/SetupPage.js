@@ -1,141 +1,167 @@
-import { useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import api from "@/lib/api";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ShieldCheck, RocketLaunch } from "@phosphor-icons/react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useRuntime } from "@/contexts/RuntimeContext";
 import { formatError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ShieldCheck, RocketLaunch } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
 export default function SetupPage() {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [inviteCode, setInviteCode] = useState("");
-  const [inviteInfo, setInviteInfo] = useState(null);
   const navigate = useNavigate();
-  const params = useParams();
+  const { bootstrap } = useAuth();
+  const { config } = useRuntime();
+  const [instanceName, setInstanceName] = useState("Singra Vox");
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [ownerUsername, setOwnerUsername] = useState("");
+  const [ownerDisplayName, setOwnerDisplayName] = useState("");
+  const [ownerPassword, setOwnerPassword] = useState("");
+  const [allowOpenSignup, setAllowOpenSignup] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (params.code) {
-      loadInvite(params.code);
-    }
-  }, [params.code]);
-
-  const loadInvite = async (code) => {
-    try {
-      const res = await api.get(`/invites/${code}`);
-      setInviteInfo(res.data);
-    } catch {
-      toast.error("Invalid or expired invite");
-    }
-  };
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (!name.trim()) return;
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setError("");
     setLoading(true);
+
     try {
-      await api.post("/setup/bootstrap", { name, description });
-      toast.success("Server created!");
-      navigate("/");
+      await bootstrap({
+        instance_name: instanceName,
+        owner_email: ownerEmail,
+        owner_username: ownerUsername,
+        owner_display_name: ownerDisplayName || ownerUsername,
+        owner_password: ownerPassword,
+        allow_open_signup: allowOpenSignup,
+      });
+      toast.success("Instance initialized");
+      navigate("/onboarding");
     } catch (err) {
-      toast.error(formatError(err.response?.data?.detail));
+      setError(formatError(err.response?.data?.detail) || err.message);
     } finally {
       setLoading(false);
     }
   };
-
-  const handleJoinInvite = async () => {
-    if (!inviteCode.trim() && !params.code) return;
-    setLoading(true);
-    try {
-      const code = params.code || inviteCode.trim();
-      const res = await api.post(`/invites/${code}/accept`);
-      toast.success("Joined server!");
-      navigate("/");
-    } catch (err) {
-      toast.error(formatError(err.response?.data?.detail));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (inviteInfo) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] px-6" data-testid="invite-page">
-        <div className="w-full max-w-sm text-center">
-          <ShieldCheck size={48} weight="fill" className="text-[#6366F1] mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>You're invited!</h2>
-          <p className="text-[#A1A1AA] mb-6">Join <span className="text-white font-semibold">{inviteInfo.server?.name}</span></p>
-          <Button
-            onClick={handleJoinInvite} disabled={loading} data-testid="accept-invite-button"
-            className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
-          >
-            {loading ? "Joining..." : "Accept Invite"}
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] px-6" data-testid="setup-page">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center px-6" data-testid="setup-page">
+      <div className="w-full max-w-lg">
         <div className="flex items-center gap-3 mb-8">
-          <RocketLaunch size={36} weight="fill" className="text-[#6366F1]" />
+          <RocketLaunch size={40} weight="fill" className="text-[#6366F1]" />
           <div>
-            <h2 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>Get Started</h2>
-            <p className="text-[#71717A] text-sm">Create your first server or join one</p>
+            <h1 className="text-3xl font-bold" style={{ fontFamily: "Manrope" }}>Initialize Instance</h1>
+            <p className="text-[#71717A] text-sm">
+              Create the first owner account for {config?.isDesktop ? "the connected server" : "this self-hosted instance"}.
+            </p>
           </div>
         </div>
 
-        <div className="bg-[#121212] border border-[#27272A] rounded-lg p-6 mb-6">
-          <h3 className="text-lg font-bold mb-4" style={{ fontFamily: 'Manrope' }}>Create a Server</h3>
-          <form onSubmit={handleCreate} className="space-y-4">
+        <div className="bg-[#121212] border border-[#27272A] rounded-xl p-6">
+          <div className="flex items-start gap-3 bg-[#18181B] border border-[#27272A] rounded-lg p-4 mb-6">
+            <ShieldCheck size={24} weight="fill" className="text-[#6366F1] shrink-0 mt-0.5" />
+            <div className="text-sm text-[#A1A1AA]">
+              This wizard runs once per instance. The first account becomes the instance owner and can promote additional admins later.
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-md text-sm" data-testid="setup-error">
+                {error}
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Server Name</Label>
+              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Instance Name</Label>
               <Input
-                value={name} onChange={e => setName(e.target.value)}
-                placeholder="My Community" required data-testid="server-name-input"
-                className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
+                value={instanceName}
+                onChange={(e) => setInstanceName(e.target.value)}
+                placeholder="Singra Vox"
+                required
+                data-testid="instance-name-input"
+                className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
               />
             </div>
-            <div className="space-y-2">
-              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Description</Label>
-              <Input
-                value={description} onChange={e => setDescription(e.target.value)}
-                placeholder="What's this server about?" data-testid="server-desc-input"
-                className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
-              />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Owner Email</Label>
+                <Input
+                  type="email"
+                  value={ownerEmail}
+                  onChange={(e) => setOwnerEmail(e.target.value)}
+                  placeholder="admin@example.com"
+                  required
+                  data-testid="setup-owner-email"
+                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Owner Username</Label>
+                <Input
+                  value={ownerUsername}
+                  onChange={(e) => setOwnerUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                  placeholder="owner"
+                  required
+                  data-testid="setup-owner-username"
+                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                />
+              </div>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Display Name</Label>
+                <Input
+                  value={ownerDisplayName}
+                  onChange={(e) => setOwnerDisplayName(e.target.value)}
+                  placeholder="Server Owner"
+                  data-testid="setup-owner-display-name"
+                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Password</Label>
+                <Input
+                  type="password"
+                  value={ownerPassword}
+                  onChange={(e) => setOwnerPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  required
+                  data-testid="setup-owner-password"
+                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                />
+              </div>
+            </div>
+
+            <label className="flex items-start gap-3 rounded-lg border border-[#27272A] bg-[#18181B] px-4 py-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allowOpenSignup}
+                onChange={(e) => setAllowOpenSignup(e.target.checked)}
+                className="mt-1 accent-[#6366F1]"
+                data-testid="setup-open-signup"
+              />
+              <div>
+                <p className="text-sm font-medium text-white">Enable open signup</p>
+                <p className="text-xs text-[#71717A]">New users can register on this instance after setup. Admin promotion stays owner-only.</p>
+              </div>
+            </label>
+
             <Button
-              type="submit" disabled={loading} data-testid="create-server-button"
+              type="submit"
+              disabled={loading}
+              data-testid="setup-submit-button"
               className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
             >
-              {loading ? "Creating..." : "Create Server"}
+              {loading ? "Initializing..." : "Create Owner Account"}
             </Button>
           </form>
-        </div>
-
-        <div className="bg-[#121212] border border-[#27272A] rounded-lg p-6">
-          <h3 className="text-lg font-bold mb-4" style={{ fontFamily: 'Manrope' }}>Join with Invite</h3>
-          <div className="flex gap-2">
-            <Input
-              value={inviteCode} onChange={e => setInviteCode(e.target.value)}
-              placeholder="Paste invite code" data-testid="invite-code-input"
-              className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
-            />
-            <Button
-              onClick={handleJoinInvite} disabled={loading || !inviteCode.trim()} data-testid="join-invite-button"
-              className="bg-[#27272A] hover:bg-[#3f3f46] text-white shrink-0"
-            >
-              Join
-            </Button>
-          </div>
         </div>
       </div>
     </div>
   );
 }
+

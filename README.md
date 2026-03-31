@@ -1,127 +1,78 @@
 # Singra Vox
 
-Privacy-first, self-hosted communication platform. Discord-Funktionalität, TeamSpeak-Administration, ohne Telemetrie.
+Privacy-first, self-hosted communication platform with a shared web client and desktop client.
 
-## Quickstart (Entwicklung)
+## What Changed in v1
+
+- The instance is bootstrapped through `/setup`, not through `ADMIN_EMAIL` or `ADMIN_PASSWORD`.
+- The first account becomes the **instance owner** and can promote additional instance admins later.
+- Open signup is controlled by instance settings after bootstrap.
+- The web app now uses same-origin runtime configuration instead of a build-time backend URL.
+- The desktop shell lives in [`desktop/`](./desktop) and connects to a target instance at runtime.
+- Voice transport is prepared for **LiveKit SFU** with backend-issued voice tokens.
+
+## Quickstart
+
+### Linux installer
+
+```bash
+git clone <your-repo-url> singra-vox
+cd singra-vox
+chmod +x install.sh
+./install.sh
+```
+
+The installer:
+
+1. checks Docker / Docker Compose
+2. generates secrets and voice config
+3. starts the stack
+4. prints the setup URL
+
+After the first start, open `http://your-host:8080/setup` or `https://your-domain/setup` and create the owner account.
+
+### Development
 
 ```bash
 # Backend
 cd backend
-cp .env.example .env          # JWT_SECRET + ADMIN_PASSWORD setzen
 pip install -r requirements.txt
 uvicorn server:app --host 0.0.0.0 --port 8001 --reload
 
-# Frontend
+# Shared web client
 cd frontend
-cp .env.example .env           # REACT_APP_BACKEND_URL setzen
 yarn install
 yarn start
+
+# Desktop shell
+cd desktop
+yarn install
+yarn tauri:dev
 ```
 
-## Quickstart (Docker)
+## Project Structure
 
-```bash
-cd deploy
-cp .env.example .env           # Werte anpassen
-docker compose up -d
-# → http://localhost:8080
+```text
+backend/     FastAPI API, setup bootstrap, auth, communities, voice token endpoint
+frontend/    Shared React client for web and desktop
+desktop/     Tauri shell that wraps the shared React client
+deploy/      Docker Compose, Caddy/nginx templates, LiveKit and turn config
+docs/        Deployment and desktop setup guides
 ```
 
-## Projektstruktur
+## Core Flow
 
-```
-singravox/
-├── backend/                 # FastAPI API-Server
-│   ├── server.py            # Haupt-App + Routen
-│   ├── routes_phase2.py     # Phase-2-Erweiterungen
-│   ├── requirements.txt
-│   ├── .env                 # Lokale Konfiguration
-│   └── .env.example
-│
-├── frontend/                # React Web-Client
-│   ├── src/
-│   │   ├── App.js           # Router + Auth-Wrapper
-│   │   ├── contexts/        # AuthContext
-│   │   ├── lib/             # api.js, crypto.js (E2EE)
-│   │   ├── pages/           # Login, Register, Setup, MainLayout
-│   │   ├── components/
-│   │   │   ├── chat/        # ServerSidebar, ChannelSidebar, ChatArea, MemberSidebar, ThreadPanel
-│   │   │   ├── modals/      # InviteModal, ServerSettingsModal, SearchDialog
-│   │   │   └── ui/          # Shadcn/UI Basis-Komponenten
-│   │   └── index.css        # Design-System
-│   ├── desktop/             # Tauri Desktop-Client (Vorbereitung)
-│   ├── .env.example
-│   └── package.json
-│
-├── deploy/                  # Docker + Deployment
-│   ├── docker-compose.yml         # Dev / Small VPS
-│   ├── docker-compose.prod.yml    # Produktion mit Caddy + TLS
-│   ├── backend.Dockerfile
-│   ├── frontend.Dockerfile
-│   ├── nginx/
-│   │   ├── default.conf          # Frontend SPA-Routing
-│   │   └── proxy.conf            # Reverse-Proxy (API + Frontend)
-│   ├── Caddyfile                  # Produktion: automatisches HTTPS
-│   └── .env.example
-│
-├── docs/
-│   ├── architecture.md            # Architektur + Web/Tauri-Strategie
-│   ├── deployment-linux.md        # Schritt-für-Schritt Linux-Deployment
-│   ├── docker-setup.md            # Docker-Konfiguration im Detail
-│   └── tauri-guide.md             # Tauri Desktop-Client Guide
-│
-└── README.md
-```
+1. The Linux server hosts the instance.
+2. The web client is served by that instance.
+3. The desktop app asks for the instance URL on first launch.
+4. `/setup` creates the first owner account exactly once.
+5. Normal users register afterwards if open signup is enabled.
+6. Only instance admins can create communities.
 
-## Architektur
+## Documentation
 
-```
-┌─────────────────┐    ┌─────────────────┐
-│   Web-Browser   │    │  Tauri Desktop  │
-│   (React SPA)   │    │  (React + Rust) │
-└────────┬────────┘    └────────┬────────┘
-         │  REST + WebSocket    │
-         └──────────┬───────────┘
-                    │
-         ┌──────────▼──────────┐
-         │    Reverse Proxy    │
-         │  (nginx / Caddy)    │
-         └──────────┬──────────┘
-                    │
-    ┌───────────────▼───────────────┐
-    │      Singra Vox Backend       │
-    │    FastAPI + WebSocket        │
-    └───────────────┬───────────────┘
-                    │
-              ┌─────▼─────┐
-              │  MongoDB   │
-              └────────────┘
-```
+- [`docs/deployment-linux.md`](./docs/deployment-linux.md)
+- [`docs/docker-setup.md`](./docs/docker-setup.md)
+- [`docs/tauri-guide.md`](./docs/tauri-guide.md)
+- [`docs/architecture.md`](./docs/architecture.md)
 
-Web-Client und Desktop-Client nutzen **dieselbe API**. Der Server ist unabhängig von beiden Clients deploybar.
-
-## Features
-
-- **Text-Channels** mit Threads, Mentions, Reactions, Dateianhängen, Suche
-- **Voice-Channels** (UI-Status, Architektur vorbereitet für WebRTC/LiveKit)
-- **Direkt-Nachrichten** mit echter Ende-zu-Ende-Verschlüsselung (ECDH + AES-GCM)
-- **Gruppen-DMs**
-- **Rollen & Rechte** (17 granulare Permissions, Channel-Overrides)
-- **Moderation** (Ban, Kick, Mute, Timeout, Audit-Log)
-- **Invite-System**
-- **Ungelesen-Tracking** mit Mention-Badges
-- **Temporäre & Private Räume**
-- **Keine Telemetrie**, keine Third-Party-Analytics
-
-## Dokumentation
-
-| Dokument | Inhalt |
-|----------|--------|
-| [docs/architecture.md](docs/architecture.md) | Architektur, Web + Tauri, Datenmodell |
-| [docs/deployment-linux.md](docs/deployment-linux.md) | Linux-Server-Deployment Schritt für Schritt |
-| [docs/docker-setup.md](docs/docker-setup.md) | Docker-Konfiguration im Detail |
-| [docs/tauri-guide.md](docs/tauri-guide.md) | Tauri Desktop-Client aufsetzen |
-
-## Lizenz
-
-Self-hosted. Kein Vendor-Lock-in. Deine Instanz, deine Daten.

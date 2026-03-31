@@ -1,0 +1,9 @@
+node_modules
+build
+.cache
+.turbo
+.idea
+.vscode
+npm-debug.log*
+yarn-error.log*
+src-tauri

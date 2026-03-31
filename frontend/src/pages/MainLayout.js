@@ -1,21 +1,93 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "@/lib/api";
+import { ShieldCheck, List, UsersThree } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { useRuntime } from "@/contexts/RuntimeContext";
+import api from "@/lib/api";
 import ServerSidebar from "@/components/chat/ServerSidebar";
 import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import ChatArea from "@/components/chat/ChatArea";
 import MemberSidebar from "@/components/chat/MemberSidebar";
-import { ShieldCheck, List, UsersThree, X } from "@phosphor-icons/react";
-import { VoiceEngine } from "@/lib/voiceEngine";
+
+function upsertById(list, item) {
+  const existingIndex = list.findIndex((entry) => entry.id === item.id);
+  if (existingIndex === -1) {
+    return [...list, item];
+  }
+
+  const next = [...list];
+  next[existingIndex] = { ...next[existingIndex], ...item };
+  return next;
+}
+
+function upsertMember(list, member) {
+  const existingIndex = list.findIndex((entry) => entry.user_id === member.user_id);
+  if (existingIndex === -1) {
+    return [...list, member];
+  }
+
+  const next = [...list];
+  next[existingIndex] = {
+    ...next[existingIndex],
+    ...member,
+    user: {
+      ...(next[existingIndex].user || {}),
+      ...(member.user || {}),
+    },
+  };
+  return next;
+}
+
+function removeMember(list, userId) {
+  return list.filter((member) => member.user_id !== userId);
+}
+
+function removeVoiceUser(channels, userId, channelId = null) {
+  return channels.map((channel) => {
+    if (channel.type !== "voice") return channel;
+    if (channelId && channel.id !== channelId) return channel;
+    return {
+      ...channel,
+      voice_states: (channel.voice_states || []).filter((state) => state.user_id !== userId),
+    };
+  });
+}
+
+function upsertVoiceState(channels, channelId, nextState) {
+  return channels.map((channel) => {
+    if (channel.type !== "voice") {
+      return {
+        ...channel,
+        voice_states: removeVoiceUser([channel], nextState.user_id)[0]?.voice_states || channel.voice_states,
+      };
+    }
+
+    if (channel.id === channelId) {
+      const existingStates = (channel.voice_states || []).filter((state) => state.user_id !== nextState.user_id);
+      return {
+        ...channel,
+        voice_states: [...existingStates, nextState],
+      };
+    }
+
+    return {
+      ...channel,
+      voice_states: (channel.voice_states || []).filter((state) => state.user_id !== nextState.user_id),
+    };
+  });
+}
 
 export default function MainLayout() {
-  const { user, token, logout } = useAuth();
+  const { user, token, logout, setUser } = useAuth();
+  const { config } = useRuntime();
   const navigate = useNavigate();
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
   const voiceRef = useRef(null);
+  const currentServerRef = useRef(null);
+  const currentChannelRef = useRef(null);
+  const currentDmUserRef = useRef(null);
 
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
@@ -24,11 +96,8 @@ export default function MainLayout() {
   const [messages, setMessages] = useState([]);
   const [members, setMembers] = useState([]);
   const [roles, setRoles] = useState([]);
-
-  // Mobile responsive
   const [showChannels, setShowChannels] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
-
   const [view, setView] = useState("server");
   const [dmConversations, setDmConversations] = useState([]);
   const [currentDmUser, setCurrentDmUser] = useState(null);
@@ -36,107 +105,113 @@ export default function MainLayout() {
   const [typingUsers, setTypingUsers] = useState({});
   const [unreadMap, setUnreadMap] = useState({});
   const [dmUnread, setDmUnread] = useState(0);
-  const [groupDms, setGroupDms] = useState([]);
 
-  // State refs for WebSocket callback
-  const currentChannelRef = useRef(currentChannel);
-  const currentDmUserRef = useRef(currentDmUser);
-  const currentServerRef = useRef(currentServer);
-  useEffect(() => { currentChannelRef.current = currentChannel; }, [currentChannel]);
-  useEffect(() => { currentDmUserRef.current = currentDmUser; }, [currentDmUser]);
-  useEffect(() => { currentServerRef.current = currentServer; }, [currentServer]);
-
-  // Load servers on mount + init E2EE keys + start unread polling
   useEffect(() => {
-    loadServers();
-    initE2EEKeys();
-    const unreadInterval = setInterval(fetchUnread, 15000);
-    fetchUnread();
-    return () => clearInterval(unreadInterval);
-  }, []);
+    currentServerRef.current = currentServer;
+  }, [currentServer]);
 
-  const initE2EEKeys = async () => {
-    try {
-      const { generateKeyPair, storeKeyPair, loadKeyPair } = await import("@/lib/crypto");
-      let kp = loadKeyPair();
-      if (!kp) {
-        kp = await generateKeyPair();
-        storeKeyPair(kp);
-        await api.post("/keys/bundle", {
-          identity_key: JSON.stringify(kp.publicKey),
-          signed_pre_key: JSON.stringify(kp.publicKey),
-          one_time_pre_keys: []
-        });
-      }
-    } catch (e) {
-      console.warn("E2EE key init:", e);
-    }
-  };
+  useEffect(() => {
+    currentChannelRef.current = currentChannel;
+  }, [currentChannel]);
 
-  const fetchUnread = async () => {
+  useEffect(() => {
+    currentDmUserRef.current = currentDmUser;
+  }, [currentDmUser]);
+
+  const refreshUnread = useCallback(async () => {
     try {
       const res = await api.get("/unread");
       setUnreadMap(res.data.channels || {});
       setDmUnread(res.data.dm_total || 0);
-    } catch {}
-  };
-
-  const loadServers = async () => {
-    try {
-      const res = await api.get("/servers");
-      setServers(res.data);
-      if (res.data.length === 0) {
-        navigate("/setup");
-      } else if (!currentServerRef.current) {
-        selectServer(res.data[0]);
-      }
-    } catch (err) {
-      if (err.response?.status === 401) navigate("/login");
+    } catch {
+      // Keep the last unread snapshot on transient failures.
     }
-  };
+  }, []);
 
-  const selectServer = async (server) => {
-    setCurrentServer(server);
-    setView("server");
-    try {
-      const [chRes, memRes, roleRes] = await Promise.all([
-        api.get(`/servers/${server.id}/channels`),
-        api.get(`/servers/${server.id}/members`),
-        api.get(`/servers/${server.id}/roles`)
-      ]);
-      setChannels(chRes.data);
-      setMembers(memRes.data);
-      setRoles(roleRes.data);
-      const textChs = chRes.data.filter(c => c.type === "text");
-      if (textChs.length > 0) selectChannel(textChs[0]);
-      else setCurrentChannel(null);
-    } catch (err) {
-      toast.error("Failed to load server");
-    }
-  };
-
-  const selectChannel = async (channel) => {
-    setCurrentChannel(channel);
-    if (channel.type === "text") {
-      try {
-        const res = await api.get(`/channels/${channel.id}/messages`);
-        setMessages(res.data);
-      } catch {
-        setMessages([]);
-      }
-    }
-  };
-
-  const loadDmConversations = async () => {
+  const loadDmConversations = useCallback(async () => {
     try {
       const res = await api.get("/dm/conversations");
       setDmConversations(res.data);
     } catch {
       setDmConversations([]);
     }
-  };
+  }, []);
 
-  const selectDmUser = async (dmUser) => {
+  const loadServerSnapshot = useCallback(async (serverId) => {
+    const [channelRes, memberRes, roleRes] = await Promise.all([
+      api.get(`/servers/${serverId}/channels`),
+      api.get(`/servers/${serverId}/members`),
+      api.get(`/servers/${serverId}/roles`),
+    ]);
+
+    setChannels(channelRes.data);
+    setMembers(memberRes.data);
+    setRoles(roleRes.data);
+
+    setCurrentChannel((previousChannel) => {
+      if (previousChannel && channelRes.data.some((channel) => channel.id === previousChannel.id)) {
+        return previousChannel;
+      }
+
+      return channelRes.data.find((channel) => channel.type === "text") || null;
+    });
+  }, []);
+
+  const selectChannel = useCallback(async (channel) => {
+    setCurrentChannel(channel);
+    if (!channel || channel.type !== "text") {
+      setMessages([]);
+      return;
+    }
+
+    try {
+      const res = await api.get(`/channels/${channel.id}/messages`);
+      setMessages(res.data);
+    } catch {
+      setMessages([]);
+    }
+  }, []);
+
+  const selectServer = useCallback(async (server) => {
+    if (!server) return;
+    setCurrentServer(server);
+    setView("server");
+
+    try {
+      await loadServerSnapshot(server.id);
+    } catch {
+      toast.error("Failed to load server");
+    }
+  }, [loadServerSnapshot]);
+
+  const loadServers = useCallback(async () => {
+    try {
+      const res = await api.get("/servers");
+      const nextServers = res.data || [];
+      setServers(nextServers);
+
+      if (nextServers.length === 0) {
+        setCurrentServer(null);
+        setCurrentChannel(null);
+        setChannels([]);
+        setMembers([]);
+        setRoles([]);
+        navigate("/onboarding");
+        return;
+      }
+
+      const activeServer = nextServers.find((server) => server.id === currentServerRef.current?.id) || nextServers[0];
+      await selectServer(activeServer);
+    } catch (error) {
+      if (error.response?.status === 401) {
+        navigate("/login");
+      } else {
+        toast.error("Failed to load servers");
+      }
+    }
+  }, [navigate, selectServer]);
+
+  const selectDmUser = useCallback(async (dmUser) => {
     setCurrentDmUser(dmUser);
     try {
       const res = await api.get(`/dm/${dmUser.id}`);
@@ -144,165 +219,283 @@ export default function MainLayout() {
     } catch {
       setDmMessages([]);
     }
-  };
+  }, []);
 
-  const switchToDm = () => {
+  const switchToDm = useCallback(() => {
     setView("dm");
-    loadDmConversations();
-    loadGroupDms();
-  };
+    setShowChannels(false);
+    setShowMembers(false);
+    void loadDmConversations();
+  }, [loadDmConversations]);
 
-  const loadGroupDms = async () => {
-    try {
-      const res = await api.get("/groups");
-      setGroupDms(res.data);
-    } catch {}
-  };
+  const handleRemovedFromServer = useCallback(async (serverId, reasonLabel) => {
+    if (voiceRef.current) {
+      await voiceRef.current.disconnect();
+      voiceRef.current = null;
+    }
 
-  // WebSocket
-  const connectWs = useCallback(() => {
-    if (!token) return;
-    const base = process.env.REACT_APP_BACKEND_URL.replace('https://', 'wss://').replace('http://', 'ws://');
-    const ws = new WebSocket(`${base}/api/ws?token=${token}`);
-    wsRef.current = ws;
+    setChannels([]);
+    setMembers([]);
+    setRoles([]);
+    setMessages([]);
+    setCurrentChannel(null);
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        handleWsEvent(data);
-      } catch {}
-    };
+    if (reasonLabel) {
+      toast.error(reasonLabel);
+    }
 
-    ws.onclose = () => {
-      reconnectTimer.current = setTimeout(connectWs, 3000);
-    };
+    await loadServers();
+  }, [loadServers]);
 
-    ws.onerror = () => ws.close();
-  }, [token]);
-
-  useEffect(() => {
-    if (token) connectWs();
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-    };
-  }, [token, connectWs]);
-
-  const handleWsEvent = useCallback((data) => {
+  const handleWsEvent = useCallback(async (data) => {
     switch (data.type) {
       case "new_message":
         if (data.channel_id === currentChannelRef.current?.id) {
-          setMessages(prev => [...prev, data.message]);
+          setMessages((previous) => previous.some((message) => message.id === data.message.id) ? previous : [...previous, data.message]);
+        } else {
+          void refreshUnread();
         }
         break;
+
       case "message_edit":
-        setMessages(prev => prev.map(m => m.id === data.message.id ? data.message : m));
+        setMessages((previous) => previous.map((message) => message.id === data.message.id ? data.message : message));
         break;
+
       case "message_delete":
-        setMessages(prev => prev.filter(m => m.id !== data.message_id));
+        setMessages((previous) => previous.filter((message) => message.id !== data.message_id));
         break;
-      case "dm_message":
-        if (data.message.sender_id === currentDmUserRef.current?.id) {
-          setDmMessages(prev => [...prev, data.message]);
-        }
-        toast.info(`DM from ${data.message.sender?.display_name || 'someone'}`);
-        break;
+
       case "typing":
-        setTypingUsers(prev => {
-          const ch = { ...(prev[data.channel_id] || {}), [data.user_id]: data.username };
-          return { ...prev, [data.channel_id]: ch };
+        setTypingUsers((previous) => {
+          const channelTyping = { ...(previous[data.channel_id] || {}), [data.user_id]: data.username };
+          return { ...previous, [data.channel_id]: channelTyping };
         });
-        setTimeout(() => {
-          setTypingUsers(prev => {
-            const ch = { ...(prev[data.channel_id] || {}) };
-            delete ch[data.user_id];
-            return { ...prev, [data.channel_id]: ch };
+        window.setTimeout(() => {
+          setTypingUsers((previous) => {
+            const channelTyping = { ...(previous[data.channel_id] || {}) };
+            delete channelTyping[data.user_id];
+            return { ...previous, [data.channel_id]: channelTyping };
           });
         }, 3000);
         break;
+
+      case "dm_message":
+        if (data.message.sender_id === currentDmUserRef.current?.id) {
+          setDmMessages((previous) => previous.some((message) => message.id === data.message.id) ? previous : [...previous, data.message]);
+        }
+        void loadDmConversations();
+        void refreshUnread();
+        break;
+
+      case "server_updated":
+        setServers((previous) => upsertById(previous, data.server));
+        if (currentServerRef.current?.id === data.server.id) {
+          setCurrentServer((previous) => ({ ...(previous || {}), ...data.server }));
+        }
+        break;
+
       case "channel_create":
-        setChannels(prev => [...prev, data.channel]);
+        setChannels((previous) => previous.some((channel) => channel.id === data.channel.id) ? previous : [...previous, data.channel]);
         break;
+
+      case "channel_updated":
+        setChannels((previous) => previous.map((channel) => channel.id === data.channel.id ? { ...channel, ...data.channel } : channel));
+        if (currentChannelRef.current?.id === data.channel.id) {
+          setCurrentChannel((previous) => ({ ...(previous || {}), ...data.channel }));
+        }
+        break;
+
       case "channel_delete":
-        setChannels(prev => prev.filter(c => c.id !== data.channel_id));
+        setChannels((previous) => previous.filter((channel) => channel.id !== data.channel_id));
+        if (currentChannelRef.current?.id === data.channel_id) {
+          setCurrentChannel(null);
+          setMessages([]);
+        }
         break;
-      case "voice_join":
-        setChannels(prev => prev.map(c => {
-          if (c.id === data.channel_id) {
-            const states = [...(c.voice_states || []), data.state];
-            return { ...c, voice_states: states };
-          }
-          return c;
-        }));
+
+      case "role_created":
+        setRoles((previous) => previous.some((role) => role.id === data.role.id) ? previous : [...previous, data.role]);
         break;
-      case "voice_leave":
-        setChannels(prev => prev.map(c => {
-          if (c.id === data.channel_id) {
-            return { ...c, voice_states: (c.voice_states || []).filter(s => s.user_id !== data.user_id) };
-          }
-          return c;
-        }));
+
+      case "role_updated":
+        setRoles((previous) => previous.map((role) => role.id === data.role.id ? { ...role, ...data.role } : role));
         break;
-      case "voice_state_update":
-        setChannels(prev => prev.map(c => {
-          if (c.id === data.channel_id) {
-            return { ...c, voice_states: (c.voice_states || []).map(s => s.user_id === data.user_id ? { ...s, ...data.state } : s) };
-          }
-          return c;
-        }));
+
+      case "role_deleted":
+        setRoles((previous) => previous.filter((role) => role.id !== data.role_id));
+        setMembers((previous) => previous.map((member) => ({
+          ...member,
+          roles: (member.roles || []).filter((roleId) => roleId !== data.role_id),
+        })));
         break;
+
       case "member_joined":
-        setMembers(prev => [...prev, { user: data.user, roles: [], user_id: data.user.id }]);
+        if (data.member) {
+          setMembers((previous) => upsertMember(previous, data.member));
+        }
         break;
+
+      case "member_updated":
+        if (data.member) {
+          setMembers((previous) => upsertMember(previous, data.member));
+        }
+        break;
+
+      case "presence_update":
+        setMembers((previous) => previous.map((member) => (
+          member.user_id === data.user_id
+            ? { ...member, user: { ...(member.user || {}), ...(data.user || {}) } }
+            : member
+        )));
+        setDmConversations((previous) => previous.map((conversation) => (
+          conversation.user?.id === data.user_id
+            ? { ...conversation, user: { ...(conversation.user || {}), ...(data.user || {}) } }
+            : conversation
+        )));
+        break;
+
       case "member_kicked":
       case "member_banned":
-        setMembers(prev => prev.filter(m => m.user_id !== data.user_id));
+        setMembers((previous) => removeMember(previous, data.user_id));
+        setChannels((previous) => removeVoiceUser(previous, data.user_id));
+        if (data.user_id === user?.id && data.server_id === currentServerRef.current?.id) {
+          await handleRemovedFromServer(
+            data.server_id,
+            data.type === "member_kicked" ? "You were removed from this server" : "You were banned from this server",
+          );
+        }
         break;
-      // WebRTC voice signaling
+
+      case "voice_join":
+        setChannels((previous) => upsertVoiceState(previous, data.channel_id, data.state));
+        break;
+
+      case "voice_leave":
+        setChannels((previous) => removeVoiceUser(previous, data.user_id, data.channel_id));
+        break;
+
+      case "voice_state_update":
+        setChannels((previous) => previous.map((channel) => {
+          if (channel.id !== data.channel_id) return channel;
+          return {
+            ...channel,
+            voice_states: (channel.voice_states || []).map((state) => (
+              state.user_id === data.user_id ? { ...state, ...data.state } : state
+            )),
+          };
+        }));
+        break;
+
+      case "voice_force_leave":
+        if (voiceRef.current) {
+          await voiceRef.current.disconnect();
+          voiceRef.current = null;
+        }
+        setChannels((previous) => removeVoiceUser(previous, user?.id, data.channel_id));
+        break;
+
       case "voice_offer":
       case "voice_answer":
       case "voice_ice":
         voiceRef.current?.handleSignal(data);
         break;
+
       default:
         break;
     }
-  }, []);
+  }, [handleRemovedFromServer, loadDmConversations, refreshUnread, user?.id]);
 
-  const sendSignal = useCallback((data) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(data));
+  const connectWs = useCallback(() => {
+    if (!token || !config?.wsBase) return;
+
+    if (wsRef.current) {
+      wsRef.current.close();
     }
-  }, []);
+
+    const ws = new WebSocket(`${config.wsBase}/api/ws?token=${token}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        void handleWsEvent(data);
+      } catch {
+        // Ignore malformed socket payloads.
+      }
+    };
+
+    ws.onclose = () => {
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+      }
+      reconnectTimer.current = setTimeout(connectWs, 3000);
+    };
+
+    ws.onerror = () => ws.close();
+  }, [config?.wsBase, handleWsEvent, token]);
+
+  useEffect(() => {
+    void loadServers();
+    const unreadInterval = window.setInterval(refreshUnread, 15000);
+    void refreshUnread();
+    return () => window.clearInterval(unreadInterval);
+  }, [loadServers, refreshUnread]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    connectWs();
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+      }
+    };
+  }, [connectWs, token]);
+
+  useEffect(() => {
+    if (currentChannel?.type === "text") {
+      void selectChannel(currentChannel);
+    }
+  }, [currentChannel, selectChannel]);
 
   const sendTyping = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && currentChannel) {
-      wsRef.current.send(JSON.stringify({ type: "typing", channel_id: currentChannel.id }));
+    if (wsRef.current?.readyState === WebSocket.OPEN && currentChannelRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "typing", channel_id: currentChannelRef.current.id }));
     }
-  }, [currentChannel]);
+  }, []);
 
-  const refreshChannels = async () => {
-    if (!currentServer) return;
+  const refreshChannels = useCallback(async () => {
+    if (!currentServerRef.current) return;
     try {
-      const res = await api.get(`/servers/${currentServer.id}/channels`);
+      const res = await api.get(`/servers/${currentServerRef.current.id}/channels`);
       setChannels(res.data);
-    } catch {}
-  };
+    } catch {
+      // keep last state
+    }
+  }, []);
 
-  const refreshMembers = async () => {
-    if (!currentServer) return;
+  const refreshMembers = useCallback(async () => {
+    if (!currentServerRef.current) return;
     try {
-      const res = await api.get(`/servers/${currentServer.id}/members`);
+      const res = await api.get(`/servers/${currentServerRef.current.id}/members`);
       setMembers(res.data);
-    } catch {}
-  };
+    } catch {
+      // keep last state
+    }
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#0A0A0A]" data-testid="main-layout">
       <ServerSidebar
         servers={servers}
         currentServer={currentServer}
-        onSelectServer={(s) => { selectServer(s); setShowChannels(false); }}
+        onSelectServer={(server) => {
+          void selectServer(server);
+          setShowChannels(false);
+        }}
         onRefreshServers={loadServers}
         view={view}
         onSwitchToDm={switchToDm}
@@ -313,38 +506,40 @@ export default function MainLayout() {
 
       {view === "server" && currentServer ? (
         <>
-          {/* Mobile backdrop */}
           {showChannels && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setShowChannels(false)} />}
           {showMembers && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setShowMembers(false)} />}
 
-          {/* Channel sidebar: always on desktop, toggle on mobile */}
-          <div className={`${showChannels ? 'fixed left-[72px] top-0 bottom-0 z-50' : 'hidden'} md:relative md:block`}>
+          <div className={`${showChannels ? "fixed left-[72px] top-0 bottom-0 z-50 h-full" : "hidden"} md:relative md:block md:h-full`}>
             <ChannelSidebar
               server={currentServer}
               channels={channels}
               currentChannel={currentChannel}
-              onSelectChannel={(ch) => { selectChannel(ch); setShowChannels(false); }}
+              onSelectChannel={(channel) => {
+                void selectChannel(channel);
+                setShowChannels(false);
+              }}
               onRefreshChannels={refreshChannels}
               user={user}
               members={members}
               roles={roles}
-              onRefreshMembers={refreshMembers}
               unreadMap={unreadMap}
               voiceEngineRef={voiceRef}
-              sendSignal={sendSignal}
+              onLogout={logout}
+              onUserUpdated={setUser}
             />
           </div>
 
-          <div className="flex-1 flex flex-col min-w-0">
-            {/* Mobile toolbar */}
+          <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <div className="flex items-center gap-2 px-3 py-2 border-b border-[#27272A] md:hidden shrink-0" data-testid="mobile-toolbar">
-              <button onClick={() => setShowChannels(true)} data-testid="toggle-channels-mobile"
-                className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]"><List size={18} /></button>
-              <span className="text-sm font-bold text-white flex-1 truncate" style={{ fontFamily: 'Manrope' }}>
+              <button onClick={() => setShowChannels(true)} data-testid="toggle-channels-mobile" className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]">
+                <List size={18} />
+              </button>
+              <span className="text-sm font-bold text-white flex-1 truncate" style={{ fontFamily: "Manrope" }}>
                 {currentChannel ? `# ${currentChannel.name}` : currentServer?.name}
               </span>
-              <button onClick={() => setShowMembers(true)} data-testid="toggle-members-mobile"
-                className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]"><UsersThree size={18} /></button>
+              <button onClick={() => setShowMembers(true)} data-testid="toggle-members-mobile" className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]">
+                <UsersThree size={18} />
+              </button>
             </div>
             <ChatArea
               channel={currentChannel}
@@ -357,58 +552,54 @@ export default function MainLayout() {
             />
           </div>
 
-          {/* Member sidebar: always on desktop, toggle on mobile */}
-          <div className={`${showMembers ? 'fixed right-0 top-0 bottom-0 z-50' : 'hidden'} md:relative md:block`}>
+          <div className={`${showMembers ? "fixed right-0 top-0 bottom-0 z-50 h-full" : "hidden"} md:relative md:block md:h-full`}>
             <MemberSidebar
               members={members}
               roles={roles}
               serverId={currentServer?.id}
+              server={currentServer}
               user={user}
               onStartDM={(dmUser) => {
                 switchToDm();
-                selectDmUser(dmUser);
+                void selectDmUser(dmUser);
                 setShowMembers(false);
               }}
               onRefreshMembers={refreshMembers}
             />
           </div>
-          />
         </>
       ) : view === "dm" ? (
         <>
-          <div className="w-[240px] bg-[#121212] border-r border-[#27272A] flex flex-col" data-testid="dm-sidebar">
+          <div className="w-[280px] bg-[#121212] border-r border-[#27272A] flex flex-col" data-testid="dm-sidebar">
             <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0">
-              <h3 className="text-sm font-bold text-white" style={{ fontFamily: 'Manrope' }}>Direct Messages</h3>
+              <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>Direct Messages</h3>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-              {dmConversations.map(conv => (
+              {dmConversations.map((conversation) => (
                 <button
-                  key={conv.user.id}
-                  onClick={() => selectDmUser(conv.user)}
-                  data-testid={`dm-conv-${conv.user.username}`}
+                  key={conversation.user.id}
+                  onClick={() => void selectDmUser(conversation.user)}
+                  data-testid={`dm-conv-${conversation.user.username}`}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors ${
-                    currentDmUser?.id === conv.user.id ? 'bg-[#27272A] text-white' : 'text-[#A1A1AA] hover:bg-[#27272A]/50 hover:text-white'
+                    currentDmUser?.id === conversation.user.id
+                      ? "bg-[#27272A] text-white"
+                      : "text-[#A1A1AA] hover:bg-[#27272A]/50 hover:text-white"
                   }`}
                 >
                   <div className="w-8 h-8 rounded-full bg-[#27272A] flex items-center justify-center text-sm font-bold shrink-0">
-                    {conv.user.display_name?.[0]?.toUpperCase() || '?'}
+                    {conversation.user.display_name?.[0]?.toUpperCase() || "?"}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{conv.user.display_name}</p>
-                    <p className="text-xs text-[#71717A] truncate">{conv.last_message?.content}</p>
+                    <p className="text-sm font-medium truncate">{conversation.user.display_name}</p>
+                    <p className="text-xs text-[#71717A] truncate">{conversation.last_message?.content}</p>
                   </div>
-                  {conv.unread_count > 0 && (
+                  {conversation.unread_count > 0 && (
                     <span className="bg-[#6366F1] text-white text-xs rounded-full w-5 h-5 flex items-center justify-center shrink-0">
-                      {conv.unread_count}
+                      {conversation.unread_count}
                     </span>
                   )}
                 </button>
               ))}
-              {dmConversations.length === 0 && (
-                <p className="text-[#71717A] text-xs text-center mt-8 px-4">
-                  No conversations yet. Start a DM from a member's profile.
-                </p>
-              )}
             </div>
           </div>
 
@@ -422,29 +613,29 @@ export default function MainLayout() {
                 <span className="ml-2 text-xs text-[#71717A]">@{currentDmUser.username}</span>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {dmMessages.map(msg => (
-                  <div key={msg.id} className="flex gap-3 fade-in" data-testid={`dm-msg-${msg.id}`}>
+                {dmMessages.map((message) => (
+                  <div key={message.id} className="flex gap-3 fade-in" data-testid={`dm-msg-${message.id}`}>
                     <div className="w-8 h-8 rounded-full bg-[#27272A] flex items-center justify-center text-xs font-bold shrink-0">
-                      {msg.sender?.display_name?.[0]?.toUpperCase() || '?'}
+                      {message.sender?.display_name?.[0]?.toUpperCase() || "?"}
                     </div>
                     <div>
                       <div className="flex items-baseline gap-2">
-                        <span className="text-sm font-semibold">{msg.sender?.display_name}</span>
-                        <span className="text-[10px] text-[#71717A]">{new Date(msg.created_at).toLocaleTimeString()}</span>
+                        <span className="text-sm font-semibold">{message.sender?.display_name}</span>
+                        <span className="text-[10px] text-[#71717A]">{new Date(message.created_at).toLocaleTimeString()}</span>
                       </div>
                       <p className="text-sm text-[#E4E4E7] mt-0.5">
-                        {msg.is_encrypted ? (
+                        {message.is_encrypted ? (
                           <span className="flex items-center gap-1">
                             <ShieldCheck size={12} weight="fill" className="text-[#6366F1]" />
-                            <DecryptedContent msg={msg} currentUserId={user?.id} />
+                            <DecryptedContent msg={message} currentUserId={user?.id} />
                           </span>
-                        ) : msg.content}
+                        ) : message.content}
                       </p>
                     </div>
                   </div>
                 ))}
               </div>
-              <DmInput userId={currentDmUser.id} onSent={(msg) => setDmMessages(prev => [...prev, msg])} />
+              <DmInput userId={currentDmUser.id} onSent={(message) => setDmMessages((previous) => [...previous, message])} />
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]">
@@ -467,30 +658,35 @@ function DmInput({ userId, onSent }) {
   const [e2eeReady, setE2eeReady] = useState(false);
   const sharedKeyRef = useRef(null);
 
-  useEffect(() => {
-    initE2EE();
-  }, [userId]);
-
-  const initE2EE = async () => {
+  const initE2EE = useCallback(async () => {
     try {
       const { loadKeyPair, deriveSharedKey } = await import("@/lib/crypto");
-      const kp = loadKeyPair();
-      if (!kp) { setE2eeReady(false); return; }
+      const keyPair = loadKeyPair();
+      if (!keyPair) {
+        setE2eeReady(false);
+        return;
+      }
       const res = await api.get(`/keys/${userId}/bundle`);
       if (res.data.identity_key) {
         const recipientKey = JSON.parse(res.data.identity_key);
-        const shared = await deriveSharedKey(kp.privateKey, recipientKey);
-        sharedKeyRef.current = shared;
+        sharedKeyRef.current = await deriveSharedKey(keyPair.privateKey, recipientKey);
         setE2eeReady(true);
+      } else {
+        setE2eeReady(false);
       }
     } catch {
       setE2eeReady(false);
     }
-  };
+  }, [userId]);
 
-  const send = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    void initE2EE();
+  }, [initE2EE]);
+
+  const send = async (event) => {
+    event.preventDefault();
     if (!content.trim() || sending) return;
+
     setSending(true);
     try {
       let payload = { content: content.trim(), is_encrypted: false };
@@ -501,7 +697,7 @@ function DmInput({ userId, onSent }) {
           content: "[E2EE encrypted message]",
           encrypted_content: encrypted.ciphertext,
           nonce: encrypted.nonce,
-          is_encrypted: true
+          is_encrypted: true,
         };
       }
       const res = await api.post(`/dm/${userId}`, payload);
@@ -518,12 +714,16 @@ function DmInput({ userId, onSent }) {
     <form onSubmit={send} className="p-4 border-t border-[#27272A]">
       <div className="flex gap-2">
         <input
-          value={content} onChange={e => setContent(e.target.value)}
-          placeholder={e2eeReady ? "Encrypted message..." : "Send a message..."} data-testid="dm-message-input"
+          value={content}
+          onChange={(event) => setContent(event.target.value)}
+          placeholder={e2eeReady ? "Encrypted message..." : "Send a message..."}
+          data-testid="dm-message-input"
           className="flex-1 bg-[#27272A] border border-[#27272A]/50 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#52525B] outline-none focus:border-[#6366F1]/50"
         />
         <button
-          type="submit" disabled={!content.trim() || sending} data-testid="dm-send-button"
+          type="submit"
+          disabled={!content.trim() || sending}
+          data-testid="dm-send-button"
           className="bg-[#6366F1] hover:bg-[#4F46E5] text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
         >
           Send
@@ -538,26 +738,22 @@ function DmInput({ userId, onSent }) {
   );
 }
 
-
 function DecryptedContent({ msg, currentUserId }) {
   const [text, setText] = useState(null);
 
-  useEffect(() => {
-    if (msg.is_encrypted && msg.encrypted_content && msg.nonce) {
-      decrypt();
-    }
-  }, [msg.id]);
-
-  const decrypt = async () => {
+  const decrypt = useCallback(async () => {
     try {
       const { loadKeyPair, deriveSharedKey, decryptMessage } = await import("@/lib/crypto");
-      const kp = loadKeyPair();
-      if (!kp) { setText("[Cannot decrypt - no keys]"); return; }
+      const keyPair = loadKeyPair();
+      if (!keyPair) {
+        setText("[Cannot decrypt - no keys]");
+        return;
+      }
       const otherId = msg.sender_id === currentUserId ? msg.receiver_id : msg.sender_id;
       const res = await api.get(`/keys/${otherId}/bundle`);
       if (res.data.identity_key) {
-        const otherPub = JSON.parse(res.data.identity_key);
-        const shared = await deriveSharedKey(kp.privateKey, otherPub);
+        const otherPublicKey = JSON.parse(res.data.identity_key);
+        const shared = await deriveSharedKey(keyPair.privateKey, otherPublicKey);
         const plain = await decryptMessage(shared, msg.encrypted_content, msg.nonce);
         setText(plain);
       } else {
@@ -566,7 +762,13 @@ function DecryptedContent({ msg, currentUserId }) {
     } catch {
       setText("[Encrypted message]");
     }
-  };
+  }, [currentUserId, msg]);
+
+  useEffect(() => {
+    if (msg.is_encrypted && msg.encrypted_content && msg.nonce) {
+      void decrypt();
+    }
+  }, [decrypt, msg.encrypted_content, msg.is_encrypted, msg.nonce]);
 
   if (!msg.is_encrypted) return msg.content;
   return <span className="italic text-[#A1A1AA]">{text || "Decrypting..."}</span>;

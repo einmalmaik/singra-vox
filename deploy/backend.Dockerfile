@@ -13,8 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py .
-COPY routes_phase2.py .
+COPY . .
 
 # Non-root user for security
 RUN useradd -m -r singravox && chown -R singravox:singravox /app

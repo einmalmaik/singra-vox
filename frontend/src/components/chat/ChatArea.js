@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  Hash, PaperPlaneRight, Paperclip, ChatText, Pencil, Trash, PushPin, PushPinSlash
+  Hash, PaperPlaneRight, Paperclip, ChatText, Pencil, Trash, PushPin, PushPinSlash, X
 } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -11,12 +11,23 @@ import SearchDialog from "@/components/modals/SearchDialog";
 import ThreadPanel from "@/components/chat/ThreadPanel";
 import PinnedMessagesPanel from "@/components/chat/PinnedMessagesPanel";
 import NotificationPanel from "@/components/chat/NotificationPanel";
+import { useRuntime } from "@/contexts/RuntimeContext";
 
 const REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{1F440}", "\u{2705}", "\u{1F602}", "\u{1F914}"];
 
+function renderMessageParts(content = "") {
+  return content.split(/(@\w+)/g).map((part, index) => (
+    part.startsWith("@")
+      ? <span key={`${part}-${index}`} className="text-[#6366F1] font-medium bg-[#6366F1]/10 rounded px-0.5">{part}</span>
+      : <span key={`${part}-${index}`}>{part}</span>
+  ));
+}
+
 export default function ChatArea({ channel, messages, setMessages, user, serverId, onSendTyping, typingUsers }) {
+  const { config } = useRuntime();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editContent, setEditContent] = useState("");
   const [threadMsgId, setThreadMsgId] = useState(null);
@@ -41,17 +52,19 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
 
   const handleSend = async (e) => {
     e.preventDefault();
-    if (!content.trim() || !channel || sending) return;
+    if ((!content.trim() && pendingAttachments.length === 0) || !channel || sending) return;
     setSending(true);
     try {
       const res = await api.post(`/channels/${channel.id}/messages`, {
-        content: content.trim(), attachments: []
+        content: content.trim(),
+        attachments: pendingAttachments,
       });
       setMessages(prev => {
         if (prev.find(m => m.id === res.data.id)) return prev;
         return [...prev, res.data];
       });
       setContent("");
+      setPendingAttachments([]);
     } catch (err) {
       toast.error("Failed to send message");
     } finally {
@@ -130,12 +143,10 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
         const uploadRes = await api.post('/upload', {
           data: base64, name: file.name, type: file.type
         });
-        // Send message with attachment
-        const res = await api.post(`/channels/${channel.id}/messages`, {
-          content: file.name,
-          attachments: [{ id: uploadRes.data.id, name: file.name, type: file.type, url: uploadRes.data.url }]
-        });
-        setMessages(prev => [...prev, res.data]);
+        setPendingAttachments(prev => [
+          ...prev,
+          { id: uploadRes.data.id, name: file.name, type: file.type, url: uploadRes.data.url },
+        ]);
       } catch {
         toast.error("Upload failed");
       }
@@ -145,6 +156,9 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
   };
 
   const typingNames = Object.values(typingUsers);
+  const removePendingAttachment = (attachmentId) => {
+    setPendingAttachments(prev => prev.filter((attachment) => attachment.id !== attachmentId));
+  };
 
   if (!channel) {
     return (
@@ -155,7 +169,7 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
   }
 
   return (
-    <div className="flex-1 flex min-w-0" data-testid="chat-area">
+    <div className="flex-1 flex min-w-0 min-h-0" data-testid="chat-area">
       <div className="flex-1 flex flex-col bg-[#18181B] min-w-0">
         {/* Header */}
         <div className="h-12 flex items-center justify-between px-4 border-b border-[#27272A] shrink-0" data-testid="chat-header">
@@ -260,14 +274,11 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
                           <PushPin size={10} weight="fill" /> Pinned
                         </div>
                       )}
-                      <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
-                      {msg.content?.split(/(@\w+)/g).map((part, pi) =>
-                        part.startsWith('@') ?
-                          <span key={pi} className="text-[#6366F1] font-medium bg-[#6366F1]/10 rounded px-0.5">{part}</span> :
-                          <span key={pi}>{part}</span>
-                      )}
-                    </p>
-                  )}
+                      {msg.content ? (
+                        <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
+                          {renderMessageParts(msg.content)}
+                        </p>
+                      ) : null}
 
                   {/* Attachments */}
                   {msg.attachments?.length > 0 && (
@@ -275,10 +286,10 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
                       {msg.attachments.map((att, j) => (
                         <div key={j}>
                           {att.type?.startsWith('image/') ? (
-                            <img src={att.url ? `${process.env.REACT_APP_BACKEND_URL}${att.url}` : att.data} alt={att.name}
+                            <img src={att.url ? `${config?.assetBase || ""}${att.url}` : att.data} alt={att.name}
                               className="max-w-md max-h-80 rounded-md border border-[#27272A]" />
                           ) : (
-                            <a href={att.url ? `${process.env.REACT_APP_BACKEND_URL}${att.url}` : '#'}
+                            <a href={att.url ? `${config?.assetBase || ""}${att.url}` : '#'}
                               className="flex items-center gap-2 bg-[#27272A] rounded px-3 py-2 text-xs text-[#A1A1AA] hover:text-white transition-colors inline-block"
                               target="_blank" rel="noopener noreferrer">
                               <Paperclip size={14} /> {att.name}
@@ -389,6 +400,24 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
 
         {/* Input */}
         <form onSubmit={handleSend} className="p-4 pt-2" data-testid="message-form">
+          {pendingAttachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {pendingAttachments.map((attachment) => (
+                <div key={attachment.id} className="flex items-center gap-2 rounded-md border border-[#27272A] bg-[#121212] px-3 py-2 text-xs text-[#E4E4E7]">
+                  <Paperclip size={14} className="text-[#71717A]" />
+                  <span className="max-w-[240px] truncate">{attachment.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removePendingAttachment(attachment.id)}
+                    className="text-[#71717A] transition-colors hover:text-white"
+                    data-testid={`remove-attachment-${attachment.id}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2 bg-[#27272A] rounded-lg border border-[#27272A]/50 px-3 py-2.5">
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,.pdf,.txt,.zip,.doc,.docx" />
             <button type="button" onClick={() => fileInputRef.current?.click()} data-testid="file-upload-button"
@@ -402,7 +431,7 @@ export default function ChatArea({ channel, messages, setMessages, user, serverI
               data-testid="message-input"
               className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none"
             />
-            <button type="submit" disabled={!content.trim() || sending} data-testid="send-message-button"
+            <button type="submit" disabled={(!content.trim() && pendingAttachments.length === 0) || sending} data-testid="send-message-button"
               className="text-[#6366F1] hover:text-[#4F46E5] disabled:text-[#52525B] transition-colors shrink-0">
               <PaperPlaneRight size={20} weight="fill" />
             </button>

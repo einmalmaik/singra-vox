@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRuntime } from "@/contexts/RuntimeContext";
 import { formatError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  const { setupStatus } = useRuntime();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -60,7 +62,9 @@ export default function LoginPage() {
           </div>
 
           <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>Welcome back</h2>
-          <p className="text-[#71717A] text-sm mb-8">Sign in to your account</p>
+          <p className="text-[#71717A] text-sm mb-8">
+            Sign in to {setupStatus?.instance_name || "your self-hosted instance"}
+          </p>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
@@ -92,12 +96,14 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <p className="text-center text-[#71717A] text-sm mt-6">
-            No account yet?{" "}
-            <Link to="/register" className="text-[#6366F1] hover:text-[#4F46E5] font-medium" data-testid="register-link">
-              Create one
-            </Link>
-          </p>
+          {setupStatus?.allow_open_signup && (
+            <p className="text-center text-[#71717A] text-sm mt-6">
+              No account yet?{" "}
+              <Link to="/register" className="text-[#6366F1] hover:text-[#4F46E5] font-medium" data-testid="register-link">
+                Create one
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>

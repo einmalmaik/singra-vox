@@ -1,14 +1,15 @@
-import { useState } from "react";
-import { Crown, Shield, ChatCircle, UserMinus, Prohibit, Timer } from "@phosphor-icons/react";
+import { Crown, ChatCircle, UserMinus, Prohibit, Timer } from "@phosphor-icons/react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import api from "@/lib/api";
+import api, { formatError } from "@/lib/api";
 import { toast } from "sonner";
+import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
 
-export default function MemberSidebar({ members, roles, serverId, user, onStartDM, onRefreshMembers }) {
+export default function MemberSidebar({ members, roles, serverId, server, user, onStartDM, onRefreshMembers }) {
   const onlineMembers = members.filter(m => m.user?.status === "online");
   const offlineMembers = members.filter(m => m.user?.status !== "online");
+  const capabilities = buildWorkspaceCapabilities({ user, server, members, roles });
 
   const getRoleColor = (member) => {
     if (!member.roles?.length || !roles?.length) return "#A1A1AA";
@@ -32,7 +33,7 @@ export default function MemberSidebar({ members, roles, serverId, user, onStartD
       toast.success("Member kicked");
       onRefreshMembers();
     } catch (err) {
-      toast.error("Failed to kick member");
+      toast.error(formatError(err.response?.data?.detail));
     }
   };
 
@@ -42,7 +43,7 @@ export default function MemberSidebar({ members, roles, serverId, user, onStartD
       toast.success("Member banned");
       onRefreshMembers();
     } catch (err) {
-      toast.error("Failed to ban member");
+      toast.error(formatError(err.response?.data?.detail));
     }
   };
 
@@ -51,7 +52,7 @@ export default function MemberSidebar({ members, roles, serverId, user, onStartD
       await api.post(`/servers/${serverId}/moderation/mute`, { user_id: userId, duration_minutes: 10 });
       toast.success("Member muted for 10 minutes");
     } catch (err) {
-      toast.error("Failed to mute member");
+      toast.error(formatError(err.response?.data?.detail));
     }
   };
 
@@ -59,6 +60,7 @@ export default function MemberSidebar({ members, roles, serverId, user, onStartD
     const isOnline = member.user?.status === "online";
     const isSelf = member.user?.id === user?.id;
     const isAdmin = isOwnerOrAdmin(member);
+    const canModerate = capabilities.canMuteMembers || capabilities.canKickMembers || capabilities.canBanMembers;
 
     return (
       <DropdownMenu>
@@ -101,19 +103,25 @@ export default function MemberSidebar({ members, roles, serverId, user, onStartD
                 data-testid={`dm-member-${member.user?.username}`}>
                 <ChatCircle size={16} className="mr-2" /> Message
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-[#27272A]" />
-              <DropdownMenuItem onClick={() => handleMute(member.user?.id)} className="cursor-pointer text-[#F59E0B] focus:text-[#F59E0B] focus:bg-[#27272A]"
-                data-testid={`mute-member-${member.user?.username}`}>
-                <Timer size={16} className="mr-2" /> Mute (10 min)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleKick(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
-                data-testid={`kick-member-${member.user?.username}`}>
-                <UserMinus size={16} className="mr-2" /> Kick
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleBan(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
-                data-testid={`ban-member-${member.user?.username}`}>
-                <Prohibit size={16} className="mr-2" /> Ban
-              </DropdownMenuItem>
+              {canModerate && <DropdownMenuSeparator className="bg-[#27272A]" />}
+              {capabilities.canMuteMembers && (
+                <DropdownMenuItem onClick={() => handleMute(member.user?.id)} className="cursor-pointer text-[#F59E0B] focus:text-[#F59E0B] focus:bg-[#27272A]"
+                  data-testid={`mute-member-${member.user?.username}`}>
+                  <Timer size={16} className="mr-2" /> Mute (10 min)
+                </DropdownMenuItem>
+              )}
+              {capabilities.canKickMembers && (
+                <DropdownMenuItem onClick={() => handleKick(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
+                  data-testid={`kick-member-${member.user?.username}`}>
+                  <UserMinus size={16} className="mr-2" /> Kick
+                </DropdownMenuItem>
+              )}
+              {capabilities.canBanMembers && (
+                <DropdownMenuItem onClick={() => handleBan(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
+                  data-testid={`ban-member-${member.user?.username}`}>
+                  <Prohibit size={16} className="mr-2" /> Ban
+                </DropdownMenuItem>
+              )}
             </>
           )}
         </DropdownMenuContent>
@@ -122,8 +130,13 @@ export default function MemberSidebar({ members, roles, serverId, user, onStartD
   };
 
   return (
-    <div className="w-[240px] bg-[#121212] border-l border-[#27272A]/40 flex flex-col shrink-0" data-testid="member-sidebar">
-      <div className="flex-1 overflow-y-auto py-4 px-2">
+    <div className="w-[240px] h-full min-h-0 bg-[#18181B] border-l border-[#27272A]/40 flex flex-col shrink-0" data-testid="member-sidebar">
+      <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0">
+        <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>
+          Members
+        </h3>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto py-4 px-2">
         {onlineMembers.length > 0 && (
           <>
             <p className="text-[#71717A] text-xs font-bold uppercase tracking-[0.2em] px-2 mb-2">

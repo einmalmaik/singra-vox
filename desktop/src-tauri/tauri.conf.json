@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.singravox.app",
   "build": {
-    "beforeBuildCommand": "yarn build",
-    "beforeDevCommand": "yarn start",
+    "beforeBuildCommand": "yarn --cwd ../frontend build",
+    "beforeDevCommand": "yarn --cwd ../frontend start",
     "devUrl": "http://localhost:3000",
-    "frontendDist": "../build"
+    "frontendDist": "../../frontend/build"
   },
   "app": {
     "windows": [
@@ -26,15 +26,8 @@
     }
   },
   "bundle": {
-    "active": true,
+    "active": false,
     "targets": ["deb", "appimage"],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
     "linux": {
       "deb": {
         "depends": ["libwebkit2gtk-4.1-0", "libayatana-appindicator3-1"]

@@ -80,15 +80,15 @@ frontend/
 └── .env.example
 ```
 
-**Prinzip**: Der gesamte `src/`-Ordner ist plattformunabhängig. Tauri nutzt denselben Code – nur der Entry Point und native Features (Tray, Hotkeys, Keychain) werden in `desktop/src-tauri/` ergänzt.
+**Prinzip**: Der gesamte `frontend/src/`-Ordner ist plattformunabhängig. Web und Desktop nutzen denselben React-Client. Die Tauri-Hülle in `desktop/src-tauri/` ergänzt nur Runtime-Verbindung, Secret-Storage und native Desktop-Funktionen.
 
 ## API-Design-Prinzipien
 
-1. **Konfigurierbare Base-URL**: `REACT_APP_BACKEND_URL` (Web) bzw. Settings-Dialog (Desktop)
-2. **Cookie-basierte Auth**: httpOnly Cookies für Sessions, Bearer-Token als Fallback
-3. **WebSocket**: Einzelne persistente Verbindung pro Client für Echtzeit-Events
-4. **REST für CRUD**: Alle Datenoperationen über REST-Endpoints
-5. **Kein Server-Side Rendering**: Der Server liefert nur API-Daten, kein HTML
+1. **Runtime-Config statt Build-Time-URL**: Web nutzt same-origin `/api`, Desktop speichert die Instanz-URL lokal
+2. **Bootstrap über `/setup`**: Die erste Owner-Identität wird einmalig zur Laufzeit erstellt, nicht über Env-Dateien
+3. **Cookie- und Token-Auth**: Web bleibt same-origin mit Cookies, Desktop nutzt Bearer-/Refresh-Tokens
+4. **WebSocket**: Einzelne persistente Verbindung pro Client für Echtzeit-Events
+5. **REST für CRUD**: Alle Datenoperationen über REST-Endpoints
 
 ## Datenmodell
 
@@ -151,8 +151,8 @@ Sender                              Server                         Empfänger
 | Backend | FastAPI (Python) | Rust (Axum + Tokio) |
 | Datenbank | MongoDB | PostgreSQL + SQLX |
 | Cache | – | Redis (optional) |
-| Voice/Media | UI-only | LiveKit SFU |
-| NAT Traversal | – | coturn |
+| Voice/Media | LiveKit Token + Channel State | LiveKit SFU |
+| NAT Traversal | optionales TURN-Profil | coturn |
 | File Storage | MongoDB (Base64) | S3/MinIO |
 | Desktop | – | Tauri 2 |
 | Auth | JWT + bcrypt | JWT + Argon2id + WebAuthn |

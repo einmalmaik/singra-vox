@@ -1,14 +1,4 @@
-# ╔══════════════════════════════════════════════════════╗
-# ║  Singra Vox – Docker Compose (Development / Small)  ║
-# ╚══════════════════════════════════════════════════════╝
-#
-# Usage:
-#   cp .env.example .env    # edit values
-#   docker compose up -d    # start
-#   docker compose logs -f  # watch logs
-
 services:
-  # ── MongoDB ──
   mongodb:
     image: mongo:7
     container_name: singravox-db
@@ -21,7 +11,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Backend API ──
   backend:
     build:
       context: ../backend
@@ -35,30 +24,50 @@ services:
       MONGO_URL: "mongodb://mongodb:27017"
       DB_NAME: "${DB_NAME:-singravox}"
       JWT_SECRET: "${JWT_SECRET}"
-      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@singravox.local}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
-      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:3000}"
-      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:8080}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8080,http://localhost:3000,http://127.0.0.1:3000,tauri://localhost,http://tauri.localhost}"
+      LIVEKIT_URL: "${LIVEKIT_URL:-ws://localhost:7880}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-devkey}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-secret}"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
       interval: 15s
       timeout: 5s
       retries: 3
 
-  # ── Frontend Web Client ──
   frontend:
     build:
       context: ../frontend
       dockerfile: ../deploy/frontend.Dockerfile
-      args:
-        REACT_APP_BACKEND_URL: "${BACKEND_PUBLIC_URL:-http://localhost:8080}"
     container_name: singravox-web
     restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
 
-  # ── Reverse Proxy (routes /api → backend, / → frontend) ──
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: singravox-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    ports:
+      - "7880:7880"
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: singravox-coturn
+    restart: unless-stopped
+    profiles: ["turn"]
+    command: ["-c", "/etc/coturn/turnserver.conf", "--no-cli"]
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+
   proxy:
     image: nginx:1.25-alpine
     container_name: singravox-proxy

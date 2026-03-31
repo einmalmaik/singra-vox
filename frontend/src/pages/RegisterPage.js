@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRuntime } from "@/contexts/RuntimeContext";
 import { formatError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,7 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
+  const { setupStatus } = useRuntime();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -41,7 +43,9 @@ export default function RegisterPage() {
         </div>
 
         <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>Create account</h2>
-        <p className="text-[#71717A] text-sm mb-8">Join a privacy-first communication platform</p>
+        <p className="text-[#71717A] text-sm mb-8">
+          Join {setupStatus?.instance_name || "this privacy-first communication platform"}
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (

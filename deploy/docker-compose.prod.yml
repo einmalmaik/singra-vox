@@ -1,14 +1,3 @@
-# ╔══════════════════════════════════════════════════════════╗
-# ║  Singra Vox – Docker Compose (Production / TLS)        ║
-# ╚══════════════════════════════════════════════════════════╝
-#
-# Uses Caddy for automatic HTTPS with Let's Encrypt.
-#
-# Usage:
-#   cp .env.example .env
-#   # Set DOMAIN=your.domain.com
-#   docker compose -f docker-compose.prod.yml up -d
-
 services:
   mongodb:
     image: mongo:7
@@ -35,21 +24,39 @@ services:
       MONGO_URL: "mongodb://mongodb:27017"
       DB_NAME: "${DB_NAME:-singravox}"
       JWT_SECRET: "${JWT_SECRET}"
-      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@singravox.local}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
+      COOKIE_SECURE: "true"
       FRONTEND_URL: "https://${DOMAIN}"
-      CORS_ORIGINS: "https://${DOMAIN}"
+      CORS_ORIGINS: "https://${DOMAIN},tauri://localhost,http://tauri.localhost"
+      LIVEKIT_URL: "wss://${RTC_DOMAIN}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET}"
 
   frontend:
     build:
       context: ../frontend
       dockerfile: ../deploy/frontend.Dockerfile
-      args:
-        REACT_APP_BACKEND_URL: "https://${DOMAIN}"
     container_name: singravox-web
     restart: unless-stopped
     depends_on:
       - backend
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: singravox-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: singravox-coturn
+    restart: unless-stopped
+    profiles: ["turn"]
+    command: ["-c", "/etc/coturn/turnserver.conf", "--no-cli"]
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
 
   caddy:
     image: caddy:2-alpine
@@ -64,11 +71,14 @@ services:
       - caddy_config:/config
     environment:
       DOMAIN: "${DOMAIN}"
+      RTC_DOMAIN: "${RTC_DOMAIN}"
     depends_on:
       - backend
       - frontend
+      - livekit
 
 volumes:
   mongo_data:
   caddy_data:
   caddy_config:
+
