@@ -67,6 +67,7 @@ const PERMISSION_LABELS = {
   ban_members: "Ban Members",
   send_messages: "Send Messages",
   read_messages: "Read Messages",
+  read_message_history: "Read Message History",
   manage_messages: "Manage Messages",
   attach_files: "Attach Files",
   mention_everyone: "Mention @everyone and all roles",

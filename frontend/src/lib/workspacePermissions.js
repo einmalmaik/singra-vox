@@ -7,6 +7,7 @@ const DEFAULT_PERMISSIONS = {
   ban_members: false,
   send_messages: true,
   read_messages: true,
+  read_message_history: true,
   manage_messages: false,
   attach_files: true,
   mention_everyone: false,
@@ -32,7 +33,9 @@ export function canCreateCommunity(user) {
 function mergePermissions(basePermissions, incomingPermissions = {}) {
   const nextPermissions = { ...basePermissions };
   Object.entries(incomingPermissions).forEach(([permission, allowed]) => {
-    nextPermissions[permission] = Boolean(nextPermissions[permission] || allowed);
+    if (allowed) {
+      nextPermissions[permission] = true;
+    }
   });
   return nextPermissions;
 }
@@ -54,7 +57,9 @@ export function getWorkspacePermissions({ user, server, members = [], roles = []
   let permissions = { ...DEFAULT_PERMISSIONS };
   const defaultRole = roles.find((role) => role.is_default);
   if (defaultRole?.permissions) {
-    permissions = mergePermissions(permissions, defaultRole.permissions);
+    Object.entries(defaultRole.permissions).forEach(([permission, allowed]) => {
+      permissions[permission] = Boolean(allowed);
+    });
   }
 
   currentMember.roles?.forEach((roleId) => {

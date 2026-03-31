@@ -7,13 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   INVITE_EXPIRY_OPTIONS,
   buildDesktopInviteLink,
   buildInviteLink,
@@ -105,18 +98,17 @@ export default function InviteGeneratorPanel({ serverId }) {
           <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">
             Expiry
           </Label>
-          <Select value={expiresHours} onValueChange={setExpiresHours}>
-            <SelectTrigger className="bg-[#0A0A0A] border-[#27272A] text-white">
-              <SelectValue placeholder="Select expiry" />
-            </SelectTrigger>
-            <SelectContent className="border-[#27272A] bg-[#18181B] text-white">
-              {INVITE_EXPIRY_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <select
+            value={expiresHours}
+            onChange={(event) => setExpiresHours(event.target.value)}
+            className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white outline-none focus:border-[#6366F1]"
+          >
+            {INVITE_EXPIRY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value} className="bg-[#18181B] text-white">
+                {option.label}
+              </option>
+            ))}
+          </select>
           <p className="text-xs text-[#71717A]">Choose how long the invite stays valid.</p>
         </div>
       </div>

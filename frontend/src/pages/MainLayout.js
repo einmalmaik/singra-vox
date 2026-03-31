@@ -89,6 +89,7 @@ export default function MainLayout() {
   const currentServerRef = useRef(null);
   const currentChannelRef = useRef(null);
   const currentDmUserRef = useRef(null);
+  const latestChannelLoadRef = useRef(0);
 
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
@@ -140,6 +141,33 @@ export default function MainLayout() {
     }
   }, []);
 
+  const loadChannelMessages = useCallback(async (channelId) => {
+    if (!channelId) {
+      latestChannelLoadRef.current += 1;
+      setMessages([]);
+      return;
+    }
+
+    // Quick channel switches can leave older requests resolving after the user
+    // already moved elsewhere. The request token keeps stale responses from
+    // blanking or replacing the current timeline.
+    const requestId = latestChannelLoadRef.current + 1;
+    latestChannelLoadRef.current = requestId;
+
+    try {
+      const res = await api.get(`/channels/${channelId}/messages`);
+      if (latestChannelLoadRef.current !== requestId || currentChannelRef.current?.id !== channelId) {
+        return;
+      }
+      setMessages(res.data);
+    } catch {
+      if (latestChannelLoadRef.current !== requestId || currentChannelRef.current?.id !== channelId) {
+        return;
+      }
+      setMessages([]);
+    }
+  }, []);
+
   const loadServerSnapshot = useCallback(async (serverId) => {
     const [channelRes, memberRes, roleRes] = await Promise.all([
       api.get(`/servers/${serverId}/channels`),
@@ -151,29 +179,34 @@ export default function MainLayout() {
     setMembers(memberRes.data);
     setRoles(roleRes.data);
 
-    setCurrentChannel((previousChannel) => {
-      if (previousChannel && channelRes.data.some((channel) => channel.id === previousChannel.id)) {
-        return previousChannel;
-      }
+    const nextChannel = (
+      currentChannelRef.current && channelRes.data.some((channel) => channel.id === currentChannelRef.current.id)
+        ? channelRes.data.find((channel) => channel.id === currentChannelRef.current.id) || currentChannelRef.current
+        : channelRes.data.find((channel) => channel.type === "text") || null
+    );
 
-      return channelRes.data.find((channel) => channel.type === "text") || null;
-    });
-  }, []);
+    currentChannelRef.current = nextChannel;
+    setCurrentChannel(nextChannel);
 
-  const selectChannel = useCallback(async (channel) => {
-    setCurrentChannel(channel);
-    if (!channel || channel.type !== "text") {
-      setMessages([]);
+    if (nextChannel?.type === "text") {
+      await loadChannelMessages(nextChannel.id);
       return;
     }
 
-    try {
-      const res = await api.get(`/channels/${channel.id}/messages`);
-      setMessages(res.data);
-    } catch {
+    latestChannelLoadRef.current += 1;
+    setMessages([]);
+  }, [loadChannelMessages]);
+
+  const selectChannel = useCallback(async (channel) => {
+    currentChannelRef.current = channel;
+    setCurrentChannel(channel);
+    if (!channel || channel.type !== "text") {
+      latestChannelLoadRef.current += 1;
       setMessages([]);
+      return;
     }
-  }, []);
+    await loadChannelMessages(channel.id);
+  }, [loadChannelMessages]);
 
   const selectServer = useCallback(async (server) => {
     if (!server) return;
@@ -464,12 +497,6 @@ export default function MainLayout() {
       }
     };
   }, [connectWs, token]);
-
-  useEffect(() => {
-    if (currentChannel?.type === "text") {
-      void selectChannel(currentChannel);
-    }
-  }, [currentChannel, selectChannel]);
 
   const sendTyping = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN && currentChannelRef.current) {

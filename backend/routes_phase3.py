@@ -22,6 +22,15 @@ load_dotenv(ROOT_DIR / '.env')
 _c = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = _c[os.environ['DB_NAME']]
 _jwt = os.environ.get('JWT_SECRET', '')
+_DEFAULT_PERMISSIONS = {
+    "manage_server": False, "manage_channels": False, "manage_roles": False,
+    "manage_members": False, "kick_members": False, "ban_members": False,
+    "send_messages": True, "read_messages": True, "read_message_history": True, "manage_messages": False,
+    "attach_files": True, "mention_everyone": False,
+    "join_voice": True, "speak": True, "mute_members": False,
+    "deafen_members": False, "priority_speaker": False, "create_invites": True,
+    "pin_messages": False, "manage_emojis": False, "manage_webhooks": False,
+}
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
@@ -58,11 +67,24 @@ async def _perm(uid, sid, perm):
     s = await db.servers.find_one({"id": sid}, {"_id": 0})
     if s and s.get("owner_id") == uid:
         return True
+    allowed = _DEFAULT_PERMISSIONS.get(perm, False)
+    default_role = await db.roles.find_one({"server_id": sid, "is_default": True}, {"_id": 0})
+    if default_role and perm in (default_role.get("permissions") or {}):
+        allowed = bool(default_role["permissions"][perm])
     for rid in m.get("roles", []):
         r = await db.roles.find_one({"id": rid}, {"_id": 0})
         if r and r.get("permissions", {}).get(perm):
             return True
-    return False
+    return allowed
+
+
+async def _history_cutoff(uid, sid):
+    member = await db.server_members.find_one({"user_id": uid, "server_id": sid}, {"_id": 0})
+    if not member or member.get("is_banned"):
+        return None
+    if await _perm(uid, sid, "read_message_history"):
+        return None
+    return member.get("joined_at")
 
 
 # ── Helper: create notification ──
@@ -114,9 +136,11 @@ async def get_pins(channel_id: str, request: Request):
     channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not channel or not await _perm(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
-    pins = await db.messages.find(
-        {"channel_id": channel_id, "is_pinned": True, "is_deleted": {"$ne": True}}, {"_id": 0}
-    ).sort("pinned_at", -1).to_list(50)
+    history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
+    pin_query = {"channel_id": channel_id, "is_pinned": True, "is_deleted": {"$ne": True}}
+    if history_cutoff:
+        pin_query["created_at"] = {"$gte": history_cutoff}
+    pins = await db.messages.find(pin_query, {"_id": 0}).sort("pinned_at", -1).to_list(50)
     for p in pins:
         p["author"] = await db.users.find_one({"id": p["author_id"]}, {"_id": 0, "password_hash": 0})
     return pins

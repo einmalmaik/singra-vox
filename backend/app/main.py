@@ -186,7 +186,7 @@ async def require_instance_owner(user: dict) -> dict:
 DEFAULT_PERMISSIONS = {
     "manage_server": False, "manage_channels": False, "manage_roles": False,
     "manage_members": False, "kick_members": False, "ban_members": False,
-    "send_messages": True, "read_messages": True, "manage_messages": False,
+    "send_messages": True, "read_messages": True, "read_message_history": True, "manage_messages": False,
     "attach_files": True, "mention_everyone": False,
     "join_voice": True, "speak": True, "mute_members": False,
     "deafen_members": False, "priority_speaker": False, "create_invites": True,
@@ -200,14 +200,24 @@ async def check_permission(user_id: str, server_id: str, permission: str) -> boo
     server = await db.servers.find_one({"id": server_id}, {"_id": 0})
     if server and server.get("owner_id") == user_id:
         return True
+    allowed = DEFAULT_PERMISSIONS.get(permission, False)
+    default_role = await db.roles.find_one({"server_id": server_id, "is_default": True}, {"_id": 0})
+    if default_role and permission in (default_role.get("permissions") or {}):
+        allowed = bool(default_role["permissions"][permission])
     for role_id in member.get("roles", []):
         role = await db.roles.find_one({"id": role_id}, {"_id": 0})
         if role and role.get("permissions", {}).get(permission):
             return True
-    default_role = await db.roles.find_one({"server_id": server_id, "is_default": True}, {"_id": 0})
-    if default_role and default_role.get("permissions", {}).get(permission):
-        return True
-    return DEFAULT_PERMISSIONS.get(permission, False)
+    return allowed
+
+
+async def get_message_history_cutoff(user_id: str, server_id: str) -> Optional[str]:
+    member = await db.server_members.find_one({"user_id": user_id, "server_id": server_id}, {"_id": 0})
+    if not member or member.get("is_banned"):
+        return None
+    if await check_permission(user_id, server_id, "read_message_history"):
+        return None
+    return member.get("joined_at")
 
 async def log_audit(server_id, actor_id, action, target_type, target_id, details):
     await db.audit_log.insert_one({
@@ -1438,8 +1448,14 @@ async def get_messages(channel_id: str, request: Request, before: str = None, li
     if not await check_permission(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
     query = {"channel_id": channel_id, "is_deleted": {"$ne": True}}
+    history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"])
+    created_at_filters = {}
     if before:
-        query["created_at"] = {"$lt": before}
+        created_at_filters["$lt"] = before
+    if history_cutoff:
+        created_at_filters["$gte"] = history_cutoff
+    if created_at_filters:
+        query["created_at"] = created_at_filters
     messages = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
     messages.reverse()
     for msg in messages:
@@ -1568,6 +1584,9 @@ async def get_message(message_id: str, request: Request):
         raise HTTPException(404, "Channel not found")
     if not await check_permission(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
+    history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"])
+    if history_cutoff and msg.get("created_at") and msg["created_at"] < history_cutoff:
+        raise HTTPException(403, "No permission to read message history")
 
     # The jump-to-message flow reuses the same hydrated payload shape as the
     # channel timeline, so the frontend can merge a fetched message without

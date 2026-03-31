@@ -24,6 +24,15 @@ _client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = _client[os.environ['DB_NAME']]
 _jwt_secret = os.environ.get('JWT_SECRET', '')
 _JWT_ALG = "HS256"
+_DEFAULT_PERMISSIONS = {
+    "manage_server": False, "manage_channels": False, "manage_roles": False,
+    "manage_members": False, "kick_members": False, "ban_members": False,
+    "send_messages": True, "read_messages": True, "read_message_history": True, "manage_messages": False,
+    "attach_files": True, "mention_everyone": False,
+    "join_voice": True, "speak": True, "mute_members": False,
+    "deafen_members": False, "priority_speaker": False, "create_invites": True,
+    "pin_messages": False, "manage_emojis": False, "manage_webhooks": False,
+}
 
 
 def _now():
@@ -64,11 +73,24 @@ async def _has_perm(user_id, server_id, perm):
     server = await db.servers.find_one({"id": server_id}, {"_id": 0})
     if server and server.get("owner_id") == user_id:
         return True
+    allowed = _DEFAULT_PERMISSIONS.get(perm, False)
+    default_role = await db.roles.find_one({"server_id": server_id, "is_default": True}, {"_id": 0})
+    if default_role and perm in (default_role.get("permissions") or {}):
+        allowed = bool(default_role["permissions"][perm])
     for rid in member.get("roles", []):
         role = await db.roles.find_one({"id": rid}, {"_id": 0})
         if role and role.get("permissions", {}).get(perm):
             return True
-    return False
+    return allowed
+
+
+async def _history_cutoff(user_id, server_id):
+    member = await db.server_members.find_one({"user_id": user_id, "server_id": server_id}, {"_id": 0})
+    if not member or member.get("is_banned"):
+        return None
+    if await _has_perm(user_id, server_id, "read_message_history"):
+        return None
+    return member.get("joined_at")
 
 
 def _parse_mentions(content):
@@ -110,11 +132,15 @@ async def get_thread(message_id: str, request: Request):
     channel = await db.channels.find_one({"id": parent["channel_id"]}, {"_id": 0})
     if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
+    history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
+    if history_cutoff and parent.get("created_at") and parent["created_at"] < history_cutoff:
+        raise HTTPException(403, "No permission to read message history")
     author = await db.users.find_one({"id": parent["author_id"]}, {"_id": 0, "password_hash": 0})
     parent["author"] = author
-    replies = await db.messages.find(
-        {"thread_id": message_id, "is_deleted": {"$ne": True}}, {"_id": 0}
-    ).sort("created_at", 1).to_list(200)
+    reply_query = {"thread_id": message_id, "is_deleted": {"$ne": True}}
+    if history_cutoff:
+        reply_query["created_at"] = {"$gte": history_cutoff}
+    replies = await db.messages.find(reply_query, {"_id": 0}).sort("created_at", 1).to_list(200)
     for r in replies:
         a = await db.users.find_one({"id": r["author_id"]}, {"_id": 0, "password_hash": 0})
         r["author"] = a
@@ -158,15 +184,24 @@ async def reply_in_thread(channel_id: str, message_id: str, request: Request):
 # ═══════════════════════════════════════════════════
 @phase2.get("/search")
 async def search_messages(request: Request, q: str = "", server_id: str = None, channel_id: str = None, limit: int = 25):
-    await _user(request)
+    user = await _user(request)
     if len(q) < 2:
         return []
     query = {"content": {"$regex": q, "$options": "i"}, "is_deleted": {"$ne": True}}
     if channel_id:
+        channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+        if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages"):
+            raise HTTPException(403, "No permission")
         query["channel_id"] = channel_id
+        history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
+        if history_cutoff:
+            query["created_at"] = {"$gte": history_cutoff}
     elif server_id:
         chs = await db.channels.find({"server_id": server_id}, {"_id": 0, "id": 1}).to_list(200)
         query["channel_id"] = {"$in": [c["id"] for c in chs]}
+        history_cutoff = await _history_cutoff(user["id"], server_id)
+        if history_cutoff:
+            query["created_at"] = {"$gte": history_cutoff}
     results = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
     for msg in results:
         msg["author"] = await db.users.find_one({"id": msg["author_id"]}, {"_id": 0, "password_hash": 0})
@@ -192,6 +227,9 @@ async def get_all_unread(request: Request):
         for ch in chs:
             rs = await db.read_states.find_one({"user_id": user["id"], "channel_id": ch["id"]}, {"_id": 0})
             last = rs["last_read_at"] if rs else "1970-01-01T00:00:00"
+            history_cutoff = await _history_cutoff(user["id"], m["server_id"])
+            if history_cutoff and last < history_cutoff:
+                last = history_cutoff
             cnt = await db.messages.count_documents({
                 "channel_id": ch["id"], "created_at": {"$gt": last},
                 "author_id": {"$ne": user["id"]}, "is_deleted": {"$ne": True}
