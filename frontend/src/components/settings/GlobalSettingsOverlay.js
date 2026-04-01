@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { loadVoicePreferences, saveVoicePreferences } from "@/lib/voicePreferences";
+import { capturePttShortcut, describePttShortcut } from "@/lib/pttShortcut";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 
 const SECTION_CONFIG = [
@@ -42,6 +43,7 @@ export default function GlobalSettingsOverlay({
   channels,
   onUserUpdated,
   onLogout,
+  pttDebug = null,
 }) {
   const { t, i18n } = useTranslation();
   const { config } = useRuntime();
@@ -161,10 +163,18 @@ export default function GlobalSettingsOverlay({
   useEffect(() => {
     if (!pttListening) return;
     const handler = (event) => {
+      const capturedShortcut = capturePttShortcut(event);
+      if (!capturedShortcut) {
+        return;
+      }
       event.preventDefault();
-      updateVoicePreferences({ pttKey: event.code, pttEnabled: true });
+      updateVoicePreferences({
+        pttKey: capturedShortcut.accelerator,
+        pttLabel: capturedShortcut.label,
+        pttEnabled: true,
+      });
       setPttListening(false);
-      toast.success(t("settings.pttKeySet", { key: event.code }));
+      toast.success(t("settings.pttKeySet", { key: capturedShortcut.label }));
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
@@ -514,8 +524,23 @@ export default function GlobalSettingsOverlay({
                   disabled={!isDesktop}
                 >
                   <Keyboard size={14} className="mr-2" />
-                  {pttListening ? t("settings.pressAnyKey") : t("settings.keyLabel", { key: voicePreferences.pttKey })}
+                  {pttListening
+                    ? t("settings.pressAnyKey")
+                    : t("settings.keyLabel", {
+                      key: voicePreferences.pttLabel || describePttShortcut(voicePreferences.pttKey, { locale: i18n.language }),
+                    })}
                 </Button>
+                {isDesktop && (
+                  <div className="mt-3 space-y-1 rounded-md border border-[#27272A] bg-[#080808] px-3 py-2 text-xs text-[#A1A1AA]">
+                    <p>{t("settings.pttStatus", { status: pttDebug?.registered ? t("settings.pttRegistered") : t("settings.pttWaiting") })}</p>
+                    <p>{t("settings.pttLastEvent", { event: pttDebug?.lastEventState || "—" })}</p>
+                    <p>{t("settings.pttLastShortcut", { key: pttDebug?.lastShortcut || voicePreferences.pttKey || "—" })}</p>
+                    <p>{t("settings.pttMicGate", { state: pttDebug?.active ? t("settings.pttMicOpen") : t("settings.pttMicClosed") })}</p>
+                    {pttDebug?.error ? (
+                      <p className="text-[#FCA5A5]">{t("settings.pttRegistrationError", { error: pttDebug.error })}</p>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-3 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">

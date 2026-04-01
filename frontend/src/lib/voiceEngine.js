@@ -36,7 +36,12 @@ export class VoiceEngine {
     this.pttActive = false;
     this.preferences = getDefaultVoicePreferences();
     this.runtimeConfig = null;
+    // Audio and video can arrive from multiple sources per participant
+    // (microphone, screen-share audio, camera, screen-share video). We track
+    // them separately so adding a screen share does not overwrite the user's
+    // microphone path.
     this.audioElements = new Map();
+    this.remoteVideoTracks = new Map();
     this.onStateChange = null;
     this.listeners = new Set();
 
@@ -247,14 +252,22 @@ export class VoiceEngine {
   }
 
   toggleMute() {
-    this.isMuted = !this.isMuted;
+    return this.setMuted(!this.isMuted);
+  }
+
+  toggleDeafen() {
+    return this.setDeafened(!this.isDeafened);
+  }
+
+  setMuted(muted) {
+    this.isMuted = Boolean(muted);
     void this._applyMuteState();
     this._emit("mute_change", { isMuted: this.isMuted });
     return this.isMuted;
   }
 
-  toggleDeafen() {
-    this.isDeafened = !this.isDeafened;
+  setDeafened(deafened) {
+    this.isDeafened = Boolean(deafened);
     this._applyRemoteAudioState();
     this._emit("deafen_change", { isDeafened: this.isDeafened });
     return this.isDeafened;
@@ -331,6 +344,7 @@ export class VoiceEngine {
       element.remove();
     });
     this.audioElements.clear();
+    this.remoteVideoTracks.clear();
 
     if (this.room && this.localTrackPublication?.track) {
       await this.room.localParticipant.unpublishTrack(this.localTrackPublication.track, false);
@@ -348,6 +362,7 @@ export class VoiceEngine {
     this.room = null;
     this.mediaE2EEController = null;
     this._resetSpeakingState();
+    this._emitRemoteMediaUpdate();
     this._emit("disconnected");
   }
 
@@ -366,6 +381,7 @@ export class VoiceEngine {
     }
     this.cameraTrack = await createLocalVideoTrack();
     await this.room.localParticipant.publishTrack(this.cameraTrack);
+    this._emitRemoteMediaUpdate();
     this._emit("camera_change", { enabled: true });
     return true;
   }
@@ -375,22 +391,52 @@ export class VoiceEngine {
     await this.room.localParticipant.unpublishTrack(this.cameraTrack, false);
     this.cameraTrack.stop();
     this.cameraTrack = null;
+    this._emitRemoteMediaUpdate();
     this._emit("camera_change", { enabled: false });
   }
 
-  async toggleScreenShare() {
+  async toggleScreenShare(options = {}) {
     if (!this.room) return false;
     if (this.screenShareTracks.length > 0) {
       await this.stopScreenShare();
       return false;
     }
+    return this.startScreenShare(options);
+  }
+
+  async startScreenShare(options = {}) {
+    if (!this.room) return false;
+    const {
+      audio = false,
+      displaySurface = "monitor",
+      resolution = { width: 1920, height: 1080, frameRate: 60 },
+    } = options;
+
     this.screenShareTracks = await createLocalScreenTracks({
-      audio: false,
-      resolution: { width: 1920, height: 1080, frameRate: 60 },
+      // Screen-share audio is separate from the microphone track. Requesting it
+      // as a boolean lets getDisplayMedia negotiate native system/tab audio
+      // support instead of reusing microphone-specific constraints.
+      audio: Boolean(audio),
+      video: { displaySurface },
+      resolution,
+      systemAudio: audio ? "include" : "exclude",
+      surfaceSwitching: "include",
+      selfBrowserSurface: "exclude",
+      suppressLocalAudioPlayback: true,
+      contentHint: "detail",
+    });
+
+    this.screenShareTracks.forEach((track) => {
+      track.mediaStreamTrack?.addEventListener("ended", () => {
+        if (this.screenShareTracks.includes(track)) {
+          void this.stopScreenShare();
+        }
+      }, { once: true });
     });
     await Promise.all(
       this.screenShareTracks.map((track) => this.room.localParticipant.publishTrack(track)),
     );
+    this._emitRemoteMediaUpdate();
     this._emit("screen_share_change", { enabled: true });
     return true;
   }
@@ -402,7 +448,36 @@ export class VoiceEngine {
     );
     this.screenShareTracks.forEach((track) => track.stop());
     this.screenShareTracks = [];
+    this._emitRemoteMediaUpdate();
     this._emit("screen_share_change", { enabled: false });
+  }
+
+  attachParticipantMediaElement(participantId, source, element) {
+    if (!element) {
+      return () => {};
+    }
+
+    const normalizedSource = source || Track.Source.Camera;
+    const track = participantId === this.userId
+      ? this._getLocalVideoTrack(normalizedSource)
+      : this.remoteVideoTracks.get(this._trackKey(participantId, normalizedSource))?.track;
+
+    if (!track) {
+      return () => {};
+    }
+
+    element.autoplay = true;
+    element.playsInline = true;
+    element.muted = participantId === this.userId;
+    track.attach(element);
+
+    return () => {
+      try {
+        track.detach(element);
+      } catch {
+        // Ignore detach errors during rapid overlay switches.
+      }
+    };
   }
 
   async _probeInput() {
@@ -488,17 +563,29 @@ export class VoiceEngine {
       || (this.preferences.pttEnabled && !this.pttActive)
     );
 
-    if (this.localTrackPublication?.track) {
-      if (shouldEnableMic) {
-        await this.localTrackPublication.track.unmute();
-      } else {
-        await this.localTrackPublication.track.mute();
-      }
-      return;
+    if (this.inputGainNode) {
+      // Gate the published signal at the gain stage so mute/PTT stays strict
+      // even if a wrapper-level mute behaves differently across runtimes.
+      this.inputGainNode.gain.value = shouldEnableMic
+        ? clampVolume(this.preferences.inputVolume, 0, 200) / 100
+        : 0;
     }
 
     if (this.localPublishedTrack) {
       this.localPublishedTrack.enabled = shouldEnableMic;
+    }
+
+    if (this.localTrackPublication?.track) {
+      try {
+        if (shouldEnableMic) {
+          await this.localTrackPublication.track.unmute();
+        } else {
+          await this.localTrackPublication.track.mute();
+        }
+      } catch {
+        // The explicit gain/track gates above are the hard fallback if a
+        // platform-specific wrapper call does not behave exactly as expected.
+      }
     }
   }
 
@@ -509,15 +596,15 @@ export class VoiceEngine {
   }
 
   _applyRemoteAudioState() {
-    this.audioElements.forEach((_, participantId) => {
+    const participantIds = new Set(
+      Array.from(this.audioElements.values()).map((state) => state.participantId),
+    );
+    participantIds.forEach((participantId) => {
       this._applyParticipantAudio(participantId);
     });
   }
 
   _applyParticipantAudio(userId) {
-    const state = this.audioElements.get(userId);
-    if (!state) return;
-
     const baseVolume = clampVolume(this.preferences.outputVolume, 0, 200) / 100;
     const participantVolume = clampVolume(
       this.preferences.perUserVolumes[userId] ?? 100,
@@ -526,8 +613,13 @@ export class VoiceEngine {
     ) / 100;
     const locallyMuted = Boolean(this.preferences.locallyMutedParticipants?.[userId]);
 
-    state.element.muted = this.isDeafened || locallyMuted;
-    state.element.volume = this.isDeafened || locallyMuted ? 0 : Math.min(2, baseVolume * participantVolume);
+    this.audioElements.forEach((state) => {
+      if (state.participantId !== userId) {
+        return;
+      }
+      state.element.muted = this.isDeafened || locallyMuted;
+      state.element.volume = this.isDeafened || locallyMuted ? 0 : Math.min(2, baseVolume * participantVolume);
+    });
   }
 
   async _applyOutputDevice() {
@@ -691,40 +783,61 @@ export class VoiceEngine {
     if (!this.room) return;
 
     this.room.on(RoomEvent.TrackSubscribed, async (track, _publication, participant) => {
-      if (track.kind !== Track.Kind.Audio) return;
+      const source = track.source || Track.Source.Unknown;
+      const trackKey = this._trackKey(participant.identity, source);
 
-      const audioEl = track.attach();
-      audioEl.autoplay = true;
-      audioEl.playsInline = true;
-      audioEl.style.display = "none";
-      document.body.appendChild(audioEl);
-      this.audioElements.set(participant.identity, { element: audioEl });
-      this._applyParticipantAudio(participant.identity);
+      if (track.kind === Track.Kind.Audio) {
+        const audioEl = track.attach();
+        audioEl.autoplay = true;
+        audioEl.playsInline = true;
+        audioEl.style.display = "none";
+        document.body.appendChild(audioEl);
+        this.audioElements.set(trackKey, {
+          element: audioEl,
+          participantId: participant.identity,
+          source,
+        });
+        this._applyParticipantAudio(participant.identity);
 
-      if (this.preferences.outputDeviceId && typeof audioEl.setSinkId === "function") {
-        try {
-          await audioEl.setSinkId(this.preferences.outputDeviceId);
-        } catch {
-          // Ignore unsupported sink changes on this browser.
+        if (this.preferences.outputDeviceId && typeof audioEl.setSinkId === "function") {
+          try {
+            await audioEl.setSinkId(this.preferences.outputDeviceId);
+          } catch {
+            // Ignore unsupported sink changes on this browser.
+          }
         }
+      } else if (track.kind === Track.Kind.Video) {
+        this.remoteVideoTracks.set(trackKey, {
+          track,
+          participantId: participant.identity,
+          source,
+        });
       }
 
-      this._emit("peer_connected", { userId: participant.identity });
+      this._emitRemoteMediaUpdate();
+      this._emit("peer_connected", { userId: participant.identity, source, kind: track.kind });
     });
 
     this.room.on(RoomEvent.TrackUnsubscribed, (track, _publication, participant) => {
-      if (track.kind !== Track.Kind.Audio) return;
+      const source = track.source || Track.Source.Unknown;
+      const trackKey = this._trackKey(participant.identity, source);
 
-      const existing = this.audioElements.get(participant.identity);
-      if (existing) {
-        track.detach(existing.element);
-        existing.element.remove();
-        this.audioElements.delete(participant.identity);
+      if (track.kind === Track.Kind.Audio) {
+        const existing = this.audioElements.get(trackKey);
+        if (existing) {
+          track.detach(existing.element);
+          existing.element.remove();
+          this.audioElements.delete(trackKey);
+        }
+      } else if (track.kind === Track.Kind.Video) {
+        this.remoteVideoTracks.delete(trackKey);
       }
+
       this._setActiveSpeakerIds(
         this.activeSpeakerIds.filter((speakerId) => speakerId !== participant.identity),
       );
-      this._emit("peer_disconnected", { userId: participant.identity });
+      this._emitRemoteMediaUpdate();
+      this._emit("peer_disconnected", { userId: participant.identity, source, kind: track.kind });
     });
 
     this.room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
@@ -754,7 +867,9 @@ export class VoiceEngine {
     this.room.on(RoomEvent.Disconnected, () => {
       this.audioElements.forEach(({ element }) => element.remove());
       this.audioElements.clear();
+      this.remoteVideoTracks.clear();
       this._resetSpeakingState();
+      this._emitRemoteMediaUpdate();
       this._emit("disconnected");
     });
   }
@@ -776,6 +891,68 @@ export class VoiceEngine {
       localSpeaking: false,
       activeSpeakerIds: [],
       audioLevel: 0,
+    });
+  }
+
+  _getLocalVideoTrack(source) {
+    if (source === Track.Source.Camera) {
+      return this.cameraTrack;
+    }
+    if (source === Track.Source.ScreenShare) {
+      return this.screenShareTracks.find((track) => track.kind === Track.Kind.Video) || null;
+    }
+    return null;
+  }
+
+  _trackKey(participantId, source) {
+    return `${participantId}:${source || "unknown"}`;
+  }
+
+  _buildRemoteMediaParticipants() {
+    const participants = new Map();
+
+    this.remoteVideoTracks.forEach(({ participantId, source }) => {
+      const nextState = participants.get(participantId) || {
+        userId: participantId,
+        hasCamera: false,
+        hasScreenShare: false,
+        hasScreenShareAudio: false,
+      };
+      if (source === Track.Source.Camera) {
+        nextState.hasCamera = true;
+      }
+      if (source === Track.Source.ScreenShare) {
+        nextState.hasScreenShare = true;
+      }
+      participants.set(participantId, nextState);
+    });
+
+    this.audioElements.forEach(({ participantId, source }) => {
+      if (source !== Track.Source.ScreenShareAudio) {
+        return;
+      }
+      const nextState = participants.get(participantId) || {
+        userId: participantId,
+        hasCamera: false,
+        hasScreenShare: false,
+        hasScreenShareAudio: false,
+      };
+      nextState.hasScreenShareAudio = true;
+      participants.set(participantId, nextState);
+    });
+
+    return Array.from(participants.values());
+  }
+
+  _emitRemoteMediaUpdate() {
+    this._emit("media_tracks_update", {
+      participants: this._buildRemoteMediaParticipants(),
+      local: {
+        userId: this.userId,
+        hasCamera: Boolean(this.cameraTrack),
+        hasScreenShare: this.screenShareTracks.some((track) => track.kind === Track.Kind.Video),
+        hasScreenShareAudio: this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
+      },
     });
   }
 

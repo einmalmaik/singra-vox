@@ -1,3 +1,7 @@
+import { describePttShortcut, normalizePttShortcut } from "@/lib/pttShortcut";
+
+const VOICE_PREFERENCES_EVENT = "singravox:voice-preferences-updated";
+
 const DEFAULT_VOICE_PREFERENCES = {
   inputDeviceId: "",
   outputDeviceId: "",
@@ -7,6 +11,7 @@ const DEFAULT_VOICE_PREFERENCES = {
   locallyMutedParticipants: {},
   pttEnabled: false,
   pttKey: "Space",
+  pttLabel: "Space",
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
@@ -17,6 +22,19 @@ const DEFAULT_VOICE_PREFERENCES = {
 
 function getStorageKey(userId = "default") {
   return `singravox.voice.preferences.${userId}`;
+}
+
+function emitVoicePreferencesUpdated(userId, preferences) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent(VOICE_PREFERENCES_EVENT, {
+    detail: {
+      userId: userId || "default",
+      preferences,
+    },
+  }));
 }
 
 export function getDefaultVoicePreferences() {
@@ -39,6 +57,11 @@ export function normalizeVoicePreferences(preferences = {}, { isDesktop = true }
       ...(preferences?.locallyMutedParticipants || {}),
     },
   };
+
+  normalized.pttKey = normalizePttShortcut(normalized.pttKey) || "Space";
+  normalized.pttLabel = normalized.pttLabel || describePttShortcut(normalized.pttKey, {
+    locale: typeof document !== "undefined" ? document.documentElement.lang || "en" : "en",
+  });
 
   if (!isDesktop) {
     normalized.pttEnabled = false;
@@ -88,6 +111,7 @@ export function saveVoicePreferences(userId = "default", preferences = {}, optio
   );
 
   window.localStorage.setItem(getStorageKey(userId), JSON.stringify(nextPreferences));
+  emitVoicePreferencesUpdated(userId, nextPreferences);
   return nextPreferences;
 }
 
@@ -97,4 +121,24 @@ export function clearVoicePreferences(userId = "default") {
   }
 
   window.localStorage.removeItem(getStorageKey(userId));
+  emitVoicePreferencesUpdated(userId, normalizeVoicePreferences({}, {}));
+}
+
+export function subscribeVoicePreferences(userId = "default", callback) {
+  if (typeof window === "undefined" || typeof callback !== "function") {
+    return () => {};
+  }
+
+  const targetUserId = userId || "default";
+  const handler = (event) => {
+    if (event?.detail?.userId !== targetUserId) {
+      return;
+    }
+    callback(event.detail.preferences);
+  };
+
+  window.addEventListener(VOICE_PREFERENCES_EVENT, handler);
+  return () => {
+    window.removeEventListener(VOICE_PREFERENCES_EVENT, handler);
+  };
 }

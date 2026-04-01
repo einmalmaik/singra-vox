@@ -26,11 +26,6 @@ fn get_app_version() -> String {
 }
 
 #[tauri::command]
-fn register_ptt_hotkey(_shortcut: String) -> Result<String, String> {
-    Ok("ok".into())
-}
-
-#[tauri::command]
 fn show_notification(_title: String, _body: String) -> Result<String, String> {
     Ok("ok".into())
 }
@@ -38,13 +33,13 @@ fn show_notification(_title: String, _body: String) -> Result<String, String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             store_secret,
             get_secret,
             delete_secret,
             get_app_version,
-            register_ptt_hotkey,
             show_notification,
         ])
         .run(tauri::generate_context!())

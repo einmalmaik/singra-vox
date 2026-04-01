@@ -81,6 +81,20 @@ function upsertVoiceState(channels, channelId, nextState) {
   });
 }
 
+function mergeMessages(previousMessages, nextMessage) {
+  if (!nextMessage) {
+    return previousMessages;
+  }
+
+  const mergedMessages = previousMessages.some((message) => message.id === nextMessage.id)
+    ? previousMessages.map((message) => (message.id === nextMessage.id ? { ...message, ...nextMessage } : message))
+    : [...previousMessages, nextMessage];
+
+  return mergedMessages.slice().sort((left, right) => (
+    new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
+  ));
+}
+
 export default function MainLayout() {
   const { t } = useTranslation();
   const { user, token, logout, setUser } = useAuth();
@@ -89,6 +103,7 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
+  const heartbeatTimer = useRef(null);
   const voiceRef = useRef(null);
   const currentServerRef = useRef(null);
   const currentChannelRef = useRef(null);
@@ -298,7 +313,12 @@ export default function MainLayout() {
     switch (data.type) {
       case "new_message":
         if (data.channel_id === currentChannelRef.current?.id) {
-          setMessages((previous) => previous.some((message) => message.id === data.message.id) ? previous : [...previous, data.message]);
+          setMessages((previous) => mergeMessages(previous, data.message));
+          setTypingUsers((previous) => {
+            const channelTyping = { ...(previous[data.channel_id] || {}) };
+            delete channelTyping[data.message.author_id];
+            return { ...previous, [data.channel_id]: channelTyping };
+          });
         } else {
           void refreshUnread();
         }
@@ -313,6 +333,9 @@ export default function MainLayout() {
         break;
 
       case "typing":
+        if (!data.channel_id) {
+          break;
+        }
         setTypingUsers((previous) => {
           const channelTyping = { ...(previous[data.channel_id] || {}), [data.user_id]: data.username };
           return { ...previous, [data.channel_id]: channelTyping };
@@ -482,9 +505,31 @@ export default function MainLayout() {
     const ws = new WebSocket(`${config.wsBase}/api/ws?token=${token}`);
     wsRef.current = ws;
 
+    ws.onopen = () => {
+      if (heartbeatTimer.current) {
+        clearInterval(heartbeatTimer.current);
+      }
+
+      heartbeatTimer.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 20000);
+
+      if (currentServerRef.current?.id) {
+        void loadServerSnapshot(currentServerRef.current.id);
+      }
+      if (currentDmUserRef.current?.id) {
+        void loadDmConversations();
+      }
+    };
+
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (data.type === "pong") {
+          return;
+        }
         void handleWsEvent(data);
       } catch {
         // Ignore malformed socket payloads.
@@ -492,6 +537,10 @@ export default function MainLayout() {
     };
 
     ws.onclose = () => {
+      if (heartbeatTimer.current) {
+        clearInterval(heartbeatTimer.current);
+        heartbeatTimer.current = null;
+      }
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
       }
@@ -499,7 +548,7 @@ export default function MainLayout() {
     };
 
     ws.onerror = () => ws.close();
-  }, [config?.wsBase, handleWsEvent, token]);
+  }, [config?.wsBase, handleWsEvent, loadDmConversations, loadServerSnapshot, token]);
 
   useEffect(() => {
     void loadServers();
@@ -515,6 +564,9 @@ export default function MainLayout() {
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
+      }
+      if (heartbeatTimer.current) {
+        clearInterval(heartbeatTimer.current);
       }
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);

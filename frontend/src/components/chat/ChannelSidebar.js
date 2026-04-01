@@ -47,6 +47,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -65,7 +66,7 @@ import {
 import api, { formatError } from "@/lib/api";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { useE2EE } from "@/contexts/E2EEContext";
-import { loadVoicePreferences, saveVoicePreferences } from "@/lib/voicePreferences";
+import { loadVoicePreferences, saveVoicePreferences, subscribeVoicePreferences } from "@/lib/voicePreferences";
 import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
 import {
   buildChannelOrganization,
@@ -78,6 +79,14 @@ import SortableChannelItem from "@/components/channels/SortableChannelItem";
 import ChannelContainerDropZone from "@/components/channels/ChannelContainerDropZone";
 import ServerSettingsOverlay from "@/components/settings/ServerSettingsOverlay";
 import GlobalSettingsOverlay from "@/components/settings/GlobalSettingsOverlay";
+import VoiceMediaStage from "@/components/chat/VoiceMediaStage";
+import { useDesktopPtt } from "@/hooks/useDesktopPtt";
+
+const SCREEN_SHARE_PRESETS = {
+  "480p30": { width: 854, height: 480, frameRate: 30 },
+  "720p30": { width: 1280, height: 720, frameRate: 30 },
+  "1080p60": { width: 1920, height: 1080, frameRate: 60 },
+};
 
 export default function ChannelSidebar({
   server,
@@ -106,6 +115,10 @@ export default function ChannelSidebar({
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
+  const [screenShareDialogOpen, setScreenShareDialogOpen] = useState(false);
+  const [screenShareQuality, setScreenShareQuality] = useState("1080p60");
+  const [screenShareAudio, setScreenShareAudio] = useState(true);
+  const [screenShareSurface, setScreenShareSurface] = useState("monitor");
   const [voiceChannel, setVoiceChannel] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
@@ -116,6 +129,13 @@ export default function ChannelSidebar({
     localSpeaking: false,
     activeSpeakerIds: [],
     audioLevel: 0,
+  });
+  const [mediaParticipants, setMediaParticipants] = useState([]);
+  const [stageState, setStageState] = useState({
+    open: false,
+    participantId: null,
+    participantName: "",
+    source: null,
   });
   const [localVoicePreferences, setLocalVoicePreferences] = useState(
     loadVoicePreferences(user?.id, { isDesktop }),
@@ -140,6 +160,10 @@ export default function ChannelSidebar({
   const activeDragChannel = activeDragId ? channelOrganization.byId[activeDragId] : null;
   const isDraggingChannel = Boolean(activeDragChannel);
   const canDropIntoCategory = activeDragChannel?.type && activeDragChannel.type !== "category";
+  const mediaByUserId = useMemo(
+    () => new Map(mediaParticipants.map((participant) => [participant.userId, participant])),
+    [mediaParticipants],
+  );
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -148,9 +172,22 @@ export default function ChannelSidebar({
     }),
   );
 
+  const pttDebug = useDesktopPtt({
+    enabled: Boolean(isDesktop && localVoicePreferences.pttEnabled),
+    shortcut: localVoicePreferences.pttKey,
+    voiceEngineRef,
+    active: Boolean(isDesktop),
+  });
+
   useEffect(() => {
     setLocalVoicePreferences(loadVoicePreferences(user?.id, { isDesktop }));
   }, [isDesktop, user?.id]);
+
+  useEffect(() => {
+    return subscribeVoicePreferences(user?.id, (nextPreferences) => {
+      setLocalVoicePreferences(nextPreferences);
+    });
+  }, [user?.id]);
 
   const bindVoiceEngine = useCallback((engine) => {
     const handleEvent = (event) => {
@@ -158,6 +195,9 @@ export default function ChannelSidebar({
       if (event.type === "deafen_change") setIsDeafened(Boolean(event.isDeafened));
       if (event.type === "camera_change") setCameraEnabled(Boolean(event.enabled));
       if (event.type === "screen_share_change") setScreenShareEnabled(Boolean(event.enabled));
+      if (event.type === "media_tracks_update") {
+        setMediaParticipants(event.participants || []);
+      }
       if (event.type === "speaking_update") {
         setVoiceActivity({
           localSpeaking: Boolean(event.localSpeaking),
@@ -169,6 +209,7 @@ export default function ChannelSidebar({
         setVoiceActivity({ localSpeaking: false, activeSpeakerIds: [], audioLevel: 0 });
         setCameraEnabled(false);
         setScreenShareEnabled(false);
+        setMediaParticipants([]);
       }
     };
 
@@ -191,10 +232,10 @@ export default function ChannelSidebar({
     }
     const engine = voiceEngineRef?.current;
     if (engine && engine.isMuted !== Boolean(selfState.is_muted)) {
-      engine.toggleMute();
+      engine.setMuted(Boolean(selfState.is_muted));
     }
     if (engine && engine.isDeafened !== Boolean(selfState.is_deafened)) {
-      engine.toggleDeafen();
+      engine.setDeafened(Boolean(selfState.is_deafened));
     }
     setIsMuted(Boolean(selfState.is_muted));
     setIsDeafened(Boolean(selfState.is_deafened));
@@ -234,6 +275,32 @@ export default function ChannelSidebar({
       window.clearInterval(intervalId);
     };
   }, [currentVoiceParticipantIds, voiceChannel?.id, voiceChannel?.is_private, voiceEngineRef]);
+
+  useEffect(() => {
+    if (!stageState.open || !stageState.participantId || !stageState.source) {
+      return;
+    }
+
+    const participantMedia = stageState.participantId === user?.id
+      ? {
+          hasCamera: cameraEnabled,
+          hasScreenShare: screenShareEnabled,
+        }
+      : mediaByUserId.get(stageState.participantId);
+
+    const stillAvailable = stageState.source === "screen_share"
+      ? Boolean(participantMedia?.hasScreenShare)
+      : Boolean(participantMedia?.hasCamera);
+
+    if (!stillAvailable) {
+      setStageState({
+        open: false,
+        participantId: null,
+        participantName: "",
+        source: null,
+      });
+    }
+  }, [cameraEnabled, mediaByUserId, screenShareEnabled, stageState, user?.id]);
 
   const updateLocalPreferences = useCallback(async (partialUpdate) => {
     const nextPreferences = saveVoicePreferences(user?.id, partialUpdate, { isDesktop });
@@ -386,6 +453,8 @@ export default function ChannelSidebar({
       setIsDeafened(false);
       setCameraEnabled(false);
       setScreenShareEnabled(false);
+      setMediaParticipants([]);
+      setStageState({ open: false, participantId: null, participantName: "", source: null });
       onRefreshChannels?.();
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail || t("channel.leaveVoiceFailed")));
@@ -395,11 +464,17 @@ export default function ChannelSidebar({
   const toggleMute = async () => {
     if (!voiceChannel) return;
     const engine = voiceEngineRef?.current;
-    const nextMuted = engine ? engine.toggleMute() : !isMuted;
+    const nextMuted = engine ? engine.setMuted(!isMuted) : !isMuted;
     setIsMuted(nextMuted);
     try {
-      await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_muted: nextMuted });
+      const response = await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_muted: nextMuted });
+      const persistedMuted = Boolean(response?.data?.is_muted ?? nextMuted);
+      engine?.setMuted(persistedMuted);
+      setIsMuted(persistedMuted);
+      onRefreshChannels?.();
     } catch (error) {
+      engine?.setMuted(!nextMuted);
+      setIsMuted(!nextMuted);
       toast.error(formatError(error.response?.data?.detail || t("channel.muteUpdateFailed")));
     }
   };
@@ -407,11 +482,17 @@ export default function ChannelSidebar({
   const toggleDeafen = async () => {
     if (!voiceChannel) return;
     const engine = voiceEngineRef?.current;
-    const nextDeafened = engine ? engine.toggleDeafen() : !isDeafened;
+    const nextDeafened = engine ? engine.setDeafened(!isDeafened) : !isDeafened;
     setIsDeafened(nextDeafened);
     try {
-      await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_deafened: nextDeafened });
+      const response = await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_deafened: nextDeafened });
+      const persistedDeafened = Boolean(response?.data?.is_deafened ?? nextDeafened);
+      engine?.setDeafened(persistedDeafened);
+      setIsDeafened(persistedDeafened);
+      onRefreshChannels?.();
     } catch (error) {
+      engine?.setDeafened(!nextDeafened);
+      setIsDeafened(!nextDeafened);
       toast.error(formatError(error.response?.data?.detail || t("channel.deafenUpdateFailed")));
     }
   };
@@ -428,11 +509,30 @@ export default function ChannelSidebar({
 
   const toggleScreenShare = async () => {
     if (!voiceChannel || !voiceEngineRef?.current) return;
+    if (!screenShareEnabled) {
+      setScreenShareDialogOpen(true);
+      return;
+    }
     try {
       const enabled = await voiceEngineRef.current.toggleScreenShare();
       setScreenShareEnabled(Boolean(enabled));
     } catch (error) {
       toast.error(formatError(error?.message || "Screen sharing could not be toggled."));
+    }
+  };
+
+  const startScreenShare = async () => {
+    if (!voiceChannel || !voiceEngineRef?.current) return;
+    try {
+      const enabled = await voiceEngineRef.current.startScreenShare({
+        audio: screenShareAudio,
+        displaySurface: screenShareSurface,
+        resolution: SCREEN_SHARE_PRESETS[screenShareQuality] || SCREEN_SHARE_PRESETS["1080p60"],
+      });
+      setScreenShareEnabled(Boolean(enabled));
+      setScreenShareDialogOpen(false);
+    } catch (error) {
+      toast.error(formatError(error?.message || "Screen sharing could not be started."));
     }
   };
 
@@ -503,6 +603,15 @@ export default function ChannelSidebar({
       toast.error(formatError(error.response?.data?.detail));
     }
   }, [channels, syncChannelOrder, t]);
+
+  const openMediaStage = useCallback((participantId, participantName, source) => {
+    setStageState({
+      open: true,
+      participantId,
+      participantName,
+      source,
+    });
+  }, []);
 
   const renderChannelRow = (channel, { nested = false } = {}) => {
     const unread = unreadMap?.[channel.id];
@@ -681,6 +790,15 @@ export default function ChannelSidebar({
             ? voiceActivity.localSpeaking
             : voiceActivity.activeSpeakerIds.includes(participantId);
           const isServerOwner = server?.owner_id === participantId;
+          const participantMedia = participantId === user?.id
+            ? {
+                hasCamera: cameraEnabled,
+                hasScreenShare: screenShareEnabled,
+              }
+            : mediaByUserId.get(participantId);
+          const hasCamera = Boolean(participantMedia?.hasCamera);
+          const hasScreenShare = Boolean(participantMedia?.hasScreenShare);
+          const participantName = voiceState.user?.display_name || t("common.unknown");
 
           return (
             <DropdownMenu key={participantId}>
@@ -691,7 +809,45 @@ export default function ChannelSidebar({
                   }`}>
                     {voiceState.user?.display_name?.[0]?.toUpperCase() || "?"}
                   </div>
-                  <span className="truncate flex-1">{voiceState.user?.display_name || t("common.unknown")}</span>
+                  <span className="truncate flex-1">{participantName}</span>
+                  {hasCamera && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openMediaStage(participantId, participantName, "camera");
+                      }}
+                      className="rounded p-0.5 text-[#22C55E] transition-colors hover:bg-[#27272A] hover:text-white"
+                      title={t("channel.viewCamera")}
+                    >
+                      <VideoCamera size={12} weight="fill" />
+                    </span>
+                  )}
+                  {hasScreenShare && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openMediaStage(participantId, participantName, "screen_share");
+                      }}
+                      className="rounded p-0.5 text-[#22C55E] transition-colors hover:bg-[#27272A] hover:text-white"
+                      title={t("channel.watchStream")}
+                    >
+                      <MonitorPlay size={12} weight="fill" />
+                    </span>
+                  )}
                   {voiceState.is_muted && <MicrophoneSlash size={12} className="text-[#EF4444]" />}
                   {voiceState.is_deafened && <SpeakerSlash size={12} className="text-[#EF4444]" />}
                   {locallyMuted && <Prohibit size={12} className="text-[#F59E0B]" />}
@@ -732,6 +888,21 @@ export default function ChannelSidebar({
                 >
                   {t("channel.resetLocalAudio")}
                 </DropdownMenuItem>
+                {(hasCamera || hasScreenShare) && (
+                  <>
+                    <DropdownMenuSeparator className="bg-[#27272A]" />
+                    {hasScreenShare && (
+                      <DropdownMenuItem onClick={() => openMediaStage(participantId, participantName, "screen_share")}>
+                        {t("channel.watchStream")}
+                      </DropdownMenuItem>
+                    )}
+                    {hasCamera && (
+                      <DropdownMenuItem onClick={() => openMediaStage(participantId, participantName, "camera")}>
+                        {t("channel.viewCamera")}
+                      </DropdownMenuItem>
+                    )}
+                  </>
+                )}
                 {participantId !== user?.id && (
                   <>
                     {(capabilities.canMuteMembers || capabilities.canDeafenMembers || capabilities.canKickMembers || capabilities.canBanMembers) && (
@@ -984,7 +1155,7 @@ export default function ChannelSidebar({
                   }`}
                 >
                   <VideoCamera size={14} />
-                  {cameraEnabled ? "Camera on" : "Camera"}
+                  {cameraEnabled ? t("channel.cameraOn") : t("channel.camera")}
                 </button>
                 <button
                   onClick={toggleScreenShare}
@@ -994,7 +1165,7 @@ export default function ChannelSidebar({
                   }`}
                 >
                   <MonitorPlay size={14} />
-                  {screenShareEnabled ? "Sharing" : "Share"}
+                  {screenShareEnabled ? t("channel.sharing") : t("channel.share")}
                 </button>
                 <button
                   onClick={leaveVoice}
@@ -1054,6 +1225,81 @@ export default function ChannelSidebar({
         channels={channels}
         onUserUpdated={onUserUpdated}
         onLogout={onLogout}
+        pttDebug={pttDebug}
+      />
+      <Dialog open={screenShareDialogOpen} onOpenChange={setScreenShareDialogOpen}>
+        <DialogContent className="max-w-lg border-[#27272A] bg-[#18181B] text-white">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "Manrope" }}>{t("channel.shareScreen")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("channel.shareQuality")}</Label>
+              <Select value={screenShareQuality} onValueChange={setScreenShareQuality}>
+                <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
+                  <SelectItem value="480p30">480p / 30 FPS</SelectItem>
+                  <SelectItem value="720p30">720p / 30 FPS</SelectItem>
+                  <SelectItem value="1080p60">1080p / 60 FPS</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("channel.shareSurface")}</Label>
+              <Select value={screenShareSurface} onValueChange={setScreenShareSurface}>
+                <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
+                  <SelectItem value="monitor">{t("channel.shareEntireScreen")}</SelectItem>
+                  <SelectItem value="window">{t("channel.shareWindow")}</SelectItem>
+                  <SelectItem value="browser">{t("channel.shareTab")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-[#27272A] bg-[#121212] px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
+                <p className="text-xs text-[#71717A]">{t("channel.shareSystemAudioHelp")}</p>
+              </div>
+              <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
+            </div>
+
+            <div className="rounded-lg border border-[#27272A] bg-[#121212] px-4 py-3 text-xs text-[#71717A]">
+              {t("channel.shareScreenPickerHint")}
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setScreenShareDialogOpen(false)}
+                className="border-[#27272A] bg-transparent text-white hover:bg-[#121212]"
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void startScreenShare()}
+                className="bg-[#6366F1] hover:bg-[#4F46E5]"
+              >
+                {t("channel.startSharing")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <VoiceMediaStage
+        open={stageState.open}
+        onClose={() => setStageState({ open: false, participantId: null, participantName: "", source: null })}
+        voiceEngineRef={voiceEngineRef}
+        participantId={stageState.participantId}
+        participantName={stageState.participantName}
+        source={stageState.source}
       />
     </>
   );

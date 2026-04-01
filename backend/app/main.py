@@ -932,30 +932,48 @@ class VoiceTokenInput(BaseModel):
 # ============================================================
 class WSManager:
     def __init__(self):
-        self.conns: Dict[str, WebSocket] = {}
+        self.conns: Dict[str, Dict[str, WebSocket]] = {}
         self.user_servers: Dict[str, set] = {}
 
     async def connect(self, ws: WebSocket, uid: str):
         await ws.accept()
-        self.conns[uid] = ws
-        members = await db.server_members.find(
-            {"user_id": uid, "is_banned": {"$ne": True}}, {"_id": 0, "server_id": 1}
-        ).to_list(100)
-        self.user_servers[uid] = {m["server_id"] for m in members}
-        await db.users.update_one({"id": uid}, {"$set": {"status": "online", "last_seen": now_utc()}})
-        await broadcast_presence_update(uid)
+        connection_id = new_id()
+        self.conns.setdefault(uid, {})[connection_id] = ws
+        if uid not in self.user_servers:
+            members = await db.server_members.find(
+                {"user_id": uid, "is_banned": {"$ne": True}}, {"_id": 0, "server_id": 1}
+            ).to_list(100)
+            self.user_servers[uid] = {m["server_id"] for m in members}
+        if len(self.conns[uid]) == 1:
+            await db.users.update_one({"id": uid}, {"$set": {"status": "online", "last_seen": now_utc()}})
+            await broadcast_presence_update(uid)
+        return connection_id
 
-    def disconnect(self, uid: str):
+    def disconnect(self, uid: str, connection_id: str) -> int:
+        user_connections = self.conns.get(uid)
+        if not user_connections:
+            return 0
+        user_connections.pop(connection_id, None)
+        if user_connections:
+            return len(user_connections)
         self.conns.pop(uid, None)
         self.user_servers.pop(uid, None)
+        return 0
 
     async def send(self, uid: str, data: dict):
-        ws = self.conns.get(uid)
-        if ws:
+        user_connections = self.conns.get(uid)
+        if not user_connections:
+            return
+
+        stale_connection_ids = []
+        for connection_id, ws in list(user_connections.items()):
             try:
                 await ws.send_json(data)
             except Exception:
-                self.disconnect(uid)
+                stale_connection_ids.append(connection_id)
+
+        for connection_id in stale_connection_ids:
+            self.disconnect(uid, connection_id)
 
     async def broadcast_server(self, sid: str, data: dict, exclude: str = None):
         for uid, svrs in list(self.user_servers.items()):
@@ -983,8 +1001,20 @@ async def broadcast_presence_update(user_id: str):
         "user_id": user_id,
         "user": sanitize_user(member_user),
     }
-    for server_id in await list_member_server_ids(user_id):
-        await ws_mgr.broadcast_server(server_id, payload)
+    member_server_ids = set(await list_member_server_ids(user_id))
+    if not member_server_ids:
+        return
+
+    # Presence is scoped to mutual communities, but a user can share more than
+    # one server with the same recipient. We de-duplicate the fan-out here so
+    # clients do not receive the same presence packet once per shared server.
+    recipient_ids = [
+        uid
+        for uid, server_ids in list(ws_mgr.user_servers.items())
+        if member_server_ids.intersection(server_ids)
+    ]
+    for recipient_id in recipient_ids:
+        await ws_mgr.send(recipient_id, payload)
 
 
 async def clear_voice_membership(
@@ -3001,7 +3031,7 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None)):
     except Exception:
         await websocket.close(code=4001)
         return
-    await ws_mgr.connect(websocket, uid)
+    connection_id = await ws_mgr.connect(websocket, uid)
     try:
         while True:
             data = await websocket.receive_json()
@@ -3029,10 +3059,11 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None)):
     except Exception as e:
         logger.error(f"WS error: {e}")
     finally:
-        ws_mgr.disconnect(uid)
-        await db.users.update_one({"id": uid}, {"$set": {"status": "offline", "last_seen": now_utc()}})
-        await clear_voice_membership(uid)
-        await broadcast_presence_update(uid)
+        remaining_connections = ws_mgr.disconnect(uid, connection_id)
+        if remaining_connections == 0:
+            await db.users.update_one({"id": uid}, {"$set": {"status": "offline", "last_seen": now_utc()}})
+            await clear_voice_membership(uid)
+            await broadcast_presence_update(uid)
 
 # ============================================================
 # Startup
