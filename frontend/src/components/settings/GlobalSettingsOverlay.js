@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import api, { formatError } from "@/lib/api";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import { useE2EE } from "@/contexts/E2EEContext";
 import SettingsOverlayShell from "@/components/settings/SettingsOverlayShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +45,19 @@ export default function GlobalSettingsOverlay({
 }) {
   const { t, i18n } = useTranslation();
   const { config } = useRuntime();
+  const {
+    loading: e2eeLoading,
+    enabled: e2eeEnabled,
+    devices: e2eeDevices,
+    currentDevice,
+    ready: e2eeReady,
+    isDesktopCapable,
+    initializeE2EE,
+    restoreE2EE,
+    approveDevice,
+    revokeDevice,
+    fingerprintPublicKey,
+  } = useE2EE();
   const isDesktop = Boolean(config?.isDesktop);
   const previewEngineRef = useRef(null);
   const micTestEngineRef = useRef(null);
@@ -68,6 +82,11 @@ export default function GlobalSettingsOverlay({
   const [inputLevel, setInputLevel] = useState(0);
   const [inputThreshold, setInputThreshold] = useState(0);
   const [inputAboveThreshold, setInputAboveThreshold] = useState(false);
+  const [e2eeDeviceName, setE2eeDeviceName] = useState("Main desktop");
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState("");
+  const [confirmRecoveryPassphrase, setConfirmRecoveryPassphrase] = useState("");
+  const [e2eeSubmitting, setE2eeSubmitting] = useState(false);
+  const [currentDeviceFingerprint, setCurrentDeviceFingerprint] = useState("");
 
   const updateVoicePreferences = useCallback(async (partialUpdate) => {
     const nextPreferences = saveVoicePreferences(user?.id, partialUpdate, { isDesktop });
@@ -86,6 +105,29 @@ export default function GlobalSettingsOverlay({
     setAvatarUrl(user?.avatar_url || "");
     setStatus(user?.status || "online");
   }, [isDesktop, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const preferredName = user.display_name ? `${user.display_name}'s desktop` : "Main desktop";
+    setE2eeDeviceName(preferredName);
+  }, [user]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!currentDevice?.public_key) {
+        setCurrentDeviceFingerprint("");
+        return;
+      }
+      const fingerprint = await fingerprintPublicKey(currentDevice.public_key);
+      if (!cancelled) {
+        setCurrentDeviceFingerprint(fingerprint);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDevice?.public_key, fingerprintPublicKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -260,6 +302,52 @@ export default function GlobalSettingsOverlay({
       toast.error(formatError(err?.response?.data?.detail));
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleInitializeE2EE = async () => {
+    if (recoveryPassphrase.length < 12) {
+      toast.error("Use a longer recovery passphrase for end-to-end encryption.");
+      return;
+    }
+    if (recoveryPassphrase !== confirmRecoveryPassphrase) {
+      toast.error("The recovery passphrases do not match.");
+      return;
+    }
+    setE2eeSubmitting(true);
+    try {
+      await initializeE2EE({
+        passphrase: recoveryPassphrase,
+        deviceName: e2eeDeviceName.trim() || "Main desktop",
+      });
+      setRecoveryPassphrase("");
+      setConfirmRecoveryPassphrase("");
+      toast.success("End-to-end encryption is now enabled on this desktop.");
+    } catch (error) {
+      toast.error(formatError(error?.response?.data?.detail || error.message));
+    } finally {
+      setE2eeSubmitting(false);
+    }
+  };
+
+  const handleRestoreE2EE = async () => {
+    if (!recoveryPassphrase) {
+      toast.error("Enter the recovery passphrase for this account.");
+      return;
+    }
+    setE2eeSubmitting(true);
+    try {
+      await restoreE2EE({
+        passphrase: recoveryPassphrase,
+        deviceName: e2eeDeviceName.trim() || "Recovered desktop",
+      });
+      setRecoveryPassphrase("");
+      setConfirmRecoveryPassphrase("");
+      toast.success("This desktop was restored for end-to-end encryption.");
+    } catch (error) {
+      toast.error(formatError(error?.response?.data?.detail || error.message));
+    } finally {
+      setE2eeSubmitting(false);
     }
   };
 
@@ -616,6 +704,105 @@ export default function GlobalSettingsOverlay({
 
       {activeSection === "privacy" && (
         <div className="space-y-6" data-testid="privacy-settings-panel">
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <div className="flex items-start gap-3">
+              <ShieldCheck size={20} className="mt-0.5 text-[#22C55E]" />
+              <div className="flex-1">
+                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>End-to-end encryption</h3>
+                <p className="mt-1 text-sm text-[#71717A]">
+                  {isDesktopCapable
+                    ? "Private channels and direct messages are only readable on verified desktop devices."
+                    : "Strong end-to-end encryption is only available in the desktop app. The web app stays a convenience client."}
+                </p>
+
+                {!isDesktopCapable && (
+                  <div className="mt-4 rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3 text-sm text-[#A1A1AA]">
+                    Install or open the desktop app to bootstrap recovery, verify devices and decrypt protected conversations.
+                  </div>
+                )}
+
+                {isDesktopCapable && !e2eeEnabled && (
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Device name</Label>
+                      <Input value={e2eeDeviceName} onChange={(event) => setE2eeDeviceName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Recovery passphrase</Label>
+                      <Input type="password" value={recoveryPassphrase} onChange={(event) => setRecoveryPassphrase(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Confirm recovery passphrase</Label>
+                      <Input type="password" value={confirmRecoveryPassphrase} onChange={(event) => setConfirmRecoveryPassphrase(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                    </div>
+                    <div className="md:col-span-2 flex flex-wrap gap-3">
+                      <Button onClick={handleInitializeE2EE} disabled={e2eeSubmitting} className="bg-[#22C55E] hover:bg-[#16A34A]">
+                        {e2eeSubmitting ? "Configuring..." : "Enable E2EE on this desktop"}
+                      </Button>
+                      <Button type="button" variant="outline" onClick={handleRestoreE2EE} disabled={e2eeSubmitting} className="border-[#27272A] bg-[#0A0A0A] text-white hover:bg-[#18181B]">
+                        Restore with recovery passphrase
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {isDesktopCapable && e2eeEnabled && (
+                  <div className="mt-5 space-y-4">
+                    <div className="rounded-xl border border-[#27272A] bg-[#0A0A0A] px-4 py-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{currentDevice?.device_name || e2eeDeviceName}</p>
+                          <p className="mt-1 text-xs text-[#71717A]">
+                            {e2eeReady ? "Verified desktop device" : "Recovery or verification still required"}
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${e2eeReady ? "bg-[#14532D] text-[#86EFAC]" : "bg-[#3F3F46] text-[#E4E4E7]"}`}>
+                          {e2eeReady ? "Ready" : "Pending"}
+                        </span>
+                      </div>
+                      {currentDeviceFingerprint && (
+                        <p className="mt-3 rounded-lg border border-[#27272A] bg-[#121212] px-3 py-2 text-xs tracking-[0.18em] text-[#A1A1AA]">
+                          {currentDeviceFingerprint}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-[#27272A] bg-[#0A0A0A] px-4 py-4">
+                      <h4 className="text-sm font-semibold text-white">Trusted devices</h4>
+                      <div className="mt-3 space-y-3">
+                        {e2eeLoading && (
+                          <p className="text-sm text-[#71717A]">Loading encrypted device state...</p>
+                        )}
+                        {!e2eeLoading && e2eeDevices.map((device) => (
+                          <div key={device.device_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#27272A] bg-[#121212] px-3 py-3">
+                            <div>
+                              <p className="text-sm font-medium text-white">{device.device_name}</p>
+                              <p className="mt-1 text-xs text-[#71717A]">
+                                {device.verified_at ? `Verified at ${new Date(device.verified_at).toLocaleString()}` : "Waiting for approval or recovery"}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {!device.verified_at && (
+                                <Button type="button" size="sm" onClick={() => approveDevice(device.device_id)} className="bg-[#6366F1] hover:bg-[#4F46E5]">
+                                  Approve
+                                </Button>
+                              )}
+                              {currentDevice?.device_id !== device.device_id && !device.revoked_at && (
+                                <Button type="button" size="sm" variant="outline" onClick={() => revokeDevice(device.device_id)} className="border-[#EF4444]/30 bg-transparent text-[#FCA5A5] hover:bg-[#450A0A]">
+                                  Revoke
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
             <div className="flex items-start gap-3">
               <Export size={20} className="mt-0.5 text-[#6366F1]" />

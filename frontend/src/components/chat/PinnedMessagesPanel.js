@@ -1,19 +1,31 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { PushPin, X } from "@phosphor-icons/react";
+import { Paperclip, PushPin, ShieldCheck, X } from "@phosphor-icons/react";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
+import { useE2EE } from "@/contexts/E2EEContext";
 
-export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessage, refreshKey }) {
+export default function PinnedMessagesPanel({ channel, channelId, onClose, onJumpToMessage, refreshKey }) {
   const { t } = useTranslation();
+  const {
+    ready: e2eeReady,
+    isDesktopCapable,
+    decryptMessage,
+    downloadAndDecryptAttachment,
+  } = useE2EE();
   const [pins, setPins] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [decryptedPins, setDecryptedPins] = useState({});
+  const isE2EEChannel = Boolean(channel?.is_private);
+  const canReadE2EEPins = !isE2EEChannel || (isDesktopCapable && e2eeReady);
 
   const loadPins = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get(`/channels/${channelId}/pins`);
       setPins(res.data);
+      setDecryptedPins({});
     } catch {
       setPins([]);
     } finally {
@@ -27,11 +39,63 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
     }
   }, [channelId, loadPins, refreshKey]);
 
+  useEffect(() => {
+    if (!isE2EEChannel || !canReadE2EEPins) {
+      return;
+    }
+
+    let cancelled = false;
+    const encryptedPins = pins.filter((pin) => pin.is_e2ee && !decryptedPins[pin.id]);
+    if (!encryptedPins.length) {
+      return;
+    }
+
+    (async () => {
+      const resolvedPins = await Promise.all(
+        encryptedPins.map(async (pin) => ({
+          id: pin.id,
+          payload: await decryptMessage(pin),
+        })),
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      setDecryptedPins((previous) => {
+        const next = { ...previous };
+        resolvedPins.forEach((entry) => {
+          if (entry.payload) {
+            next[entry.id] = entry.payload;
+          }
+        });
+        return next;
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canReadE2EEPins, decryptMessage, decryptedPins, isE2EEChannel, pins]);
+
   const unpin = async (msgId) => {
     try {
       await api.delete(`/messages/${msgId}/pin`);
       setPins(prev => prev.filter(p => p.id !== msgId));
     } catch {}
+  };
+
+  const openEncryptedAttachment = async (attachment) => {
+    try {
+      const { url } = await downloadAndDecryptAttachment(attachment);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.name || "encrypted-attachment";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      toast.error("Encrypted attachment could not be opened.");
+    }
   };
 
   return (
@@ -53,6 +117,12 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
           <div className="flex justify-center py-8">
             <div className="w-5 h-5 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : !canReadE2EEPins ? (
+          <div className="rounded-lg border border-[#27272A] bg-[#111214] p-4 text-sm text-[#A1A1AA]">
+            {isDesktopCapable
+              ? "This private channel is end-to-end encrypted. Verify or restore this desktop device in Settings > Privacy to review pinned messages."
+              : "Pinned messages from end-to-end encrypted channels are only available in the desktop app."}
+          </div>
         ) : pins.length === 0 ? (
             <div className="text-center py-8">
               <PushPin size={32} className="text-[#27272A] mx-auto mb-2" />
@@ -61,6 +131,18 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
           </div>
         ) : (
           pins.map(pin => (
+            (() => {
+              const decryptedPayload = pin.is_e2ee ? decryptedPins[pin.id] : null;
+              const decryptedAttachments = decryptedPayload?.attachments || [];
+              const hasDecryptedText = typeof decryptedPayload?.text === "string" && decryptedPayload.text.length > 0;
+              const hasDecryptedAttachments = decryptedAttachments.length > 0;
+              const displayContent = pin.is_e2ee
+                ? (hasDecryptedText ? decryptedPayload.text : (hasDecryptedAttachments ? "" : "Encrypted message"))
+                : pin.content;
+              const displayAttachments = pin.is_e2ee
+                ? decryptedAttachments
+                : (pin.attachments || []);
+              return (
             <div key={pin.id} className="bg-[#18181B] border border-[#27272A] rounded-lg p-3 group" data-testid={`pin-${pin.id}`}>
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2">
@@ -75,7 +157,40 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
                 </button>
               </div>
               <div className="space-y-2">
-                <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">{pin.content}</p>
+                {pin.is_e2ee && (
+                  <div className="flex items-center gap-1 text-[10px] uppercase tracking-[0.18em] text-[#818CF8]">
+                    <ShieldCheck size={12} weight="fill" />
+                    <span>End-to-end encrypted</span>
+                  </div>
+                )}
+                {displayContent ? (
+                  <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
+                    {displayContent}
+                  </p>
+                ) : null}
+                {displayAttachments.length > 0 && (
+                  <div className="space-y-1">
+                    {displayAttachments.map((attachment, index) => (
+                      <button
+                        key={`${pin.id}-attachment-${index}`}
+                        type="button"
+                        onClick={() => {
+                          if (pin.is_e2ee) {
+                            void openEncryptedAttachment(attachment);
+                            return;
+                          }
+                          if (attachment.url) {
+                            window.open(attachment.url, "_blank", "noopener,noreferrer");
+                          }
+                        }}
+                        className="flex items-center gap-2 rounded-md bg-[#111214] px-2.5 py-2 text-xs text-[#D4D4D8] transition-colors hover:bg-[#16181D] hover:text-white"
+                      >
+                        <Paperclip size={13} />
+                        <span className="truncate">{attachment.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {pin.reply_to_id && (
                   <MessageReferencePreview
                     message={null}
@@ -97,6 +212,8 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
                 </div>
               </div>
             </div>
+              );
+            })()
           ))
         )}
       </div>

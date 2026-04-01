@@ -9,6 +9,7 @@ let currentSession = {
   accessToken: null,
   refreshToken: null,
   authMode: "cookie",
+  deviceId: null,
 };
 
 let onUnauthorized = null;
@@ -40,6 +41,7 @@ export function clearApiSession() {
     accessToken: null,
     refreshToken: null,
     authMode: runtimeConfig.authMode || "cookie",
+    deviceId: null,
   };
 }
 
@@ -89,6 +91,10 @@ api.interceptors.request.use(async (config) => {
   if (currentSession.authMode === "token" && currentSession.accessToken) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${currentSession.accessToken}`;
+  }
+  if (currentSession.deviceId) {
+    config.headers = config.headers || {};
+    config.headers["X-Singra-Device-Id"] = currentSession.deviceId;
   }
   config.withCredentials = currentSession.authMode === "cookie";
   return config;

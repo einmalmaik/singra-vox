@@ -87,6 +87,36 @@ async def _history_cutoff(uid, sid):
     return member.get("joined_at")
 
 
+async def _private_channel_user_ids(channel_id):
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        return []
+    members = await db.server_members.find(
+        {"server_id": channel["server_id"], "is_banned": {"$ne": True}},
+        {"_id": 0, "user_id": 1, "roles": 1},
+    ).to_list(500)
+    access_entries = await db.channel_access.find({"channel_id": channel_id}, {"_id": 0}).to_list(500)
+    if not channel.get("is_private") or not access_entries:
+        return [member["user_id"] for member in members]
+    allowed = {entry["target_id"] for entry in access_entries if entry.get("type") == "user"}
+    allowed_roles = {entry["target_id"] for entry in access_entries if entry.get("type") == "role"}
+    for member in members:
+        if allowed_roles.intersection(member.get("roles") or []):
+            allowed.add(member["user_id"])
+    server = await db.servers.find_one({"id": channel["server_id"]}, {"_id": 0, "owner_id": 1})
+    if server and server.get("owner_id"):
+        allowed.add(server["owner_id"])
+    return list(allowed)
+
+
+async def _assert_channel_access(user_id, channel):
+    if not channel.get("is_private"):
+        return
+    allowed_ids = await _private_channel_user_ids(channel["id"])
+    if user_id not in allowed_ids:
+        raise HTTPException(403, "No access to this private channel")
+
+
 # ── Helper: create notification ──
 async def _notify(user_id, ntype, title, body, link=None, from_user_id=None):
     await db.notifications.insert_one({
@@ -111,6 +141,7 @@ async def pin_message(message_id: str, request: Request):
     ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
     if not ch:
         raise HTTPException(404)
+    await _assert_channel_access(user["id"], ch)
     if not await _perm(user["id"], ch["server_id"], "pin_messages"):
         if not await _perm(user["id"], ch["server_id"], "manage_messages"):
             raise HTTPException(403, "No permission to pin")
@@ -124,6 +155,8 @@ async def unpin_message(message_id: str, request: Request):
     if not msg:
         raise HTTPException(404)
     ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
+    if ch:
+        await _assert_channel_access(user["id"], ch)
     if ch and not await _perm(user["id"], ch["server_id"], "pin_messages"):
         if not await _perm(user["id"], ch["server_id"], "manage_messages"):
             raise HTTPException(403)
@@ -136,6 +169,7 @@ async def get_pins(channel_id: str, request: Request):
     channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not channel or not await _perm(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
+    await _assert_channel_access(user["id"], channel)
     history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
     pin_query = {"channel_id": channel_id, "is_pinned": True, "is_deleted": {"$ne": True}}
     if history_cutoff:

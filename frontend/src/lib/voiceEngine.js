@@ -1,5 +1,5 @@
 import api from "@/lib/api";
-import { Room, RoomEvent, Track } from "livekit-client";
+import { Room, RoomEvent, Track, createLocalScreenTracks, createLocalVideoTrack } from "livekit-client";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
 
 function clampVolume(value, min = 0, max = 200) {
@@ -35,6 +35,7 @@ export class VoiceEngine {
     this.isDeafened = false;
     this.pttActive = false;
     this.preferences = getDefaultVoicePreferences();
+    this.runtimeConfig = null;
     this.audioElements = new Map();
     this.onStateChange = null;
     this.listeners = new Set();
@@ -64,6 +65,8 @@ export class VoiceEngine {
     this.analysisFrame = null;
     this.analysisData = null;
     this.analysisStream = null;
+    this.cameraTrack = null;
+    this.screenShareTracks = [];
   }
 
   addStateListener(listener) {
@@ -96,6 +99,10 @@ export class VoiceEngine {
         ...optionsOrDeviceId.preferences,
       };
       this.currentInputThreshold = this._resolveInputThreshold();
+    }
+
+    if (optionsOrDeviceId?.runtimeConfig) {
+      this.runtimeConfig = optionsOrDeviceId.runtimeConfig;
     }
 
     await this._probeInput();
@@ -198,10 +205,17 @@ export class VoiceEngine {
       await this.disconnect();
     }
 
+    let encryptionOptions;
+    if (tokenResponse.data.e2ee_required && this.runtimeConfig?.isDesktop) {
+      const { buildMediaE2EEOptions } = await import("@/lib/e2ee/media");
+      encryptionOptions = await buildMediaE2EEOptions(this.runtimeConfig, this.channelId);
+    }
+
     this.room = new Room({
       adaptiveStream: true,
       dynacast: true,
       webAudioMix: false,
+      encryption: encryptionOptions,
     });
 
     this._bindRoomEvents();
@@ -210,6 +224,9 @@ export class VoiceEngine {
       tokenResponse.data.server_url,
       tokenResponse.data.participant_token,
     );
+    if (tokenResponse.data.e2ee_required && typeof this.room.setE2EEEnabled === "function") {
+      await this.room.setE2EEEnabled(true);
+    }
 
     if (typeof this.room.startAudio === "function") {
       await this.room.startAudio();
@@ -318,6 +335,8 @@ export class VoiceEngine {
     }
 
     this.localTrackPublication = null;
+    await this.stopCamera();
+    await this.stopScreenShare();
     this._stopLocalTrackResources();
     await this.stopMicTest();
 
@@ -327,6 +346,53 @@ export class VoiceEngine {
     this.room = null;
     this._resetSpeakingState();
     this._emit("disconnected");
+  }
+
+  async toggleCamera() {
+    if (!this.room) return false;
+    if (this.cameraTrack) {
+      await this.stopCamera();
+      return false;
+    }
+    this.cameraTrack = await createLocalVideoTrack();
+    await this.room.localParticipant.publishTrack(this.cameraTrack);
+    this._emit("camera_change", { enabled: true });
+    return true;
+  }
+
+  async stopCamera() {
+    if (!this.room || !this.cameraTrack) return;
+    await this.room.localParticipant.unpublishTrack(this.cameraTrack, false);
+    this.cameraTrack.stop();
+    this.cameraTrack = null;
+    this._emit("camera_change", { enabled: false });
+  }
+
+  async toggleScreenShare() {
+    if (!this.room) return false;
+    if (this.screenShareTracks.length > 0) {
+      await this.stopScreenShare();
+      return false;
+    }
+    this.screenShareTracks = await createLocalScreenTracks({
+      audio: false,
+      resolution: { width: 1920, height: 1080, frameRate: 60 },
+    });
+    await Promise.all(
+      this.screenShareTracks.map((track) => this.room.localParticipant.publishTrack(track)),
+    );
+    this._emit("screen_share_change", { enabled: true });
+    return true;
+  }
+
+  async stopScreenShare() {
+    if (!this.room || this.screenShareTracks.length === 0) return;
+    await Promise.all(
+      this.screenShareTracks.map((track) => this.room.localParticipant.unpublishTrack(track, false)),
+    );
+    this.screenShareTracks.forEach((track) => track.stop());
+    this.screenShareTracks = [];
+    this._emit("screen_share_change", { enabled: false });
   }
 
   async _probeInput() {

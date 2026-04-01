@@ -1,6 +1,9 @@
 """
 Singra Vox backend application.
 """
+import base64
+import binascii
+import json
 from pathlib import Path
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -29,8 +32,9 @@ import jwt as pyjwt
 from pydantic import BaseModel, ConfigDict, Field
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from app.emailing import render_password_reset_email, render_verification_email, send_email
+from app.blob_storage import ensure_bucket, get_blob, put_blob
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
@@ -69,6 +73,9 @@ EMAIL_VERIFICATION_PURPOSE = "verify_email"
 PASSWORD_RESET_TTL_MINUTES = int(os.environ.get("PASSWORD_RESET_TTL_MINUTES", "15"))
 PASSWORD_RESET_PURPOSE = "password_reset"
 EMAIL_VERIFICATION_CODE_LENGTH = 6
+E2EE_PROTOCOL_VERSION = "sv-e2ee-v1"
+E2EE_DEVICE_HEADER = "X-Singra-Device-Id"
+MAX_E2EE_BLOB_BYTES = int(os.environ.get("MAX_E2EE_BLOB_BYTES", str(50 * 1024 * 1024)))
 
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
@@ -365,6 +372,180 @@ async def build_member_payload(server_id: str, user_id: str) -> Optional[dict]:
     return member
 
 
+def request_device_id(request: Request) -> Optional[str]:
+    return (request.headers.get(E2EE_DEVICE_HEADER) or "").strip() or None
+
+
+def redact_e2ee_fields(message: dict) -> dict:
+    safe = dict(message)
+    safe.pop("_id", None)
+    return safe
+
+
+def decode_base64_bytes(value: str, *, field_name: str) -> bytes:
+    try:
+        return base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(400, f"Invalid base64 payload for {field_name}") from exc
+
+
+async def get_e2ee_account(user_id: str) -> Optional[dict]:
+    return await db.e2ee_accounts.find_one({"user_id": user_id}, {"_id": 0})
+
+
+async def get_device_record(user_id: str, device_id: str) -> Optional[dict]:
+    return await db.e2ee_devices.find_one(
+        {"user_id": user_id, "device_id": device_id},
+        {"_id": 0},
+    )
+
+
+async def require_verified_device(request: Request, user: dict) -> dict:
+    device_id = request_device_id(request)
+    if not device_id:
+        raise HTTPException(428, "Desktop device header required for end-to-end encryption")
+    device = await get_device_record(user["id"], device_id)
+    if not device or device.get("revoked_at"):
+        raise HTTPException(428, "Verified desktop device required for end-to-end encryption")
+    if not device.get("verified_at"):
+        raise HTTPException(428, "This desktop device is not verified for end-to-end encryption yet")
+    return device
+
+
+def sanitize_device_record(device: dict) -> dict:
+    safe = dict(device)
+    safe.pop("_id", None)
+    return safe
+
+
+async def build_e2ee_state(user_id: str, current_device_id: Optional[str]) -> dict:
+    account = await get_e2ee_account(user_id)
+    devices = await db.e2ee_devices.find(
+        {"user_id": user_id},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(50)
+    current_device = None
+    if current_device_id:
+        current_device = next((device for device in devices if device["device_id"] == current_device_id), None)
+    return {
+        "enabled": bool(account),
+        "account": account,
+        "devices": [sanitize_device_record(device) for device in devices],
+        "current_device": sanitize_device_record(current_device) if current_device else None,
+    }
+
+
+async def list_channel_recipient_user_ids(channel: dict) -> List[str]:
+    members = await db.server_members.find(
+        {"server_id": channel["server_id"], "is_banned": {"$ne": True}},
+        {"_id": 0, "user_id": 1, "roles": 1},
+    ).to_list(500)
+    access_entries = await db.channel_access.find(
+        {"channel_id": channel["id"]},
+        {"_id": 0},
+    ).to_list(500)
+
+    if not channel.get("is_private") or not access_entries:
+        return [member["user_id"] for member in members]
+
+    allowed_users = set()
+    allowed_roles = {
+        entry["target_id"]
+        for entry in access_entries
+        if entry.get("type") == "role"
+    }
+    for entry in access_entries:
+        if entry.get("type") == "user":
+            allowed_users.add(entry["target_id"])
+
+    for member in members:
+        if member["user_id"] in allowed_users:
+            continue
+        if allowed_roles.intersection(member.get("roles") or []):
+            allowed_users.add(member["user_id"])
+
+    server = await db.servers.find_one({"id": channel["server_id"]}, {"_id": 0, "owner_id": 1})
+    if server and server.get("owner_id"):
+        allowed_users.add(server["owner_id"])
+
+    return list(allowed_users)
+
+
+async def ensure_private_channel_member_access(user_id: str, channel: dict) -> None:
+    if not channel.get("is_private"):
+        return
+    recipients = await list_channel_recipient_user_ids(channel)
+    if user_id not in recipients:
+        raise HTTPException(403, "No access to this private channel")
+
+
+async def list_group_recipient_user_ids(group_id: str) -> List[str]:
+    group = await db.group_conversations.find_one({"id": group_id}, {"_id": 0, "members": 1})
+    if not group:
+        raise HTTPException(404, "Group conversation not found")
+    return list(group.get("members") or [])
+
+
+async def build_e2ee_recipient_payload(user_ids: List[str]) -> dict:
+    normalized_ids = sorted({user_id for user_id in user_ids if user_id})
+    recipients = []
+    for recipient_id in normalized_ids:
+        account = await get_e2ee_account(recipient_id)
+        devices = await db.e2ee_devices.find(
+            {
+                "user_id": recipient_id,
+                "verified_at": {"$ne": None},
+                "revoked_at": None,
+            },
+            {"_id": 0},
+        ).to_list(50)
+        recipients.append({
+            "user_id": recipient_id,
+            "recovery_public_key": account.get("recovery_public_key") if account else None,
+            "devices": [
+                {
+                    "device_id": device["device_id"],
+                    "device_name": device.get("device_name", ""),
+                    "public_key": device["public_key"],
+                    "verified_at": device.get("verified_at"),
+                }
+                for device in devices
+            ],
+        })
+    return {
+        "protocol_version": E2EE_PROTOCOL_VERSION,
+        "recipients": recipients,
+    }
+
+
+async def authorize_blob_access(user: dict, blob_record: dict) -> None:
+    scope_kind = blob_record.get("scope_kind")
+    scope_id = blob_record.get("scope_id")
+
+    if scope_kind == "dm":
+        participants = blob_record.get("participant_user_ids") or []
+        if user["id"] not in participants:
+            raise HTTPException(403, "No access to this encrypted attachment")
+        return
+
+    if scope_kind == "group":
+        participants = await list_group_recipient_user_ids(scope_id)
+        if user["id"] not in participants:
+            raise HTTPException(403, "No access to this encrypted attachment")
+        return
+
+    if scope_kind == "channel":
+        channel = await db.channels.find_one({"id": scope_id}, {"_id": 0})
+        if not channel:
+            raise HTTPException(404, "Channel not found")
+        if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+            raise HTTPException(403, "No access to this encrypted attachment")
+        await ensure_private_channel_member_access(user["id"], channel)
+        return
+
+    raise HTTPException(400, "Unsupported encrypted attachment scope")
+
+
 async def hydrate_message_mentions(message: dict) -> dict:
     message["mentions_everyone"] = bool(message.get("mentions_everyone"))
 
@@ -640,18 +821,67 @@ class ChannelReorderInput(BaseModel):
     items: List[ChannelReorderItem]
 
 class MessageCreateInput(BaseModel):
-    content: str
+    content: str = ""
     reply_to_id: Optional[str] = None
     attachments: List[dict] = []
     mentioned_user_ids: List[str] = []
     mentioned_role_ids: List[str] = []
     mentions_everyone: bool = False
+    is_e2ee: bool = False
+    ciphertext: Optional[str] = None
+    nonce: Optional[str] = None
+    sender_device_id: Optional[str] = None
+    protocol_version: str = E2EE_PROTOCOL_VERSION
+    message_type: str = "text"
+    key_envelopes: List[dict] = []
 
 class DMCreateInput(BaseModel):
-    content: str
+    content: str = ""
     encrypted_content: Optional[str] = None
     is_encrypted: bool = False
     nonce: Optional[str] = None
+    attachments: List[dict] = []
+    is_e2ee: bool = False
+    ciphertext: Optional[str] = None
+    sender_device_id: Optional[str] = None
+    protocol_version: str = E2EE_PROTOCOL_VERSION
+    message_type: str = "text"
+    key_envelopes: List[dict] = []
+
+
+class E2EEBootstrapInput(BaseModel):
+    device_id: str
+    device_name: str = Field(min_length=2, max_length=80)
+    device_public_key: str
+    recovery_public_key: str
+    encrypted_recovery_private_key: str
+    recovery_salt: str
+    recovery_nonce: str
+
+
+class E2EEDeviceInput(BaseModel):
+    device_id: str
+    device_name: str = Field(min_length=2, max_length=80)
+    device_public_key: str
+
+
+class EncryptedBlobInitInput(BaseModel):
+    scope_kind: str
+    scope_id: str
+    participant_user_ids: List[str] = []
+
+
+class EncryptedBlobContentInput(BaseModel):
+    ciphertext_b64: str
+    sha256: str
+    size_bytes: int = Field(gt=0, le=MAX_E2EE_BLOB_BYTES)
+    content_type: str = "application/octet-stream"
+
+
+class EncryptedMediaKeyInput(BaseModel):
+    sender_device_id: str
+    key_version: str
+    key_envelopes: List[dict]
 
 class RoleCreateInput(BaseModel):
     name: str
@@ -1010,6 +1240,363 @@ async def refresh(inp: RefreshInput, request: Request, response: Response):
         raise HTTPException(401, "Invalid token")
 
 # ============================================================
+# E2EE ROUTES
+# ============================================================
+e2ee_r = APIRouter(prefix="/api/e2ee", tags=["E2EE"])
+
+
+@e2ee_r.get("/state")
+async def get_e2ee_state(request: Request):
+    user = await current_user(request)
+    return await build_e2ee_state(user["id"], request_device_id(request))
+
+
+@e2ee_r.get("/recovery/account")
+async def get_recovery_bundle(request: Request):
+    user = await current_user(request)
+    account = await get_e2ee_account(user["id"])
+    if not account:
+        raise HTTPException(404, "End-to-end encryption is not configured for this account")
+    return {
+        "enabled": True,
+        "recovery_public_key": account.get("recovery_public_key"),
+        "encrypted_recovery_private_key": account.get("encrypted_recovery_private_key"),
+        "recovery_salt": account.get("recovery_salt"),
+        "recovery_nonce": account.get("recovery_nonce"),
+        "protocol_version": account.get("protocol_version", E2EE_PROTOCOL_VERSION),
+    }
+
+
+@e2ee_r.post("/bootstrap")
+async def bootstrap_e2ee(inp: E2EEBootstrapInput, request: Request):
+    user = await current_user(request)
+    existing_account = await get_e2ee_account(user["id"])
+    if existing_account:
+        raise HTTPException(409, "End-to-end encryption is already configured for this account")
+
+    header_device_id = request_device_id(request)
+    if header_device_id and header_device_id != inp.device_id:
+        raise HTTPException(400, "Desktop device id header does not match the bootstrap payload")
+
+    created_at = now_utc()
+    account_doc = {
+        "id": new_id(),
+        "user_id": user["id"],
+        "protocol_version": E2EE_PROTOCOL_VERSION,
+        "recovery_public_key": inp.recovery_public_key,
+        "encrypted_recovery_private_key": inp.encrypted_recovery_private_key,
+        "recovery_salt": inp.recovery_salt,
+        "recovery_nonce": inp.recovery_nonce,
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    device_doc = {
+        "id": new_id(),
+        "user_id": user["id"],
+        "device_id": inp.device_id,
+        "device_name": inp.device_name,
+        "public_key": inp.device_public_key,
+        "verified_at": created_at,
+        "verified_by_device_id": inp.device_id,
+        "revoked_at": None,
+        "created_at": created_at,
+        "last_seen": created_at,
+    }
+    await db.e2ee_accounts.insert_one(account_doc)
+    await db.e2ee_devices.insert_one(device_doc)
+    return await build_e2ee_state(user["id"], inp.device_id)
+
+
+@e2ee_r.post("/devices")
+async def register_e2ee_device(inp: E2EEDeviceInput, request: Request):
+    user = await current_user(request)
+    account = await get_e2ee_account(user["id"])
+    if not account:
+        raise HTTPException(409, "Configure end-to-end encryption on a desktop device first")
+
+    existing = await get_device_record(user["id"], inp.device_id)
+    created_at = now_utc()
+    if existing:
+        if existing.get("revoked_at"):
+            raise HTTPException(409, "This device was revoked and cannot be reused")
+        await db.e2ee_devices.update_one(
+            {"user_id": user["id"], "device_id": inp.device_id},
+            {"$set": {"device_name": inp.device_name, "public_key": inp.device_public_key, "last_seen": created_at}},
+        )
+    else:
+        await db.e2ee_devices.insert_one({
+            "id": new_id(),
+            "user_id": user["id"],
+            "device_id": inp.device_id,
+            "device_name": inp.device_name,
+            "public_key": inp.device_public_key,
+            "verified_at": None,
+            "verified_by_device_id": None,
+            "revoked_at": None,
+            "created_at": created_at,
+            "last_seen": created_at,
+        })
+
+    return await build_e2ee_state(user["id"], inp.device_id)
+
+
+@e2ee_r.post("/devices/{device_id}/approve")
+async def approve_e2ee_device(device_id: str, request: Request):
+    user = await current_user(request)
+    actor_device = await require_verified_device(request, user)
+    target = await get_device_record(user["id"], device_id)
+    if not target:
+        raise HTTPException(404, "Device not found")
+    if target.get("revoked_at"):
+        raise HTTPException(409, "Revoked devices cannot be approved")
+    if target["device_id"] == actor_device["device_id"]:
+        raise HTTPException(400, "This device is already trusted")
+
+    verified_at = now_utc()
+    await db.e2ee_devices.update_one(
+        {"user_id": user["id"], "device_id": device_id},
+        {"$set": {"verified_at": verified_at, "verified_by_device_id": actor_device["device_id"], "last_seen": verified_at}},
+    )
+    return await build_e2ee_state(user["id"], request_device_id(request))
+
+
+@e2ee_r.post("/devices/{device_id}/verify-recovery")
+async def verify_device_via_recovery(device_id: str, request: Request):
+    user = await current_user(request)
+    target = await get_device_record(user["id"], device_id)
+    if not target:
+        raise HTTPException(404, "Device not found")
+    if target.get("revoked_at"):
+        raise HTTPException(409, "Revoked devices cannot be recovered")
+    verified_at = now_utc()
+    await db.e2ee_devices.update_one(
+        {"user_id": user["id"], "device_id": device_id},
+        {"$set": {"verified_at": verified_at, "verified_by_device_id": "recovery", "last_seen": verified_at}},
+    )
+    return await build_e2ee_state(user["id"], device_id)
+
+
+@e2ee_r.post("/devices/{device_id}/revoke")
+async def revoke_e2ee_device(device_id: str, request: Request):
+    user = await current_user(request)
+    actor_device = await require_verified_device(request, user)
+    target = await get_device_record(user["id"], device_id)
+    if not target:
+        raise HTTPException(404, "Device not found")
+    if target["device_id"] == actor_device["device_id"]:
+        raise HTTPException(400, "Revoke this device from another trusted device")
+    await db.e2ee_devices.update_one(
+        {"user_id": user["id"], "device_id": device_id},
+        {"$set": {"revoked_at": now_utc()}},
+    )
+    return await build_e2ee_state(user["id"], actor_device["device_id"])
+
+
+@e2ee_r.get("/dm/{other_user_id}/recipients")
+async def dm_recipients(other_user_id: str, request: Request):
+    user = await current_user(request)
+    other = await db.users.find_one({"id": other_user_id}, {"_id": 0, "id": 1})
+    if not other:
+        raise HTTPException(404, "User not found")
+    return await build_e2ee_recipient_payload([user["id"], other_user_id])
+
+
+@e2ee_r.get("/groups/{group_id}/recipients")
+async def group_recipients(group_id: str, request: Request):
+    user = await current_user(request)
+    recipients = await list_group_recipient_user_ids(group_id)
+    if user["id"] not in recipients:
+        raise HTTPException(403, "No access to this group conversation")
+    return await build_e2ee_recipient_payload(recipients)
+
+
+@e2ee_r.get("/channels/{channel_id}/recipients")
+async def channel_recipients(channel_id: str, request: Request):
+    user = await current_user(request)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    if not channel.get("is_private"):
+        raise HTTPException(400, "Only private channels use the end-to-end recipient API")
+    if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+        raise HTTPException(403, "No permission")
+    await ensure_private_channel_member_access(user["id"], channel)
+    recipients = await list_channel_recipient_user_ids(channel)
+    return await build_e2ee_recipient_payload(recipients)
+
+
+@e2ee_r.post("/blobs/init")
+async def init_encrypted_blob(inp: EncryptedBlobInitInput, request: Request):
+    user = await current_user(request)
+    device = await require_verified_device(request, user)
+    scope_kind = (inp.scope_kind or "").strip().lower()
+    participant_user_ids = sorted(set(inp.participant_user_ids or []))
+
+    if scope_kind == "dm":
+        if user["id"] not in participant_user_ids or len(participant_user_ids) != 2:
+            raise HTTPException(400, "Encrypted DM uploads require both DM participants")
+    elif scope_kind == "group":
+        group_users = sorted(await list_group_recipient_user_ids(inp.scope_id))
+        if participant_user_ids != group_users:
+            raise HTTPException(400, "Encrypted group upload recipients do not match the group members")
+    elif scope_kind == "channel":
+        channel = await db.channels.find_one({"id": inp.scope_id}, {"_id": 0})
+        if not channel:
+            raise HTTPException(404, "Channel not found")
+        if not channel.get("is_private"):
+            raise HTTPException(400, "Only private channels support encrypted blob uploads")
+        allowed_users = sorted(await list_channel_recipient_user_ids(channel))
+        if sorted(participant_user_ids) != allowed_users:
+            raise HTTPException(400, "Encrypted channel upload recipients do not match the channel audience")
+    else:
+        raise HTTPException(400, "Unsupported encrypted blob scope")
+
+    upload_id = new_id()
+    object_key = f"ciphertext/{scope_kind}/{inp.scope_id}/{upload_id}"
+    await db.e2ee_blob_uploads.insert_one({
+        "id": upload_id,
+        "user_id": user["id"],
+        "device_id": device["device_id"],
+        "scope_kind": scope_kind,
+        "scope_id": inp.scope_id,
+        "participant_user_ids": participant_user_ids,
+        "object_key": object_key,
+        "status": "pending",
+        "created_at": now_utc(),
+    })
+    return {"upload_id": upload_id, "protocol_version": E2EE_PROTOCOL_VERSION}
+
+
+@e2ee_r.put("/blobs/{upload_id}/content")
+async def upload_encrypted_blob_content(upload_id: str, inp: EncryptedBlobContentInput, request: Request):
+    user = await current_user(request)
+    await require_verified_device(request, user)
+    upload = await db.e2ee_blob_uploads.find_one({"id": upload_id, "user_id": user["id"]}, {"_id": 0})
+    if not upload or upload.get("status") != "pending":
+        raise HTTPException(404, "Encrypted upload not found")
+
+    ciphertext = decode_base64_bytes(inp.ciphertext_b64, field_name="ciphertext_b64")
+    if len(ciphertext) != inp.size_bytes:
+        raise HTTPException(400, "Encrypted blob size does not match the declared ciphertext size")
+    await put_blob(
+        object_key=upload["object_key"],
+        data=ciphertext,
+        content_type=inp.content_type,
+    )
+    await db.e2ee_blob_uploads.update_one(
+        {"id": upload_id},
+        {
+            "$set": {
+                "status": "uploaded",
+                "sha256": inp.sha256,
+                "size_bytes": inp.size_bytes,
+                "content_type": inp.content_type,
+                "uploaded_at": now_utc(),
+            },
+        },
+    )
+    return {"ok": True}
+
+
+@e2ee_r.post("/blobs/{upload_id}/complete")
+async def finalize_encrypted_blob(upload_id: str, request: Request):
+    user = await current_user(request)
+    device = await require_verified_device(request, user)
+    upload = await db.e2ee_blob_uploads.find_one({"id": upload_id, "user_id": user["id"]}, {"_id": 0})
+    if not upload or upload.get("status") != "uploaded":
+        raise HTTPException(404, "Encrypted upload is not ready to finalize")
+
+    blob_id = new_id()
+    blob_record = {
+        "id": blob_id,
+        "scope_kind": upload["scope_kind"],
+        "scope_id": upload["scope_id"],
+        "participant_user_ids": upload.get("participant_user_ids") or [],
+        "object_key": upload["object_key"],
+        "sha256": upload.get("sha256"),
+        "size_bytes": upload.get("size_bytes"),
+        "content_type": upload.get("content_type", "application/octet-stream"),
+        "uploader_user_id": user["id"],
+        "uploaded_by_device_id": device["device_id"],
+        "created_at": now_utc(),
+    }
+    await db.e2ee_blobs.insert_one(blob_record)
+    await db.e2ee_blob_uploads.delete_one({"id": upload_id})
+    return {
+        "id": blob_id,
+        "size_bytes": blob_record["size_bytes"],
+        "content_type": blob_record["content_type"],
+        "url": f"/api/e2ee/blobs/{blob_id}",
+    }
+
+
+@e2ee_r.get("/blobs/{blob_id}")
+async def fetch_encrypted_blob(blob_id: str, request: Request):
+    user = await current_user(request)
+    blob_record = await db.e2ee_blobs.find_one({"id": blob_id}, {"_id": 0})
+    if not blob_record:
+        raise HTTPException(404, "Encrypted attachment not found")
+    await authorize_blob_access(user, blob_record)
+    blob_bytes = await get_blob(object_key=blob_record["object_key"])
+    return RawResponse(content=blob_bytes, media_type=blob_record.get("content_type", "application/octet-stream"))
+
+
+@e2ee_r.get("/media/channels/{channel_id}/current")
+async def get_current_media_key(channel_id: str, request: Request):
+    user = await current_user(request)
+    device = await require_verified_device(request, user)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    if not channel.get("is_private") or channel.get("type") != "voice":
+        raise HTTPException(400, "Only private voice channels use encrypted media keys")
+    if not await check_permission(user["id"], channel["server_id"], "join_voice"):
+        raise HTTPException(403, "No permission")
+    await ensure_private_channel_member_access(user["id"], channel)
+
+    media_key = await db.e2ee_media_keys.find_one(
+        {"channel_id": channel_id},
+        {"_id": 0},
+        sort=[("created_at", -1)],
+    )
+    if not media_key:
+        return {"key_package": None}
+
+    matching_envelopes = [
+        envelope for envelope in media_key.get("key_envelopes", [])
+        if envelope.get("recipient_device_id") == device["device_id"]
+    ]
+    return {"key_package": {**media_key, "key_envelopes": matching_envelopes}}
+
+
+@e2ee_r.post("/media/channels/{channel_id}/rotate")
+async def rotate_media_key(channel_id: str, inp: EncryptedMediaKeyInput, request: Request):
+    user = await current_user(request)
+    device = await require_verified_device(request, user)
+    if inp.sender_device_id != device["device_id"]:
+        raise HTTPException(400, "Encrypted media payload must originate from the current desktop device")
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    if not channel.get("is_private") or channel.get("type") != "voice":
+        raise HTTPException(400, "Only private voice channels use encrypted media keys")
+    if not await check_permission(user["id"], channel["server_id"], "join_voice"):
+        raise HTTPException(403, "No permission")
+    await ensure_private_channel_member_access(user["id"], channel)
+
+    record = {
+        "id": new_id(),
+        "channel_id": channel_id,
+        "sender_user_id": user["id"],
+        "sender_device_id": inp.sender_device_id,
+        "key_version": inp.key_version,
+        "key_envelopes": inp.key_envelopes,
+        "created_at": now_utc(),
+    }
+    await db.e2ee_media_keys.insert_one(record)
+    return {"ok": True, "key_package": {**record, "_id": None}}
+
+# ============================================================
 # SETUP ROUTES
 # ============================================================
 setup_r = APIRouter(prefix="/api/setup", tags=["Setup"])
@@ -1258,15 +1845,22 @@ async def list_channels(server_id: str, request: Request):
     if not member or member.get("is_banned"):
         raise HTTPException(403, "Not a member")
     channels = await db.channels.find({"server_id": server_id}, {"_id": 0}).sort("position", 1).to_list(100)
+    visible_channels = []
     # Add voice states to voice channels
     for ch in channels:
+        if ch.get("is_private"):
+            try:
+                await ensure_private_channel_member_access(user["id"], ch)
+            except HTTPException:
+                continue
         if ch["type"] == "voice":
             states = await db.voice_states.find({"channel_id": ch["id"]}, {"_id": 0}).to_list(50)
             for s in states:
                 u = await db.users.find_one({"id": s["user_id"]}, {"_id": 0, "password_hash": 0})
                 s["user"] = u
             ch["voice_states"] = states
-    return channels
+        visible_channels.append(ch)
+    return visible_channels
 
 @servers_r.post("/{server_id}/channels")
 async def create_channel(server_id: str, inp: ChannelCreateInput, request: Request):
@@ -1611,6 +2205,10 @@ async def voice_join(server_id: str, channel_id: str, request: Request):
     user = await current_user(request)
     if not await check_permission(user["id"], server_id, "join_voice"):
         raise HTTPException(403, "No permission")
+    channel = await db.channels.find_one({"id": channel_id, "server_id": server_id, "type": "voice"}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Voice channel not found")
+    await ensure_private_channel_member_access(user["id"], channel)
     await clear_voice_membership(user["id"])
     state = {
         "user_id": user["id"], "channel_id": channel_id, "server_id": server_id,
@@ -1656,6 +2254,7 @@ async def create_voice_token(inp: VoiceTokenInput, request: Request):
     )
     if not channel:
         raise HTTPException(404, "Voice channel not found")
+    await ensure_private_channel_member_access(user["id"], channel)
     if not livekit_url or not livekit_api_key or not livekit_api_secret:
         raise HTTPException(503, "Voice service is not configured")
 
@@ -1678,6 +2277,9 @@ async def create_voice_token(inp: VoiceTokenInput, request: Request):
         "server_url": livekit_url,
         "participant_token": access_token,
         "room_name": room_name,
+        "e2ee_required": bool(channel.get("is_private")),
+        "media_key_endpoint": f"/api/e2ee/media/channels/{inp.channel_id}/current" if channel.get("is_private") else None,
+        "media_rotate_endpoint": f"/api/e2ee/media/channels/{inp.channel_id}/rotate" if channel.get("is_private") else None,
     }
 
 # ============================================================
@@ -1810,6 +2412,7 @@ async def get_messages(channel_id: str, request: Request, before: str = None, li
         raise HTTPException(404, "Channel not found")
     if not await check_permission(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
+    await ensure_private_channel_member_access(user["id"], channel)
     query = {"channel_id": channel_id, "is_deleted": {"$ne": True}}
     history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"])
     created_at_filters = {}
@@ -1835,10 +2438,12 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
         raise HTTPException(404, "Channel not found")
     if not await check_permission(user["id"], ch["server_id"], "send_messages"):
         raise HTTPException(403, "No permission")
+    await ensure_private_channel_member_access(user["id"], ch)
     member = await db.server_members.find_one({"server_id": ch["server_id"], "user_id": user["id"]}, {"_id": 0})
     if member and member.get("muted_until"):
         if datetime.fromisoformat(member["muted_until"]) > datetime.now(timezone.utc):
             raise HTTPException(403, "You are muted")
+    is_e2ee_channel = bool(ch.get("is_private"))
     mention_data = await resolve_message_mentions(
         server_id=ch["server_id"],
         actor_id=user["id"],
@@ -1847,17 +2452,50 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
         mentioned_role_ids=inp.mentioned_role_ids,
         mentions_everyone=inp.mentions_everyone,
     )
-    msg = {
-        "id": new_id(), "channel_id": channel_id, "author_id": user["id"],
-        "content": inp.content, "type": "text",
-        "attachments": inp.attachments, "edited_at": None,
-        "is_deleted": False, "reactions": {},
-        "reply_to_id": inp.reply_to_id, "mention_ids": mention_data["mentioned_user_ids"],
-        "mentioned_user_ids": mention_data["mentioned_user_ids"],
-        "mentioned_role_ids": mention_data["mentioned_role_ids"],
-        "mentions_everyone": mention_data["mentions_everyone"],
-        "thread_id": None, "thread_count": 0, "created_at": now_utc()
-    }
+    if is_e2ee_channel:
+        device = await require_verified_device(request, user)
+        if not inp.is_e2ee or not inp.ciphertext or not inp.nonce or not inp.sender_device_id:
+            raise HTTPException(400, "Private channels require encrypted desktop messages")
+        if inp.sender_device_id != device["device_id"]:
+            raise HTTPException(400, "Encrypted messages must originate from the active desktop device")
+        msg = {
+            "id": new_id(),
+            "channel_id": channel_id,
+            "author_id": user["id"],
+            "content": "[encrypted]",
+            "type": inp.message_type or "text",
+            "attachments": inp.attachments,
+            "edited_at": None,
+            "is_deleted": False,
+            "reactions": {},
+            "reply_to_id": inp.reply_to_id,
+            "mention_ids": mention_data["mentioned_user_ids"],
+            "mentioned_user_ids": mention_data["mentioned_user_ids"],
+            "mentioned_role_ids": mention_data["mentioned_role_ids"],
+            "mentions_everyone": mention_data["mentions_everyone"],
+            "thread_id": None,
+            "thread_count": 0,
+            "created_at": now_utc(),
+            "is_e2ee": True,
+            "ciphertext": inp.ciphertext,
+            "nonce": inp.nonce,
+            "sender_device_id": inp.sender_device_id,
+            "protocol_version": inp.protocol_version or E2EE_PROTOCOL_VERSION,
+            "key_envelopes": inp.key_envelopes,
+        }
+    else:
+        msg = {
+            "id": new_id(), "channel_id": channel_id, "author_id": user["id"],
+            "content": inp.content, "type": "text",
+            "attachments": inp.attachments, "edited_at": None,
+            "is_deleted": False, "reactions": {},
+            "reply_to_id": inp.reply_to_id, "mention_ids": mention_data["mentioned_user_ids"],
+            "mentioned_user_ids": mention_data["mentioned_user_ids"],
+            "mentioned_role_ids": mention_data["mentioned_role_ids"],
+            "mentions_everyone": mention_data["mentions_everyone"],
+            "thread_id": None, "thread_count": 0, "created_at": now_utc(),
+            "is_e2ee": False,
+        }
     await db.messages.insert_one(msg)
     msg.pop("_id", None)
     msg["author"] = user
@@ -1867,8 +2505,14 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     # @everyone so a user only receives one notification per message.
     for mid in mention_data["notify_user_ids"]:
         if mid != user["id"]:
-            await create_notification(mid, "mention", f"@{user['display_name']} mentioned you",
-                inp.content[:100], f"/channel/{channel_id}", user["id"])
+            await create_notification(
+                mid,
+                "mention",
+                f"@{user['display_name']} mentioned you",
+                "[Encrypted message]" if is_e2ee_channel else inp.content[:100],
+                f"/channel/{channel_id}",
+                user["id"],
+            )
     return msg
 
 # ============================================================
@@ -1885,6 +2529,8 @@ async def edit_message(message_id: str, request: Request):
         raise HTTPException(404, "Message not found")
     if msg["author_id"] != user["id"]:
         raise HTTPException(403, "Not your message")
+    if msg.get("is_e2ee"):
+        raise HTTPException(400, "Editing encrypted messages is not supported yet")
     old_content = msg["content"]
     new_content = body.get("content", old_content)
     ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0}) if msg.get("channel_id") else None
@@ -1947,6 +2593,7 @@ async def get_message(message_id: str, request: Request):
         raise HTTPException(404, "Channel not found")
     if not await check_permission(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
+    await ensure_private_channel_member_access(user["id"], channel)
     history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"])
     if history_cutoff and msg.get("created_at") and msg["created_at"] < history_cutoff:
         raise HTTPException(403, "No permission to read message history")
@@ -2032,20 +2679,47 @@ async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
     other = await db.users.find_one({"id": other_user_id}, {"_id": 0})
     if not other:
         raise HTTPException(404, "User not found")
+    sender_account = await get_e2ee_account(user["id"])
+    receiver_account = await get_e2ee_account(other_user_id)
+    use_e2ee = bool(sender_account and receiver_account)
+
+    if use_e2ee:
+        device = await require_verified_device(request, user)
+        if not inp.is_e2ee or not inp.ciphertext or not inp.nonce or not inp.sender_device_id:
+            raise HTTPException(400, "Direct messages require encrypted desktop payloads when both users use end-to-end encryption")
+        if inp.sender_device_id != device["device_id"]:
+            raise HTTPException(400, "Encrypted messages must originate from the active desktop device")
+
     msg = {
-        "id": new_id(), "sender_id": user["id"], "receiver_id": other_user_id,
-        "content": inp.content, "encrypted_content": inp.encrypted_content or "",
-        "is_encrypted": inp.is_encrypted, "nonce": inp.nonce or "",
-        "attachments": [], "read": False, "created_at": now_utc()
+        "id": new_id(),
+        "sender_id": user["id"],
+        "receiver_id": other_user_id,
+        "content": inp.content if not use_e2ee else "[encrypted]",
+        "encrypted_content": inp.encrypted_content or inp.ciphertext or "",
+        "is_encrypted": inp.is_encrypted or use_e2ee,
+        "is_e2ee": use_e2ee,
+        "nonce": inp.nonce or "",
+        "attachments": inp.attachments,
+        "sender_device_id": inp.sender_device_id or None,
+        "protocol_version": inp.protocol_version or E2EE_PROTOCOL_VERSION,
+        "message_type": inp.message_type or "text",
+        "key_envelopes": inp.key_envelopes or [],
+        "read": False,
+        "created_at": now_utc(),
     }
     await db.direct_messages.insert_one(msg)
     msg.pop("_id", None)
     msg["sender"] = {k: v for k, v in user.items() if k != "password_hash"}
     await ws_mgr.send(other_user_id, {"type": "dm_message", "message": msg})
     # DM notification
-    await create_notification(other_user_id, "dm", f"DM from {user['display_name']}",
-        inp.content[:100] if not inp.is_encrypted else "[Encrypted message]",
-        f"/dm/{user['id']}", user["id"])
+    await create_notification(
+        other_user_id,
+        "dm",
+        f"DM from {user['display_name']}",
+        "[Encrypted message]" if use_e2ee or inp.is_encrypted else inp.content[:100],
+        f"/dm/{user['id']}",
+        user["id"],
+    )
     return msg
 
 # ============================================================
@@ -2194,6 +2868,7 @@ async def get_public_key(user_id: str, request: Request):
 # Include All Routers
 # ============================================================
 app.include_router(auth_r)
+app.include_router(e2ee_r)
 app.include_router(setup_r)
 app.include_router(instance_r)
 app.include_router(servers_r)
@@ -2358,8 +3033,16 @@ async def startup():
     await db.voice_states.create_index("user_id")
     await db.audit_log.create_index([("server_id", 1), ("created_at", -1)])
     await db.login_attempts.create_index("identifier")
+    await db.e2ee_accounts.create_index("user_id", unique=True)
+    await db.e2ee_devices.create_index([("user_id", 1), ("device_id", 1)], unique=True)
+    await db.e2ee_devices.create_index([("user_id", 1), ("verified_at", 1), ("revoked_at", 1)])
+    await db.e2ee_blob_uploads.create_index("id", unique=True)
+    await db.e2ee_blobs.create_index("id", unique=True)
+    await db.e2ee_blobs.create_index([("scope_kind", 1), ("scope_id", 1), ("created_at", -1)])
+    await db.e2ee_media_keys.create_index([("channel_id", 1), ("created_at", -1)])
     await create_phase2_indexes()
     await create_phase3_indexes()
+    await ensure_bucket()
 
     await migrate_legacy_instance_state()
     await migrate_default_roles()

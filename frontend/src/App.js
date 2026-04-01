@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { RuntimeProvider, useRuntime } from "@/contexts/RuntimeContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { E2EEProvider } from "@/contexts/E2EEContext";
 import ConnectPage from "@/pages/ConnectPage";
 import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
@@ -117,7 +118,9 @@ function App() {
     <BrowserRouter>
       <RuntimeProvider>
         <AuthProvider>
-          <AppShell />
+          <E2EEProvider>
+            <AppShell />
+          </E2EEProvider>
         </AuthProvider>
       </RuntimeProvider>
     </BrowserRouter>

@@ -19,12 +19,14 @@ import {
   Lock,
   Microphone,
   MicrophoneSlash,
+  MonitorPlay,
   Plus,
   Prohibit,
   SignOut,
   SpeakerHigh,
   SpeakerSlash,
   UserMinus,
+  VideoCamera,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import {
@@ -62,6 +64,7 @@ import {
 } from "@/components/ui/context-menu";
 import api, { formatError } from "@/lib/api";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import { useE2EE } from "@/contexts/E2EEContext";
 import { loadVoicePreferences, saveVoicePreferences } from "@/lib/voicePreferences";
 import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
 import {
@@ -93,6 +96,7 @@ export default function ChannelSidebar({
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
+  const { ready: e2eeReady, isDesktopCapable } = useE2EE();
   const isDesktop = Boolean(config?.isDesktop);
   const [showCreate, setShowCreate] = useState(false);
   const [chName, setChName] = useState("");
@@ -105,6 +109,8 @@ export default function ChannelSidebar({
   const [voiceChannel, setVoiceChannel] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [screenShareEnabled, setScreenShareEnabled] = useState(false);
   const [activeDragId, setActiveDragId] = useState(null);
   const [voiceActivity, setVoiceActivity] = useState({
     localSpeaking: false,
@@ -142,6 +148,8 @@ export default function ChannelSidebar({
     const handleEvent = (event) => {
       if (event.type === "mute_change") setIsMuted(Boolean(event.isMuted));
       if (event.type === "deafen_change") setIsDeafened(Boolean(event.isDeafened));
+      if (event.type === "camera_change") setCameraEnabled(Boolean(event.enabled));
+      if (event.type === "screen_share_change") setScreenShareEnabled(Boolean(event.enabled));
       if (event.type === "speaking_update") {
         setVoiceActivity({
           localSpeaking: Boolean(event.localSpeaking),
@@ -151,6 +159,8 @@ export default function ChannelSidebar({
       }
       if (event.type === "disconnected") {
         setVoiceActivity({ localSpeaking: false, activeSpeakerIds: [], audioLevel: 0 });
+        setCameraEnabled(false);
+        setScreenShareEnabled(false);
       }
     };
 
@@ -166,6 +176,8 @@ export default function ChannelSidebar({
       setVoiceChannel(null);
       setIsMuted(false);
       setIsDeafened(false);
+      setCameraEnabled(false);
+      setScreenShareEnabled(false);
       setVoiceActivity({ localSpeaking: false, activeSpeakerIds: [], audioLevel: 0 });
       return;
     }
@@ -275,6 +287,14 @@ export default function ChannelSidebar({
   const joinVoice = useCallback(async (channel) => {
     try {
       if (voiceChannel?.id === channel.id) return;
+      if (channel.is_private && !isDesktopCapable) {
+        toast.error("Encrypted voice channels are only available in the desktop app.");
+        return;
+      }
+      if (channel.is_private && !e2eeReady) {
+        toast.error("Restore or verify this desktop device before joining encrypted voice channels.");
+        return;
+      }
 
       if (voiceEngineRef?.current) {
         await voiceEngineRef.current.disconnect();
@@ -288,6 +308,7 @@ export default function ChannelSidebar({
         channelId: channel.id,
         userId: user?.id,
         preferences: loadVoicePreferences(user?.id, { isDesktop }),
+        runtimeConfig: config,
       });
       bindVoiceEngine(engine);
       if (voiceEngineRef) {
@@ -299,13 +320,15 @@ export default function ChannelSidebar({
       setVoiceChannel(channel);
       setIsMuted(false);
       setIsDeafened(false);
+      setCameraEnabled(false);
+      setScreenShareEnabled(false);
       onRefreshChannels?.();
       toast.success(t("channel.voiceConnected"));
     } catch (error) {
       console.error("Voice join error:", error);
       toast.error(formatError(error?.response?.data?.detail || t("channel.joinVoiceFailed")));
     }
-  }, [bindVoiceEngine, isDesktop, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
+  }, [bindVoiceEngine, config, e2eeReady, isDesktop, isDesktopCapable, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
 
   const leaveVoice = useCallback(async () => {
     if (!voiceChannel) return;
@@ -318,6 +341,8 @@ export default function ChannelSidebar({
       setVoiceChannel(null);
       setIsMuted(false);
       setIsDeafened(false);
+      setCameraEnabled(false);
+      setScreenShareEnabled(false);
       onRefreshChannels?.();
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail || t("channel.leaveVoiceFailed")));
@@ -345,6 +370,26 @@ export default function ChannelSidebar({
       await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_deafened: nextDeafened });
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail || t("channel.deafenUpdateFailed")));
+    }
+  };
+
+  const toggleCamera = async () => {
+    if (!voiceChannel || !voiceEngineRef?.current) return;
+    try {
+      const enabled = await voiceEngineRef.current.toggleCamera();
+      setCameraEnabled(Boolean(enabled));
+    } catch (error) {
+      toast.error(formatError(error?.message || "Camera could not be toggled."));
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    if (!voiceChannel || !voiceEngineRef?.current) return;
+    try {
+      const enabled = await voiceEngineRef.current.toggleScreenShare();
+      setScreenShareEnabled(Boolean(enabled));
+    } catch (error) {
+      toast.error(formatError(error?.message || "Screen sharing could not be toggled."));
     }
   };
 
@@ -887,6 +932,26 @@ export default function ChannelSidebar({
                 >
                   {isDeafened ? <SpeakerSlash size={14} /> : <SpeakerHigh size={14} />}
                   {isDeafened ? t("channel.deafened") : t("channel.deafen")}
+                </button>
+                <button
+                  onClick={toggleCamera}
+                  data-testid="voice-camera-toggle"
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    cameraEnabled ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#27272A] text-[#A1A1AA] hover:text-white"
+                  }`}
+                >
+                  <VideoCamera size={14} />
+                  {cameraEnabled ? "Camera on" : "Camera"}
+                </button>
+                <button
+                  onClick={toggleScreenShare}
+                  data-testid="voice-screen-share-toggle"
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    screenShareEnabled ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#27272A] text-[#A1A1AA] hover:text-white"
+                  }`}
+                >
+                  <MonitorPlay size={14} />
+                  {screenShareEnabled ? "Sharing" : "Share"}
                 </button>
                 <button
                   onClick={leaveVoice}

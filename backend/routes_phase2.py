@@ -33,6 +33,7 @@ _DEFAULT_PERMISSIONS = {
     "deafen_members": False, "priority_speaker": False, "create_invites": True,
     "pin_messages": False, "manage_emojis": False, "manage_webhooks": False,
 }
+_E2EE_DEVICE_HEADER = "X-Singra-Device-Id"
 
 
 def _now():
@@ -93,6 +94,79 @@ async def _history_cutoff(user_id, server_id):
     return member.get("joined_at")
 
 
+async def _private_channel_user_ids(channel_id):
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        return []
+    members = await db.server_members.find(
+        {"server_id": channel["server_id"], "is_banned": {"$ne": True}},
+        {"_id": 0, "user_id": 1, "roles": 1},
+    ).to_list(500)
+    access_entries = await db.channel_access.find({"channel_id": channel_id}, {"_id": 0}).to_list(500)
+    if not channel.get("is_private") or not access_entries:
+        return [member["user_id"] for member in members]
+    allowed = {entry["target_id"] for entry in access_entries if entry.get("type") == "user"}
+    allowed_roles = {entry["target_id"] for entry in access_entries if entry.get("type") == "role"}
+    for member in members:
+        if allowed_roles.intersection(member.get("roles") or []):
+            allowed.add(member["user_id"])
+    server = await db.servers.find_one({"id": channel["server_id"]}, {"_id": 0, "owner_id": 1})
+    if server and server.get("owner_id"):
+        allowed.add(server["owner_id"])
+    return list(allowed)
+
+
+async def _assert_channel_access(user_id, channel):
+    if not channel.get("is_private"):
+        return
+    allowed_ids = await _private_channel_user_ids(channel["id"])
+    if user_id not in allowed_ids:
+        raise HTTPException(403, "No access to this private channel")
+
+
+def _request_device_id(request: Request):
+    return (request.headers.get(_E2EE_DEVICE_HEADER) or "").strip() or None
+
+
+async def _require_verified_device(request: Request, user: dict):
+    device_id = _request_device_id(request)
+    if not device_id:
+        raise HTTPException(400, "A verified desktop device header is required")
+    device = await db.e2ee_devices.find_one({"user_id": user["id"], "device_id": device_id}, {"_id": 0})
+    if not device or device.get("revoked_at") or not device.get("verified_at"):
+        raise HTTPException(403, "This desktop device is not trusted for end-to-end encryption")
+    return device
+
+
+async def _accessible_text_channels(user_id, server_id, *, include_private=True):
+    """
+    Resolve the server text channels the current user may legitimately see.
+
+    Unread counters and server-wide search previously looked at every text
+    channel in the server, which leaked private-channel activity to members who
+    were not part of that channel. E2EE/private channels must be filtered at the
+    channel list boundary, not only when the message body is fetched.
+    """
+    if not await _has_perm(user_id, server_id, "read_messages"):
+        return []
+
+    text_channels = await db.channels.find(
+        {"server_id": server_id, "type": "text"},
+        {"_id": 0},
+    ).to_list(200)
+
+    accessible = []
+    for channel in text_channels:
+        if channel.get("is_private"):
+            if not include_private:
+                continue
+            allowed_ids = await _private_channel_user_ids(channel["id"])
+            if user_id not in allowed_ids:
+                continue
+        accessible.append(channel)
+    return accessible
+
+
 def _parse_mentions(content):
     return re.findall(r'@(\w+)', content)
 
@@ -103,9 +177,14 @@ class GroupDMCreate(BaseModel):
     member_ids: List[str]
 
 class GroupMsgCreate(BaseModel):
-    content: str
+    content: str = ""
     encrypted_content: Optional[str] = None
     is_encrypted: bool = False
+    attachments: List[dict] = []
+    nonce: Optional[str] = None
+    sender_device_id: Optional[str] = None
+    protocol_version: str = "sv-e2ee-v1"
+    key_envelopes: List[dict] = []
 
 class ChannelOverrideInput(BaseModel):
     target_type: str
@@ -132,6 +211,7 @@ async def get_thread(message_id: str, request: Request):
     channel = await db.channels.find_one({"id": parent["channel_id"]}, {"_id": 0})
     if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages"):
         raise HTTPException(403, "No permission")
+    await _assert_channel_access(user["id"], channel)
     history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
     if history_cutoff and parent.get("created_at") and parent["created_at"] < history_cutoff:
         raise HTTPException(403, "No permission to read message history")
@@ -151,25 +231,50 @@ async def get_thread(message_id: str, request: Request):
 async def reply_in_thread(channel_id: str, message_id: str, request: Request):
     user = await _user(request)
     body = await request.json()
-    content = body.get("content", "").strip()
-    if not content:
-        raise HTTPException(400, "Content required")
     parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
     if not parent:
         raise HTTPException(404, "Parent not found")
-    mention_names = _parse_mentions(content)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    await _assert_channel_access(user["id"], channel)
+
+    is_e2ee_channel = bool(channel.get("is_private"))
+    content = body.get("content", "").strip()
+    attachments = body.get("attachments", [])
+
     mention_ids = []
-    for m in mention_names:
-        u = await db.users.find_one({"username": m.lower()}, {"_id": 0})
-        if u:
-            mention_ids.append(u["id"])
+    if not is_e2ee_channel:
+        if not content:
+            raise HTTPException(400, "Content required")
+        mention_names = _parse_mentions(content)
+        for m in mention_names:
+            u = await db.users.find_one({"username": m.lower()}, {"_id": 0})
+            if u:
+                mention_ids.append(u["id"])
+    else:
+        device = await _require_verified_device(request, user)
+        if not body.get("is_e2ee") or not body.get("ciphertext") or not body.get("nonce") or not body.get("sender_device_id"):
+            raise HTTPException(400, "Encrypted private threads require a desktop E2EE payload")
+        if body.get("sender_device_id") != device["device_id"]:
+            raise HTTPException(400, "Encrypted thread replies must originate from the active desktop device")
+        content = "[encrypted]"
+
     reply = {
         "id": _id(), "channel_id": channel_id, "author_id": user["id"],
         "content": content, "type": "text", "thread_id": message_id,
-        "attachments": body.get("attachments", []),
+        "attachments": attachments,
         "edited_at": None, "is_deleted": False, "reactions": {},
         "reply_to_id": message_id, "mention_ids": mention_ids,
-        "thread_count": 0, "created_at": _now()
+        "thread_count": 0, "created_at": _now(),
+        "is_e2ee": is_e2ee_channel,
+        "ciphertext": body.get("ciphertext", ""),
+        "encrypted_content": body.get("encrypted_content") or body.get("ciphertext", ""),
+        "nonce": body.get("nonce", ""),
+        "sender_device_id": body.get("sender_device_id"),
+        "protocol_version": body.get("protocol_version", "sv-e2ee-v1"),
+        "message_type": body.get("message_type", "thread_reply"),
+        "key_envelopes": body.get("key_envelopes", []),
     }
     await db.messages.insert_one(reply)
     reply.pop("_id", None)
@@ -187,18 +292,27 @@ async def search_messages(request: Request, q: str = "", server_id: str = None, 
     user = await _user(request)
     if len(q) < 2:
         return []
-    query = {"content": {"$regex": q, "$options": "i"}, "is_deleted": {"$ne": True}}
+    query = {
+        "content": {"$regex": q, "$options": "i"},
+        "is_deleted": {"$ne": True},
+        "is_e2ee": {"$ne": True},
+    }
     if channel_id:
         channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
         if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages"):
             raise HTTPException(403, "No permission")
+        await _assert_channel_access(user["id"], channel)
+        if channel.get("is_private"):
+            raise HTTPException(400, "Server-side search is unavailable in encrypted private channels")
         query["channel_id"] = channel_id
         history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
         if history_cutoff:
             query["created_at"] = {"$gte": history_cutoff}
     elif server_id:
-        chs = await db.channels.find({"server_id": server_id}, {"_id": 0, "id": 1}).to_list(200)
-        query["channel_id"] = {"$in": [c["id"] for c in chs]}
+        channels = await _accessible_text_channels(user["id"], server_id, include_private=False)
+        if not channels:
+            return []
+        query["channel_id"] = {"$in": [channel["id"] for channel in channels]}
         history_cutoff = await _history_cutoff(user["id"], server_id)
         if history_cutoff:
             query["created_at"] = {"$gte": history_cutoff}
@@ -222,7 +336,7 @@ async def get_all_unread(request: Request):
     unread = {}
     server_unread = {}
     for m in memberships:
-        chs = await db.channels.find({"server_id": m["server_id"], "type": "text"}, {"_id": 0, "id": 1}).to_list(100)
+        chs = await _accessible_text_channels(user["id"], m["server_id"], include_private=True)
         member_role_ids = m.get("roles", [])
         for ch in chs:
             rs = await db.read_states.find_one({"user_id": user["id"], "channel_id": ch["id"]}, {"_id": 0})
@@ -454,10 +568,23 @@ async def send_group_msg(gid: str, inp: GroupMsgCreate, request: Request):
     grp = await db.group_conversations.find_one({"id": gid, "members": user["id"]}, {"_id": 0})
     if not grp:
         raise HTTPException(404)
+    if inp.is_encrypted:
+        device = await _require_verified_device(request, user)
+        if not inp.encrypted_content or not inp.nonce or not inp.sender_device_id:
+            raise HTTPException(400, "Encrypted group messages require a trusted desktop payload")
+        if inp.sender_device_id != device["device_id"]:
+            raise HTTPException(400, "Encrypted group messages must originate from the active desktop device")
     m = {
         "id": _id(), "group_id": gid, "sender_id": user["id"],
-        "content": inp.content, "encrypted_content": inp.encrypted_content or "",
-        "is_encrypted": inp.is_encrypted, "created_at": _now()
+        "content": inp.content if not inp.is_encrypted else "[encrypted]",
+        "encrypted_content": inp.encrypted_content or "",
+        "is_encrypted": inp.is_encrypted,
+        "attachments": inp.attachments,
+        "nonce": inp.nonce or "",
+        "sender_device_id": inp.sender_device_id or "",
+        "protocol_version": inp.protocol_version or "sv-e2ee-v1",
+        "key_envelopes": inp.key_envelopes or [],
+        "created_at": _now()
     }
     await db.group_messages.insert_one(m)
     m.pop("_id", None)
@@ -612,6 +739,10 @@ async def delete_account(request: Request):
 
     # 5. Delete E2EE keys
     await db.key_bundles.delete_many({"user_id": uid})
+    await db.e2ee_accounts.delete_many({"user_id": uid})
+    await db.e2ee_devices.delete_many({"user_id": uid})
+    await db.e2ee_blob_uploads.delete_many({"user_id": uid})
+    await db.e2ee_blobs.delete_many({"uploader_user_id": uid})
 
     # 6. Delete file uploads
     await db.file_uploads.delete_many({"user_id": uid})

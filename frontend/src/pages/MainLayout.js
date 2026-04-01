@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ShieldCheck, List, UsersThree } from "@phosphor-icons/react";
+import { List, Paperclip, ShieldCheck, UsersThree, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import { useE2EE } from "@/contexts/E2EEContext";
 import api from "@/lib/api";
 import { consumePreferredServer } from "@/lib/inviteLinks";
 import ServerSidebar from "@/components/chat/ServerSidebar";
@@ -84,6 +85,7 @@ export default function MainLayout() {
   const { t } = useTranslation();
   const { user, token, logout, setUser } = useAuth();
   const { config } = useRuntime();
+  const { isDesktopCapable, ready: e2eeReady } = useE2EE();
   const navigate = useNavigate();
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
@@ -678,7 +680,11 @@ export default function MainLayout() {
                 <span className="ml-2 text-xs text-[#71717A]">@{currentDmUser.username}</span>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {dmMessages.map((message) => (
+                {!isDesktopCapable ? (
+                  <div className="rounded-xl border border-[#27272A] bg-[#121212] p-6 text-sm text-[#A1A1AA]">
+                    Strong end-to-end encrypted direct messages are only available in the desktop app.
+                  </div>
+                ) : dmMessages.map((message) => (
                   <div key={message.id} className="flex gap-3 fade-in" data-testid={`dm-msg-${message.id}`}>
                     <div className="w-8 h-8 rounded-full bg-[#27272A] flex items-center justify-center text-xs font-bold shrink-0">
                       {message.sender?.display_name?.[0]?.toUpperCase() || "?"}
@@ -689,10 +695,10 @@ export default function MainLayout() {
                         <span className="text-[10px] text-[#71717A]">{new Date(message.created_at).toLocaleTimeString()}</span>
                       </div>
                       <p className="text-sm text-[#E4E4E7] mt-0.5">
-                        {message.is_encrypted ? (
+                        {message.is_encrypted || message.is_e2ee ? (
                           <span className="flex items-center gap-1">
                             <ShieldCheck size={12} weight="fill" className="text-[#6366F1]" />
-                            <DecryptedContent msg={message} currentUserId={user?.id} />
+                            <DecryptedContent msg={message} config={config} />
                           </span>
                         ) : message.content}
                       </p>
@@ -700,7 +706,13 @@ export default function MainLayout() {
                   </div>
                 ))}
               </div>
-              <DmInput userId={currentDmUser.id} onSent={(message) => setDmMessages((previous) => [...previous, message])} />
+              {isDesktopCapable ? (
+                <DmInput
+                  userId={currentDmUser.id}
+                  e2eeReady={e2eeReady}
+                  onSent={(message) => setDmMessages((previous) => [...previous, message])}
+                />
+              ) : null}
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]">
@@ -717,58 +729,57 @@ export default function MainLayout() {
   );
 }
 
-function DmInput({ userId, onSent }) {
+function DmInput({ userId, onSent, e2eeReady }) {
   const { t } = useTranslation();
+  const { fetchDmRecipients, encryptForRecipients, uploadEncryptedAttachment } = useE2EE();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
-  const [e2eeReady, setE2eeReady] = useState(false);
-  const sharedKeyRef = useRef(null);
-
-  const initE2EE = useCallback(async () => {
-    try {
-      const { loadKeyPair, deriveSharedKey } = await import("@/lib/crypto");
-      const keyPair = loadKeyPair();
-      if (!keyPair) {
-        setE2eeReady(false);
-        return;
-      }
-      const res = await api.get(`/keys/${userId}/bundle`);
-      if (res.data.identity_key) {
-        const recipientKey = JSON.parse(res.data.identity_key);
-        sharedKeyRef.current = await deriveSharedKey(keyPair.privateKey, recipientKey);
-        setE2eeReady(true);
-      } else {
-        setE2eeReady(false);
-      }
-    } catch {
-      setE2eeReady(false);
-    }
-  }, [userId]);
-
-  useEffect(() => {
-    void initE2EE();
-  }, [initE2EE]);
+  const [pendingAttachments, setPendingAttachments] = useState([]);
+  const fileInputRef = useRef(null);
 
   const send = async (event) => {
     event.preventDefault();
-    if (!content.trim() || sending) return;
+    if ((!content.trim() && pendingAttachments.length === 0) || sending) return;
 
     setSending(true);
     try {
       let payload = { content: content.trim(), is_encrypted: false };
-      if (e2eeReady && sharedKeyRef.current) {
-        const { encryptMessage } = await import("@/lib/crypto");
-        const encrypted = await encryptMessage(sharedKeyRef.current, content.trim());
+      if (e2eeReady) {
+        const recipients = await fetchDmRecipients(userId);
+        const attachmentRefs = [];
+        const attachmentManifests = [];
+        for (const attachment of pendingAttachments) {
+          if (!attachment.localFile) continue;
+          const uploaded = await uploadEncryptedAttachment({
+            file: attachment.localFile,
+            scopeKind: "dm",
+            scopeId: userId,
+            recipientsResponse: recipients,
+          });
+          attachmentRefs.push(uploaded.serverAttachment);
+          attachmentManifests.push(uploaded.manifest);
+        }
+        const encrypted = await encryptForRecipients({
+          text: content.trim(),
+          attachments: attachmentManifests,
+        }, recipients);
         payload = {
-          content: "[E2EE encrypted message]",
+          content: "[Encrypted message]",
+          attachments: attachmentRefs,
           encrypted_content: encrypted.ciphertext,
+          ciphertext: encrypted.ciphertext,
           nonce: encrypted.nonce,
+          sender_device_id: encrypted.sender_device_id,
+          protocol_version: encrypted.protocol_version,
           is_encrypted: true,
+          is_e2ee: true,
+          key_envelopes: encrypted.key_envelopes,
         };
       }
       const res = await api.post(`/dm/${userId}`, payload);
       onSent(res.data);
       setContent("");
+      setPendingAttachments([]);
     } catch {
       toast.error(t("dm.sendFailed"));
     } finally {
@@ -776,19 +787,73 @@ function DmInput({ userId, onSent }) {
     }
   };
 
+  const handleFileUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("File too large (max 10 MB).");
+      event.target.value = "";
+      return;
+    }
+    setPendingAttachments((previous) => [
+      ...previous,
+      {
+        id: `${file.name}-${file.size}-${Date.now()}`,
+        name: file.name,
+        type: file.type,
+        size_bytes: file.size,
+        localFile: file,
+      },
+    ]);
+    event.target.value = "";
+  };
+
   return (
     <form onSubmit={send} className="p-4 border-t border-[#27272A]">
+      {pendingAttachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {pendingAttachments.map((attachment) => (
+            <div key={attachment.id} className="flex items-center gap-2 rounded-md border border-[#27272A] bg-[#121212] px-3 py-2 text-xs text-[#E4E4E7]">
+              <Paperclip size={14} className="text-[#71717A]" />
+              <span className="max-w-[240px] truncate">{attachment.name}</span>
+              <button
+                type="button"
+                onClick={() => setPendingAttachments((previous) => previous.filter((entry) => entry.id !== attachment.id))}
+                className="text-[#71717A] transition-colors hover:text-white"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          onChange={handleFileUpload}
+          className="hidden"
+          accept="image/*,.pdf,.txt,.zip,.doc,.docx"
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!e2eeReady}
+          className="rounded-lg border border-[#27272A]/50 bg-[#27272A] px-3 py-2.5 text-[#A1A1AA] transition-colors hover:text-white disabled:text-[#52525B]"
+        >
+          <Paperclip size={18} />
+        </button>
         <input
           value={content}
           onChange={(event) => setContent(event.target.value)}
-          placeholder={e2eeReady ? t("dm.encryptedMessage") : t("dm.sendMessage")}
+          placeholder={e2eeReady ? t("dm.encryptedMessage") : "Restore or verify this desktop device to send encrypted DMs"}
+          disabled={!e2eeReady}
           data-testid="dm-message-input"
-          className="flex-1 bg-[#27272A] border border-[#27272A]/50 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#52525B] outline-none focus:border-[#6366F1]/50"
+          className="flex-1 bg-[#27272A] border border-[#27272A]/50 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#52525B] outline-none focus:border-[#6366F1]/50 disabled:text-[#71717A]"
         />
         <button
           type="submit"
-          disabled={!content.trim() || sending}
+          disabled={!e2eeReady || (!content.trim() && pendingAttachments.length === 0) || sending}
           data-testid="dm-send-button"
           className="bg-[#6366F1] hover:bg-[#4F46E5] text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
         >
@@ -804,39 +869,76 @@ function DmInput({ userId, onSent }) {
   );
 }
 
-function DecryptedContent({ msg, currentUserId }) {
+function DecryptedContent({ msg, config }) {
   const { t } = useTranslation();
-  const [text, setText] = useState(null);
+  const { decryptMessage, downloadAndDecryptAttachment, ready: e2eeReady } = useE2EE();
+  const [payload, setPayload] = useState(null);
+  const [statusText, setStatusText] = useState(null);
 
   const decrypt = useCallback(async () => {
     try {
-      const { loadKeyPair, deriveSharedKey, decryptMessage } = await import("@/lib/crypto");
-      const keyPair = loadKeyPair();
-      if (!keyPair) {
-        setText(t("dm.cannotDecryptNoKeys"));
+      if (!e2eeReady) {
+        setStatusText("Use a verified desktop device or recovery to decrypt this message.");
         return;
       }
-      const otherId = msg.sender_id === currentUserId ? msg.receiver_id : msg.sender_id;
-      const res = await api.get(`/keys/${otherId}/bundle`);
-      if (res.data.identity_key) {
-        const otherPublicKey = JSON.parse(res.data.identity_key);
-        const shared = await deriveSharedKey(keyPair.privateKey, otherPublicKey);
-        const plain = await decryptMessage(shared, msg.encrypted_content, msg.nonce);
-        setText(plain);
-      } else {
-        setText(t("dm.cannotDecrypt"));
-      }
+      const decrypted = await decryptMessage(msg);
+      setPayload(decrypted);
+      setStatusText(decrypted?.text ? null : t("dm.cannotDecrypt"));
     } catch {
-      setText(t("dm.encryptedFallback"));
+      setStatusText(t("dm.encryptedFallback"));
     }
-  }, [currentUserId, msg, t]);
+  }, [decryptMessage, e2eeReady, msg, t]);
 
   useEffect(() => {
-    if (msg.is_encrypted && msg.encrypted_content && msg.nonce) {
+    if ((msg.is_encrypted || msg.is_e2ee) && (msg.encrypted_content || msg.ciphertext) && msg.nonce) {
       void decrypt();
     }
-  }, [decrypt, msg.encrypted_content, msg.is_encrypted, msg.nonce]);
+  }, [decrypt, msg.ciphertext, msg.encrypted_content, msg.is_e2ee, msg.is_encrypted, msg.nonce]);
 
-  if (!msg.is_encrypted) return msg.content;
-  return <span className="italic text-[#A1A1AA]">{text || t("dm.decrypting")}</span>;
+  if (!msg.is_encrypted && !msg.is_e2ee) return msg.content;
+  const hasText = typeof payload?.text === "string" && payload.text.length > 0;
+  const attachments = payload?.attachments || msg.attachments || [];
+
+  const renderAttachments = () => {
+    if (!attachments.length) return null;
+    return (
+      <div className="mt-2 space-y-1">
+        {attachments.map((attachment, index) => (
+          <button
+            key={`${attachment.blob_id || attachment.id || attachment.name || "attachment"}-${index}`}
+            type="button"
+            onClick={async () => {
+              if (msg.is_e2ee) {
+                const { url } = await downloadAndDecryptAttachment(attachment);
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.download = attachment.name || "encrypted-attachment";
+                anchor.click();
+                window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+                return;
+              }
+              if (attachment.url) {
+                window.open(`${config?.assetBase || ""}${attachment.url}`, "_blank", "noopener,noreferrer");
+              }
+            }}
+            className="flex items-center gap-2 rounded-md bg-[#111214] px-2.5 py-2 text-xs text-[#D4D4D8] transition-colors hover:bg-[#16181D] hover:text-white"
+          >
+            <Paperclip size={13} />
+            <span className="truncate">{attachment.name}</span>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <span className="flex flex-col gap-1">
+      {(hasText || (!attachments.length && (statusText || !payload))) && (
+        <span className="italic text-[#A1A1AA]">
+          {hasText ? payload.text : (statusText || t("dm.decrypting"))}
+        </span>
+      )}
+      {renderAttachments()}
+    </span>
+  );
 }

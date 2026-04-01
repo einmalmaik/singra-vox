@@ -14,6 +14,7 @@ import PinnedMessagesPanel from "@/components/chat/PinnedMessagesPanel";
 import NotificationPanel from "@/components/chat/NotificationPanel";
 import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import { useE2EE } from "@/contexts/E2EEContext";
 import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
 import {
   applyMentionSuggestion,
@@ -56,6 +57,15 @@ export default function ChatArea({
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
+  const {
+    ready: e2eeReady,
+    isDesktopCapable,
+    decryptMessage,
+    encryptForRecipients,
+    fetchChannelRecipients,
+    uploadEncryptedAttachment,
+    downloadAndDecryptAttachment,
+  } = useE2EE();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingAttachments, setPendingAttachments] = useState([]);
@@ -71,6 +81,7 @@ export default function ChatArea({
   const [selectedMentions, setSelectedMentions] = useState([]);
   const [activeMention, setActiveMention] = useState(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [decryptedPayloads, setDecryptedPayloads] = useState({});
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const composerInputRef = useRef(null);
@@ -93,6 +104,8 @@ export default function ChatArea({
     }),
     [activeMention?.query, members, roles, workspacePermissions],
   );
+  const isE2EEChannel = Boolean(channel?.is_private);
+  const canUseE2EEChannel = !isE2EEChannel || (isDesktopCapable && e2eeReady);
 
   useEffect(() => {
     if (suppressAutoScroll.current) {
@@ -115,7 +128,40 @@ export default function ChatArea({
     setSelectedMentions([]);
     setActiveMention(null);
     setActiveMentionIndex(0);
+    setDecryptedPayloads({});
   }, [channel?.id]);
+
+  useEffect(() => {
+    if (!isE2EEChannel || !e2eeReady) {
+      return;
+    }
+    let cancelled = false;
+    const encryptedMessages = messages.filter((message) => message.is_e2ee && !decryptedPayloads[message.id]);
+    if (encryptedMessages.length === 0) {
+      return;
+    }
+    (async () => {
+      const decrypted = await Promise.all(
+        encryptedMessages.map(async (message) => ({
+          id: message.id,
+          payload: await decryptMessage(message),
+        })),
+      );
+      if (cancelled) return;
+      setDecryptedPayloads((previous) => {
+        const next = { ...previous };
+        decrypted.forEach((entry) => {
+          if (entry.payload) {
+            next[entry.id] = entry.payload;
+          }
+        });
+        return next;
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [decryptMessage, decryptedPayloads, e2eeReady, isE2EEChannel, messages]);
 
   useEffect(() => {
     if (!pendingJumpMessageId.current) {
@@ -188,11 +234,52 @@ export default function ChatArea({
     setSending(true);
     try {
       const mentionPayload = buildMentionPayload(selectedMentions, content);
-      const res = await api.post(`/channels/${channel.id}/messages`, {
+      let requestBody = {
         content: content.trim(),
         attachments: pendingAttachments,
         ...mentionPayload,
-      });
+      };
+      let optimisticPayload = null;
+
+      if (isE2EEChannel) {
+        if (!canUseE2EEChannel) {
+          throw new Error("Use a verified desktop device to send encrypted messages here.");
+        }
+        const recipients = await fetchChannelRecipients(channel.id);
+        const attachmentRefs = [];
+        const attachmentManifests = [];
+        for (const attachment of pendingAttachments) {
+          if (!attachment.localFile) continue;
+          const uploaded = await uploadEncryptedAttachment({
+            file: attachment.localFile,
+            scopeKind: "channel",
+            scopeId: channel.id,
+            recipientsResponse: recipients,
+          });
+          attachmentRefs.push(uploaded.serverAttachment);
+          attachmentManifests.push(uploaded.manifest);
+        }
+        optimisticPayload = {
+          text: content.trim(),
+          attachments: attachmentManifests,
+        };
+        const encryptedPayload = await encryptForRecipients(optimisticPayload, recipients);
+        requestBody = {
+          content: "[Encrypted message]",
+          attachments: attachmentRefs,
+          message_type: "text",
+          ...mentionPayload,
+          ...encryptedPayload,
+        };
+      }
+
+      const res = await api.post(`/channels/${channel.id}/messages`, requestBody);
+      if (optimisticPayload) {
+        setDecryptedPayloads((previous) => ({
+          ...previous,
+          [res.data.id]: optimisticPayload,
+        }));
+      }
       setMessages(prev => {
         if (prev.find(m => m.id === res.data.id)) return prev;
         return [...prev, res.data];
@@ -273,6 +360,20 @@ export default function ChatArea({
       toast.error(t("chat.fileTooLarge"));
       return;
     }
+    if (isE2EEChannel) {
+      setPendingAttachments((previous) => [
+        ...previous,
+        {
+          id: `${file.name}-${file.size}-${Date.now()}`,
+          name: file.name,
+          type: file.type,
+          size_bytes: file.size,
+          localFile: file,
+        },
+      ]);
+      e.target.value = "";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = async () => {
       const base64 = reader.result.split(',')[1];
@@ -307,6 +408,19 @@ export default function ChatArea({
   const typingNames = Object.values(typingUsers);
   const removePendingAttachment = (attachmentId) => {
     setPendingAttachments(prev => prev.filter((attachment) => attachment.id !== attachmentId));
+  };
+
+  const handleEncryptedAttachmentDownload = async (attachment) => {
+    try {
+      const { url } = await downloadAndDecryptAttachment(attachment);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.name || "encrypted-attachment";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      toast.error("Encrypted attachment could not be opened.");
+    }
   };
 
   const focusMessage = (messageId) => {
@@ -433,13 +547,20 @@ export default function ChatArea({
               </Tooltip>
             </TooltipProvider>
             <NotificationPanel />
-            <SearchDialog serverId={serverId} />
+            {!isE2EEChannel && <SearchDialog serverId={serverId} />}
           </div>
         </div>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-2" data-testid="messages-list">
-          {messages.length === 0 && (
+          {isE2EEChannel && !canUseE2EEChannel && (
+            <div className="mx-auto mt-8 max-w-xl rounded-xl border border-[#27272A] bg-[#121212] p-6 text-sm text-[#A1A1AA]">
+              {isDesktopCapable
+                ? "This private channel is end-to-end encrypted. Verify or restore this desktop device in Settings > Privacy to read the messages."
+                : "This private channel is end-to-end encrypted and is only available in the desktop app."}
+            </div>
+          )}
+          {canUseE2EEChannel && messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-[#71717A]">
               <Hash size={48} weight="bold" className="mb-4 opacity-30" />
               <p className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>{t("chat.welcomeToChannel", { name: channel.name })}</p>
@@ -447,13 +568,23 @@ export default function ChatArea({
             </div>
           )}
 
-          {messages.map((msg, i) => {
+          {canUseE2EEChannel && messages.map((msg, i) => {
             const prevMsg = messages[i - 1];
             const sameAuthor = prevMsg?.author_id === msg.author_id;
             const timeDiff = prevMsg ? (new Date(msg.created_at) - new Date(prevMsg.created_at)) / 60000 : 999;
             const compact = sameAuthor && timeDiff < 5;
             const replyTarget = getReplyTarget(msg);
             const isHighlighted = highlightedMessageId === msg.id;
+            const decryptedPayload = msg.is_e2ee ? decryptedPayloads[msg.id] : null;
+            const decryptedAttachments = decryptedPayload?.attachments || [];
+            const hasDecryptedText = typeof decryptedPayload?.text === "string" && decryptedPayload.text.length > 0;
+            const hasDecryptedAttachments = decryptedAttachments.length > 0;
+            const displayContent = msg.is_e2ee
+              ? (hasDecryptedText ? decryptedPayload.text : (hasDecryptedAttachments ? "" : "Encrypted message"))
+              : msg.content;
+            const displayAttachments = msg.is_e2ee
+              ? decryptedAttachments
+              : (msg.attachments || []);
 
             return (
               <div
@@ -521,26 +652,28 @@ export default function ChatArea({
                           <PushPin size={10} weight="fill" /> {t("chat.pinned")}
                         </div>
                       )}
-                      {msg.content ? (
+                      {displayContent ? (
                         <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">
-                          {renderMessageContent(msg.content, msg)}
+                          {renderMessageContent(displayContent, msg)}
                         </p>
                       ) : null}
 
                   {/* Attachments */}
-                  {msg.attachments?.length > 0 && (
+                  {displayAttachments?.length > 0 && (
                     <div className="mt-2 space-y-1">
-                      {msg.attachments.map((att, j) => (
+                      {displayAttachments.map((att, j) => (
                         <div key={j}>
-                          {att.type?.startsWith('image/') ? (
+                          {!msg.is_e2ee && att.type?.startsWith('image/') ? (
                             <img src={att.url ? `${config?.assetBase || ""}${att.url}` : att.data} alt={att.name}
                               className="max-w-md max-h-80 rounded-md border border-[#27272A]" />
                           ) : (
-                            <a href={att.url ? `${config?.assetBase || ""}${att.url}` : '#'}
+                            <button
+                              type="button"
+                              onClick={() => (msg.is_e2ee ? handleEncryptedAttachmentDownload(att) : window.open(att.url ? `${config?.assetBase || ""}${att.url}` : "#", "_blank", "noopener,noreferrer"))}
                               className="flex items-center gap-2 bg-[#27272A] rounded px-3 py-2 text-xs text-[#A1A1AA] hover:text-white transition-colors inline-block"
-                              target="_blank" rel="noopener noreferrer">
+                            >
                               <Paperclip size={14} /> {att.name}
-                            </a>
+                            </button>
                           )}
                         </div>
                       ))}
@@ -599,7 +732,7 @@ export default function ChatArea({
                       <TooltipContent side="top"><p>{t("chat.replyInThread")}</p></TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
-                  {msg.author_id === user?.id && (
+                  {msg.author_id === user?.id && !msg.is_e2ee && (
                     <>
                       <button onClick={() => { setEditingId(msg.id); setEditContent(msg.content); }}
                         className="px-1.5 py-1 hover:bg-[#27272A] transition-colors" data-testid={`edit-msg-${msg.id}`}>
@@ -668,7 +801,8 @@ export default function ChatArea({
           <div className="flex items-center gap-2 bg-[#27272A] rounded-lg border border-[#27272A]/50 px-3 py-2.5">
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,.pdf,.txt,.zip,.doc,.docx" />
             <button type="button" onClick={() => fileInputRef.current?.click()} data-testid="file-upload-button"
-              className="text-[#71717A] hover:text-white transition-colors shrink-0">
+              disabled={!canUseE2EEChannel}
+              className="text-[#71717A] hover:text-white transition-colors shrink-0 disabled:text-[#3F3F46]">
               <Paperclip size={18} />
             </button>
             <input
@@ -713,10 +847,11 @@ export default function ChatArea({
                 }
               }}
               placeholder={t("chat.messagePlaceholder", { name: channel.name })}
+              disabled={!canUseE2EEChannel}
               data-testid="message-input"
-              className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none"
+              className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none disabled:text-[#52525B]"
             />
-            <button type="submit" disabled={(!content.trim() && pendingAttachments.length === 0) || sending} data-testid="send-message-button"
+            <button type="submit" disabled={!canUseE2EEChannel || (!content.trim() && pendingAttachments.length === 0) || sending} data-testid="send-message-button"
               className="text-[#6366F1] hover:text-[#4F46E5] disabled:text-[#52525B] transition-colors shrink-0">
               <PaperPlaneRight size={20} weight="fill" />
             </button>
@@ -753,6 +888,7 @@ export default function ChatArea({
       {/* Pinned messages panel */}
       {showPins && (
         <PinnedMessagesPanel
+          channel={channel}
           channelId={channel.id}
           onClose={() => setShowPins(false)}
           onJumpToMessage={async (messageId) => {
@@ -768,6 +904,7 @@ export default function ChatArea({
         <ThreadPanel
           messageId={threadMsgId}
           channelId={channel.id}
+          channel={channel}
           onClose={() => setThreadMsgId(null)}
           user={user}
           onReplySent={(replyMessage, parentMessageId) => {
