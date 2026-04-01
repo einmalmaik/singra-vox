@@ -409,6 +409,26 @@ export default function MainLayout() {
         }
         break;
 
+      case "member_left":
+        setMembers((previous) => removeMember(previous, data.user_id));
+        setChannels((previous) => removeVoiceUser(previous, data.user_id));
+        break;
+
+      case "member_unbanned":
+        if (data.member) {
+          setMembers((previous) => upsertMember(previous, data.member));
+        }
+        if (data.user_id === user?.id) {
+          await loadServers();
+        }
+        break;
+
+      case "server_left":
+        if (data.user_id === user?.id) {
+          await handleRemovedFromServer(data.server_id, "You left this server");
+        }
+        break;
+
       case "voice_join":
         setChannels((previous) => upsertVoiceState(previous, data.channel_id, data.state));
         break;
@@ -446,7 +466,7 @@ export default function MainLayout() {
       default:
         break;
     }
-  }, [handleRemovedFromServer, loadDmConversations, refreshUnread, user?.id]);
+  }, [handleRemovedFromServer, loadDmConversations, loadServers, refreshUnread, user?.id]);
 
   const connectWs = useCallback(() => {
     if (!token || !config?.wsBase) return;
@@ -564,6 +584,7 @@ export default function MainLayout() {
               voiceEngineRef={voiceRef}
               onLogout={logout}
               onUserUpdated={setUser}
+              onRefreshServers={loadServers}
             />
           </div>
 

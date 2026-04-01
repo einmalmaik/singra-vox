@@ -615,6 +615,7 @@ async def delete_account(request: Request):
 
     # 6. Delete file uploads
     await db.file_uploads.delete_many({"user_id": uid})
+    await db.email_verifications.delete_many({"user_id": uid})
 
     # 7. Remove from group conversations
     await db.group_conversations.update_many({"members": uid}, {"$pull": {"members": uid}})

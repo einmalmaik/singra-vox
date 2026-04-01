@@ -27,7 +27,7 @@ const ALL_PERMISSIONS = Object.fromEntries(
 );
 
 export function canCreateCommunity(user) {
-  return ["owner", "admin"].includes(user?.instance_role);
+  return user?.instance_role === "owner";
 }
 
 function mergePermissions(basePermissions, incomingPermissions = {}) {

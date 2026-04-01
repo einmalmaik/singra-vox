@@ -140,8 +140,21 @@ export function AuthProvider({ children }) {
 
   const register = useCallback(async (email, username, password, display_name) => {
     const res = await api.post("/auth/register", { email, username, password, display_name });
+    if (res.data?.verification_required) {
+      return res.data;
+    }
     return applyAuthResult(res.data);
   }, [applyAuthResult]);
+
+  const verifyEmail = useCallback(async (email, code) => {
+    const res = await api.post("/auth/verify-email", { email, code });
+    return applyAuthResult(res.data);
+  }, [applyAuthResult]);
+
+  const resendVerification = useCallback(async (email) => {
+    const res = await api.post("/auth/resend-verification", { email });
+    return res.data;
+  }, []);
 
   const bootstrap = useCallback(async (payload) => {
     const res = await api.post("/setup/bootstrap", payload);
@@ -164,10 +177,12 @@ export function AuthProvider({ children }) {
     token,
     login,
     register,
+    verifyEmail,
+    resendVerification,
     bootstrap,
     logout,
     setUser,
-  }), [bootstrap, loading, login, logout, register, token, user]);
+  }), [bootstrap, loading, login, logout, register, resendVerification, token, user, verifyEmail]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -177,4 +192,3 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be inside AuthProvider");
   return ctx;
 }
-

@@ -30,11 +30,27 @@ services:
       LIVEKIT_URL: "${LIVEKIT_URL:-ws://localhost:7880}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-devkey}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-secret}"
+      SMTP_HOST: "${SMTP_HOST:-mailpit}"
+      SMTP_PORT: "${SMTP_PORT:-1025}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM_EMAIL: "${SMTP_FROM_EMAIL:-no-reply@singravox.local}"
+      SMTP_FROM_NAME: "${SMTP_FROM_NAME:-Singra Vox}"
+      SMTP_USE_TLS: "${SMTP_USE_TLS:-false}"
+      SMTP_USE_SSL: "${SMTP_USE_SSL:-false}"
+      EMAIL_VERIFICATION_TTL_MINUTES: "${EMAIL_VERIFICATION_TTL_MINUTES:-15}"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
       interval: 15s
       timeout: 5s
       retries: 3
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: singravox-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAIL_UI_PORT:-8025}:8025"
 
   frontend:
     build:

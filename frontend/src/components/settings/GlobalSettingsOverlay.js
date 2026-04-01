@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Export,
   GearSix,
@@ -20,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { loadVoicePreferences, saveVoicePreferences } from "@/lib/voicePreferences";
+import { SUPPORTED_LANGUAGES } from "@/i18n";
 
 const STATUS_OPTIONS = [
   { value: "online", label: "Online" },
@@ -29,9 +31,9 @@ const STATUS_OPTIONS = [
 ];
 
 const SECTION_CONFIG = [
-  { id: "voice", label: "Voice & Video", icon: <SlidersHorizontal size={16} /> },
-  { id: "account", label: "Account", icon: <UserCircle size={16} /> },
-  { id: "privacy", label: "Privacy", icon: <ShieldCheck size={16} /> },
+  { id: "voice", icon: <SlidersHorizontal size={16} /> },
+  { id: "account", icon: <UserCircle size={16} /> },
+  { id: "privacy", icon: <ShieldCheck size={16} /> },
 ];
 
 function supportOutputDeviceSelection() {
@@ -47,6 +49,7 @@ export default function GlobalSettingsOverlay({
   onUserUpdated,
   onLogout,
 }) {
+  const { t, i18n } = useTranslation();
   const { config } = useRuntime();
   const isDesktop = Boolean(config?.isDesktop);
   const previewEngineRef = useRef(null);
@@ -63,8 +66,12 @@ export default function GlobalSettingsOverlay({
   const [pttListening, setPttListening] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState("");
   const [savingAccount, setSavingAccount] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [inputLevel, setInputLevel] = useState(0);
   const [inputThreshold, setInputThreshold] = useState(0);
   const [inputAboveThreshold, setInputAboveThreshold] = useState(false);
@@ -133,6 +140,12 @@ export default function GlobalSettingsOverlay({
     if (!activeChannelId) return null;
     return channels?.find((channel) => channel.id === activeChannelId) || null;
   }, [channels, voiceEngineRef]);
+
+  const sectionConfig = useMemo(() => ([
+    { ...SECTION_CONFIG[0], label: t("settings.voiceVideo") },
+    { ...SECTION_CONFIG[1], label: t("settings.account") },
+    { ...SECTION_CONFIG[2], label: t("settings.privacy") },
+  ]), [t]);
 
   const remoteParticipants = useMemo(
     () => (activeVoiceChannel?.voice_states || []).filter((state) => state.user_id !== user?.id),
@@ -250,6 +263,33 @@ export default function GlobalSettingsOverlay({
     }
   };
 
+  const changePassword = async () => {
+    if (newPassword.length < 8) {
+      toast.error("New password must be at least 8 characters");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("New password confirmation does not match");
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await api.put("/users/me/password", {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success("Password changed");
+    } catch (err) {
+      toast.error(formatError(err?.response?.data?.detail));
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   const toggleMicTest = async (enabled) => {
     try {
       const nextPreferences = saveVoicePreferences(
@@ -275,7 +315,7 @@ export default function GlobalSettingsOverlay({
     <SettingsOverlayShell
       open={open}
       title="User Settings"
-      sections={SECTION_CONFIG}
+      sections={sectionConfig}
       activeSection={activeSection}
       onSectionChange={setActiveSection}
       onClose={onClose}
@@ -433,7 +473,11 @@ export default function GlobalSettingsOverlay({
                   <div className="relative h-3 overflow-hidden rounded-full bg-[#18181B]">
                     <div
                       className={`h-full rounded-full transition-all ${inputAboveThreshold ? "bg-[#22C55E]" : "bg-[#6366F1]"}`}
-                      style={{ width: `${Math.max(4, Math.round(inputLevel * 100))}%` }}
+                      style={{ width: `${Math.round(inputLevel * 100)}%` }}
+                    />
+                    <div
+                      className="absolute inset-y-0 w-[3px] rounded-full bg-[#EF4444] shadow-[0_0_10px_rgba(239,68,68,0.45)]"
+                      style={{ left: `${Math.min(99, Math.max(0, inputLevel * 100))}%` }}
                     />
                     <div
                       className="absolute inset-y-0 w-[2px] bg-[#F59E0B]"
@@ -486,7 +530,7 @@ export default function GlobalSettingsOverlay({
       {activeSection === "account" && (
         <div className="space-y-6" data-testid="account-settings-panel">
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Profile</h3>
+              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.profile")}</h3>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Display Name</Label>
@@ -507,8 +551,65 @@ export default function GlobalSettingsOverlay({
             </div>
             <Button onClick={saveAccount} disabled={savingAccount} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">
               <GearSix size={14} className="mr-2" />
-              {savingAccount ? "Saving..." : "Save Profile"}
+              {savingAccount ? t("settings.saving") : t("settings.saveProfile")}
             </Button>
+          </section>
+
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.password")}</h3>
+            <p className="mt-1 text-sm text-[#71717A]">
+              {t("settings.passwordHelp")}
+            </p>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.currentPassword")}</Label>
+                <Input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  className="bg-[#0A0A0A] border-[#27272A] text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.newPassword")}</Label>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  className="bg-[#0A0A0A] border-[#27272A] text-white"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.confirmPassword")}</Label>
+                <Input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  className="bg-[#0A0A0A] border-[#27272A] text-white"
+                />
+              </div>
+            </div>
+            <Button onClick={changePassword} disabled={changingPassword} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">
+              {changingPassword ? t("settings.changingPassword") : t("settings.changePassword")}
+            </Button>
+          </section>
+
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.language")}</h3>
+            <div className="mt-5 space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.language")}</Label>
+              <select
+                value={i18n.language}
+                onChange={(event) => { void i18n.changeLanguage(event.target.value); }}
+                className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
+              >
+                {SUPPORTED_LANGUAGES.map((language) => (
+                  <option key={language.value} value={language.value}>
+                    {t(language.labelKey)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </section>
         </div>
       )}
@@ -519,7 +620,7 @@ export default function GlobalSettingsOverlay({
             <div className="flex items-start gap-3">
               <Export size={20} className="mt-0.5 text-[#6366F1]" />
               <div>
-                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Export Your Data</h3>
+                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.exportData")}</h3>
                 <p className="mt-1 text-sm text-[#71717A]">Download profile, memberships, messages and DM data as JSON.</p>
                 <Button onClick={handleExport} disabled={exporting} className="mt-4 bg-[#6366F1] hover:bg-[#4F46E5]">
                   {exporting ? "Exporting..." : "Download Export"}
@@ -532,7 +633,7 @@ export default function GlobalSettingsOverlay({
             <div className="flex items-start gap-3">
               <Trash size={20} className="mt-0.5 text-[#EF4444]" />
               <div className="flex-1">
-                <h3 className="text-lg font-bold text-[#EF4444]" style={{ fontFamily: "Manrope" }}>Delete Account</h3>
+                <h3 className="text-lg font-bold text-[#EF4444]" style={{ fontFamily: "Manrope" }}>{t("settings.deleteAccount")}</h3>
                 <p className="mt-1 text-sm text-[#71717A]">Type your username to confirm permanent deletion.</p>
                 <Input
                   value={confirmDelete}

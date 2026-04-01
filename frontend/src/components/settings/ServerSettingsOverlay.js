@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   DndContext,
   DragOverlay,
@@ -45,17 +46,18 @@ import {
   parseContainerDropId,
   ROOT_CHANNEL_CONTAINER_ID,
 } from "@/lib/channelOrganization";
+import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
 import SortableChannelItem from "@/components/channels/SortableChannelItem";
 import ChannelContainerDropZone from "@/components/channels/ChannelContainerDropZone";
 import InviteGeneratorPanel from "@/components/invites/InviteGeneratorPanel";
 
 const SECTION_CONFIG = [
-  { id: "general", label: "General", icon: <GearSix size={16} /> },
-  { id: "channels", label: "Channels", icon: <Hash size={16} /> },
-  { id: "roles", label: "Roles", icon: <Shield size={16} /> },
-  { id: "members", label: "Members", icon: <UsersThree size={16} /> },
-  { id: "invites", label: "Invites", icon: <UserPlus size={16} /> },
-  { id: "audit", label: "Audit", icon: <ClipboardText size={16} /> },
+  { id: "general", icon: <GearSix size={16} /> },
+  { id: "channels", icon: <Hash size={16} /> },
+  { id: "roles", icon: <Shield size={16} /> },
+  { id: "members", icon: <UsersThree size={16} /> },
+  { id: "invites", icon: <UserPlus size={16} /> },
+  { id: "audit", icon: <ClipboardText size={16} /> },
 ];
 
 const PERMISSION_LABELS = {
@@ -86,7 +88,10 @@ export default function ServerSettingsOverlay({
   channels,
   members,
   roles,
+  user,
+  onRefreshServers,
 }) {
+  const { t } = useTranslation();
   const [activeSection, setActiveSection] = useState("general");
   const [serverName, setServerName] = useState(server?.name || "");
   const [serverDescription, setServerDescription] = useState(server?.description || "");
@@ -96,6 +101,7 @@ export default function ServerSettingsOverlay({
   const [newRoleColor, setNewRoleColor] = useState("#6366F1");
   const [newRoleMentionable, setNewRoleMentionable] = useState(false);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [bannedMembers, setBannedMembers] = useState([]);
   const [newChannelType, setNewChannelType] = useState("text");
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelParentId, setNewChannelParentId] = useState("__root__");
@@ -103,6 +109,13 @@ export default function ServerSettingsOverlay({
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [channelDraft, setChannelDraft] = useState({ name: "", topic: "", is_private: false, parent_id: "__root__", type: "text" });
   const [roleDraft, setRoleDraft] = useState({ name: "", color: "#6366F1", permissions: {}, mentionable: false });
+  const [ownershipTargetId, setOwnershipTargetId] = useState("");
+  const [transferringOwnership, setTransferringOwnership] = useState(false);
+  const [leavingServer, setLeavingServer] = useState(false);
+  const capabilities = useMemo(
+    () => buildWorkspaceCapabilities({ user, server, members, roles }),
+    [members, roles, server, user],
+  );
   const channelOrganization = useMemo(
     () => buildChannelOrganization(channels || []),
     [channels],
@@ -128,6 +141,15 @@ export default function ServerSettingsOverlay({
       setAuditLogs(res.data);
     } catch {
       setAuditLogs([]);
+    }
+  }, [server?.id]);
+
+  const loadBans = useCallback(async () => {
+    try {
+      const res = await api.get(`/servers/${server.id}/moderation/bans`);
+      setBannedMembers(res.data);
+    } catch {
+      setBannedMembers([]);
     }
   }, [server?.id]);
 
@@ -194,6 +216,30 @@ export default function ServerSettingsOverlay({
     if (!open || activeSection !== "audit" || !server?.id) return;
     void loadAudit();
   }, [activeSection, loadAudit, open, server?.id]);
+
+  useEffect(() => {
+    if (!open || activeSection !== "members" || !server?.id) return;
+    void loadBans();
+  }, [activeSection, loadBans, open, server?.id]);
+
+  useEffect(() => {
+    if (!open) return;
+    setOwnershipTargetId("");
+  }, [open, server?.id]);
+
+  const isServerOwner = server?.owner_id === user?.id;
+  const transferCandidates = useMemo(
+    () => (members || []).filter((member) => member.user_id !== user?.id),
+    [members, user?.id],
+  );
+  const sectionConfig = useMemo(() => ([
+    { ...SECTION_CONFIG[0], label: t("server.general") },
+    { ...SECTION_CONFIG[1], label: t("server.channels") },
+    { ...SECTION_CONFIG[2], label: t("server.roles") },
+    { ...SECTION_CONFIG[3], label: t("server.members") },
+    { ...SECTION_CONFIG[4], label: t("server.invites") },
+    { ...SECTION_CONFIG[5], label: t("server.audit") },
+  ]), [t]);
 
   const saveGeneral = async () => {
     try {
@@ -546,6 +592,8 @@ export default function ServerSettingsOverlay({
         await api.delete(`/servers/${server.id}/members/${memberId}`);
       } else if (action === "ban") {
         await api.post(`/servers/${server.id}/moderation/ban`, { user_id: memberId, reason: "Banned by admin" });
+      } else if (action === "unban") {
+        await api.post(`/servers/${server.id}/moderation/unban`, { user_id: memberId });
       } else if (action === "mute") {
         await api.post(`/servers/${server.id}/moderation/mute`, { user_id: memberId, duration_minutes: 10 });
       }
@@ -554,10 +602,66 @@ export default function ServerSettingsOverlay({
           ? "Member muted"
           : action === "kick"
             ? "Member kicked"
-            : "Member banned",
+            : action === "unban"
+              ? "Member unbanned"
+              : "Member banned",
       );
+      if (action === "unban") {
+        await loadBans();
+      } else if (action === "ban") {
+        await loadBans();
+      }
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail || `Failed to ${action} member`));
+    }
+  };
+
+  const handleTransferOwnership = async () => {
+    if (!ownershipTargetId) {
+      toast.error("Select a member first");
+      return;
+    }
+
+    const confirmed = window.confirm("Transfer server ownership to the selected member?");
+    if (!confirmed) {
+      return;
+    }
+
+    setTransferringOwnership(true);
+    try {
+      await api.post(`/servers/${server.id}/ownership/transfer`, { user_id: ownershipTargetId });
+      toast.success("Server ownership transferred");
+      await onRefreshServers?.();
+      onClose?.();
+    } catch (error) {
+      toast.error(formatError(error.response?.data?.detail));
+    } finally {
+      setTransferringOwnership(false);
+    }
+  };
+
+  const handleLeaveServer = async () => {
+    if (isServerOwner) {
+      toast.error("Transfer ownership before leaving this server");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Leave "${server.name}"?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setLeavingServer(true);
+    try {
+      await api.post(`/servers/${server.id}/leave`);
+      toast.success("Left server");
+      await onRefreshServers?.();
+      onClose?.();
+    } catch (error) {
+      toast.error(formatError(error.response?.data?.detail));
+    } finally {
+      setLeavingServer(false);
     }
   };
 
@@ -567,26 +671,96 @@ export default function ServerSettingsOverlay({
     <SettingsOverlayShell
       open={open}
       title={`${server.name} Settings`}
-      sections={SECTION_CONFIG}
+      sections={sectionConfig}
       activeSection={activeSection}
       onSectionChange={setActiveSection}
       onClose={onClose}
     >
       {activeSection === "general" && (
-        <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-          <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>General</h3>
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Server Name</Label>
-              <Input value={serverName} onChange={(event) => setServerName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+        <div className="space-y-6">
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.general")}</h3>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("server.serverName")}</Label>
+                <Input value={serverName} onChange={(event) => setServerName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Description</Label>
+                <Input value={serverDescription} onChange={(event) => setServerDescription(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Description</Label>
-              <Input value={serverDescription} onChange={(event) => setServerDescription(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+            <Button onClick={saveGeneral} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">Save Changes</Button>
+          </section>
+
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.ownership")}</h3>
+                <p className="mt-1 text-sm text-[#71717A]">
+                  The current owner controls deletion-sensitive actions and can transfer the crown before leaving.
+                </p>
+              </div>
+              <div className="rounded-full border border-[#27272A] bg-[#0A0A0A] px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#A1A1AA]">
+                {isServerOwner ? t("server.owner") : t("server.ownership")}
+              </div>
             </div>
-          </div>
-          <Button onClick={saveGeneral} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">Save Changes</Button>
-        </section>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("server.transferOwnership")}</Label>
+                <select
+                  value={ownershipTargetId}
+                  onChange={(event) => setOwnershipTargetId(event.target.value)}
+                  disabled={!isServerOwner || transferCandidates.length === 0}
+                  className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white disabled:opacity-50"
+                >
+                  <option value="">Select a member</option>
+                  {transferCandidates.map((member) => (
+                    <option key={member.user_id} value={member.user_id}>
+                      {member.user?.display_name || member.user?.username}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-[#71717A]">
+                  {isServerOwner
+                    ? "Transfer ownership before leaving so the server keeps an active owner."
+                    : "Only the current server owner can transfer ownership."}
+                </p>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  onClick={handleTransferOwnership}
+                  disabled={!isServerOwner || !ownershipTargetId || transferringOwnership}
+                  className="w-full bg-[#6366F1] hover:bg-[#4F46E5]"
+                >
+                  {transferringOwnership ? "Transferring..." : t("server.transferOwnership")}
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-lg border border-[#EF4444]/20 bg-[#0A0A0A] px-4 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-white">{t("server.leaveServer")}</p>
+                  <p className="mt-1 text-xs text-[#71717A]">
+                    {isServerOwner
+                      ? "Owners must transfer ownership before they can leave."
+                      : "Leave this community while preserving it for the remaining members."}
+                  </p>
+                </div>
+                <Button
+                  onClick={handleLeaveServer}
+                  disabled={leavingServer}
+                  variant="outline"
+                  className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10"
+                >
+                  {leavingServer ? "Leaving..." : t("server.leaveServer")}
+                </Button>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
 
       {activeSection === "channels" && (
@@ -899,52 +1073,117 @@ export default function ServerSettingsOverlay({
       )}
 
       {activeSection === "members" && (
-        <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-          <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Members</h3>
-          <ScrollArea className="mt-5 h-[560px] pr-4">
-            <div className="space-y-4">
-              {members?.map((member) => (
-                <div key={member.user_id} className="rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">{member.user?.display_name}</p>
-                      <p className="text-xs text-[#71717A]">@{member.user?.username}</p>
-                    </div>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.members")}</h3>
+            <ScrollArea className="mt-5 h-[560px] pr-4">
+              <div className="space-y-4">
+                {members?.map((member) => {
+                  const isOwner = server?.owner_id === member.user_id;
+                  return (
+                    <div key={member.user_id} className="rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-white">
+                            {member.user?.display_name}
+                            {isOwner ? <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-[#F59E0B]">{t("server.owner")}</span> : null}
+                          </p>
+                          <p className="text-xs text-[#71717A]">@{member.user?.username}</p>
+                        </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      {roles?.filter((role) => !role.is_default).map((role) => (
-                        <button
-                          key={role.id}
-                          onClick={() => assignRole(member, role.id)}
-                          className={`rounded-full border px-2 py-1 text-xs transition-colors ${
-                            member.roles?.includes(role.id)
-                              ? "border-current opacity-100"
-                              : "border-[#27272A] text-[#71717A] opacity-70 hover:opacity-100"
-                          }`}
-                          style={{ color: role.color }}
-                        >
-                          {role.name}
-                        </button>
-                      ))}
-                    </div>
+                        <div className="flex flex-wrap gap-2">
+                          {roles?.filter((role) => !role.is_default).map((role) => (
+                            <button
+                              key={role.id}
+                              onClick={() => assignRole(member, role.id)}
+                              className={`rounded-full border px-2 py-1 text-xs transition-colors ${
+                                member.roles?.includes(role.id)
+                                  ? "border-current opacity-100"
+                                  : "border-[#27272A] text-[#71717A] opacity-70 hover:opacity-100"
+                              }`}
+                              style={{ color: role.color }}
+                            >
+                              {role.name}
+                            </button>
+                          ))}
+                        </div>
 
-                    <div className="flex gap-2">
-                      <Button onClick={() => moderateMember(member.user_id, "mute")} variant="outline" className="border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]">Mute</Button>
-                      <Button onClick={() => moderateMember(member.user_id, "kick")} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
-                        <UserMinus size={14} className="mr-2" />
-                        Kick
-                      </Button>
-                      <Button onClick={() => moderateMember(member.user_id, "ban")} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
-                        <Trash size={14} className="mr-2" />
-                        Ban
-                      </Button>
+                        <div className="flex gap-2">
+                          {capabilities.canMuteMembers && (
+                            <Button onClick={() => moderateMember(member.user_id, "mute")} variant="outline" className="border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]">Mute</Button>
+                          )}
+                          {!isOwner && (
+                            <>
+                              {capabilities.canKickMembers && (
+                                <Button onClick={() => moderateMember(member.user_id, "kick")} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
+                                  <UserMinus size={14} className="mr-2" />
+                                  Kick
+                                </Button>
+                              )}
+                              {capabilities.canBanMembers && (
+                                <Button onClick={() => moderateMember(member.user_id, "ban")} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
+                                  <Trash size={14} className="mr-2" />
+                                  Ban
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  );
+                })}
+              </div>
+            </ScrollArea>
+          </section>
+
+          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.bannedMembers")}</h3>
+                <p className="mt-1 text-sm text-[#71717A]">Restore access for previously banned users.</p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => void loadBans()}
+                disabled={!capabilities.canBanMembers && !capabilities.canManageMembers}
+                className="border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]"
+              >
+                {t("server.refresh")}
+              </Button>
             </div>
-          </ScrollArea>
-        </section>
+
+            <ScrollArea className="mt-5 h-[560px] pr-4">
+              {!capabilities.canBanMembers && !capabilities.canManageMembers ? (
+                <p className="text-sm text-[#71717A]">You do not have permission to view the ban list.</p>
+              ) : bannedMembers.length === 0 ? (
+                <p className="text-sm text-[#71717A]">No banned members.</p>
+              ) : (
+                <div className="space-y-3">
+                  {bannedMembers.map((member) => (
+                    <div key={member.user_id} className="rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-white">{member.user?.display_name || member.user?.username}</p>
+                          <p className="text-xs text-[#71717A]">@{member.user?.username}</p>
+                          {member.ban_reason ? (
+                            <p className="mt-2 text-xs text-[#A1A1AA]">Reason: {member.ban_reason}</p>
+                          ) : null}
+                        </div>
+                        <Button
+                          onClick={() => moderateMember(member.user_id, "unban")}
+                          className="bg-[#6366F1] hover:bg-[#4F46E5]"
+                        >
+                          {t("server.unban")}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </section>
+        </div>
       )}
 
         {activeSection === "invites" && (

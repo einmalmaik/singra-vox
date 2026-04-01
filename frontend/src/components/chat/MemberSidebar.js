@@ -1,4 +1,5 @@
 import { Crown, ChatCircle, UserMinus, Prohibit, Timer } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
@@ -7,6 +8,7 @@ import { toast } from "sonner";
 import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
 
 export default function MemberSidebar({ members, roles, serverId, server, user, onStartDM, onRefreshMembers }) {
+  const { t } = useTranslation();
   const onlineMembers = members.filter(m => m.user?.status === "online");
   const offlineMembers = members.filter(m => m.user?.status !== "online");
   const capabilities = buildWorkspaceCapabilities({ user, server, members, roles });
@@ -21,7 +23,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
   };
 
   const isOwnerOrAdmin = (member) => {
-    return member.user?.role === "admin" || member.roles?.some(rid => {
+    return server?.owner_id === member.user?.id || member.user?.role === "admin" || member.roles?.some(rid => {
       const r = roles?.find(role => role.id === rid);
       return r?.permissions?.manage_server;
     });
@@ -60,6 +62,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
     const isOnline = member.user?.status === "online";
     const isSelf = member.user?.id === user?.id;
     const isAdmin = isOwnerOrAdmin(member);
+    const isServerOwner = server?.owner_id === member.user?.id;
     const canModerate = capabilities.canMuteMembers || capabilities.canKickMembers || capabilities.canBanMembers;
 
     return (
@@ -110,13 +113,13 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
                   <Timer size={16} className="mr-2" /> Mute (10 min)
                 </DropdownMenuItem>
               )}
-              {capabilities.canKickMembers && (
+              {capabilities.canKickMembers && !isServerOwner && (
                 <DropdownMenuItem onClick={() => handleKick(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
                   data-testid={`kick-member-${member.user?.username}`}>
                   <UserMinus size={16} className="mr-2" /> Kick
                 </DropdownMenuItem>
               )}
-              {capabilities.canBanMembers && (
+              {capabilities.canBanMembers && !isServerOwner && (
                 <DropdownMenuItem onClick={() => handleBan(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
                   data-testid={`ban-member-${member.user?.username}`}>
                   <Prohibit size={16} className="mr-2" /> Ban
@@ -133,7 +136,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
     <div className="w-[240px] h-full min-h-0 bg-[#18181B] border-l border-[#27272A]/40 flex flex-col shrink-0" data-testid="member-sidebar">
       <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0">
         <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>
-          Members
+          {t("server.members")}
         </h3>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto py-4 px-2">

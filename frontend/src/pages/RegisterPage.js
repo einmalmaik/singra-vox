@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import api, { formatError } from "@/lib/api";
@@ -9,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { ShieldCheck } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
+import { rememberPendingVerification } from "@/lib/pendingVerification";
 
 export default function RegisterPage() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -25,10 +28,16 @@ export default function RegisterPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
     setLoading(true);
     try {
-      await register(email, username, password, displayName || username);
+      const result = await register(email, username, password, displayName || username);
+      if (result?.verification_required) {
+        rememberPendingVerification(result.email || email);
+        toast.success(t("auth.verificationSent"));
+        navigate("/verify-email", { state: { email: result.email || email } });
+        return;
+      }
       if (pendingInvite?.code) {
         try {
           const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
@@ -60,13 +69,13 @@ export default function RegisterPage() {
           <h1 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>Singra Vox</h1>
         </div>
 
-        <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>Create account</h2>
+        <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>{t("auth.createAccount")}</h2>
         <p className="text-[#71717A] text-sm mb-8">
-          Join {setupStatus?.instance_name || "this privacy-first communication platform"}
+          {t("auth.registerSubtitle", { instance: setupStatus?.instance_name || "this privacy-first communication platform" })}
         </p>
         {pendingInvite?.code ? (
           <div className="mb-6 rounded-md border border-[#27272A] bg-[#121212] px-4 py-3 text-sm text-[#D4D4D8]">
-            Your account will join the invite automatically after registration.
+            {t("auth.pendingInviteRegister")}
           </div>
         ) : null}
 
@@ -77,7 +86,7 @@ export default function RegisterPage() {
             </div>
           )}
           <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Email</Label>
+            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.email")}</Label>
             <Input
               type="email" value={email} onChange={e => setEmail(e.target.value)}
               placeholder="you@example.com" required data-testid="register-email-input"
@@ -85,7 +94,7 @@ export default function RegisterPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Username</Label>
+            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.username")}</Label>
             <Input
               value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
               placeholder="username" required data-testid="register-username-input"
@@ -93,7 +102,7 @@ export default function RegisterPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Display Name</Label>
+            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.displayName")}</Label>
             <Input
               value={displayName} onChange={e => setDisplayName(e.target.value)}
               placeholder="How others see you" data-testid="register-display-input"
@@ -101,10 +110,10 @@ export default function RegisterPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Password</Label>
+            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.password")}</Label>
             <Input
               type="password" value={password} onChange={e => setPassword(e.target.value)}
-              placeholder="Min. 6 characters" required data-testid="register-password-input"
+              placeholder="Min. 8 characters" required data-testid="register-password-input"
               className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
             />
           </div>
@@ -112,14 +121,14 @@ export default function RegisterPage() {
             type="submit" disabled={loading} data-testid="register-submit-button"
             className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
           >
-            {loading ? "Creating..." : "Create Account"}
+            {loading ? t("auth.creatingAccount") : t("auth.createAccountAction")}
           </Button>
         </form>
 
         <p className="text-center text-[#71717A] text-sm mt-6">
-          Already have an account?{" "}
+          {t("auth.alreadyHaveAccount")}{" "}
           <Link to="/login" className="text-[#6366F1] hover:text-[#4F46E5] font-medium" data-testid="login-link">
-            Sign in
+            {t("auth.signIn")}
           </Link>
         </p>
       </div>

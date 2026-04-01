@@ -29,6 +29,7 @@ next-env.d.ts
 /build
 dist/
 dist
+desktop/src-tauri/target/
 
 # Environment files (comprehensive coverage)
 

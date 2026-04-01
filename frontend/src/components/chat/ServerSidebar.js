@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus, ChatCircleDots } from "@phosphor-icons/react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger
@@ -24,6 +25,7 @@ export default function ServerSidebar({
   dmUnread,
   serverUnreadMap = {},
 }) {
+  const { t } = useTranslation();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -67,7 +69,7 @@ export default function ServerSidebar({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent side="right"><p>Direct Messages</p></TooltipContent>
+          <TooltipContent side="right"><p>{t("server.directMessages")}</p></TooltipContent>
         </Tooltip>
 
         <div className="w-8 h-[2px] bg-[#27272A] rounded-full my-1" />
@@ -124,15 +126,15 @@ export default function ServerSidebar({
                   </button>
                 </DialogTrigger>
               </TooltipTrigger>
-              <TooltipContent side="right"><p>Add Server</p></TooltipContent>
+              <TooltipContent side="right"><p>{t("server.addServer")}</p></TooltipContent>
             </Tooltip>
             <DialogContent className="bg-[#18181B] border-[#27272A] text-white max-w-sm">
               <DialogHeader>
-                <DialogTitle style={{ fontFamily: "Manrope" }}>Create Server</DialogTitle>
+                <DialogTitle style={{ fontFamily: "Manrope" }}>{t("server.createServer")}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleCreate} className="space-y-4 mt-2">
                 <div className="space-y-2">
-                  <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Server Name</Label>
+                  <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("server.serverName")}</Label>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -147,7 +149,7 @@ export default function ServerSidebar({
                   data-testid="create-server-submit"
                   className="w-full bg-[#6366F1] hover:bg-[#4F46E5]"
                 >
-                  {creating ? "Creating..." : "Create"}
+                  {creating ? "Creating..." : t("server.create")}
                 </Button>
               </form>
             </DialogContent>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   DndContext,
   DragOverlay,
@@ -88,7 +89,9 @@ export default function ChannelSidebar({
   voiceEngineRef,
   onLogout,
   onUserUpdated,
+  onRefreshServers,
 }) {
+  const { t } = useTranslation();
   const { config } = useRuntime();
   const isDesktop = Boolean(config?.isDesktop);
   const [showCreate, setShowCreate] = useState(false);
@@ -584,6 +587,7 @@ export default function ChannelSidebar({
           const speaking = participantId === user?.id
             ? voiceActivity.localSpeaking
             : voiceActivity.activeSpeakerIds.includes(participantId);
+          const isServerOwner = server?.owner_id === participantId;
 
           return (
             <DropdownMenu key={participantId}>
@@ -650,12 +654,12 @@ export default function ChannelSidebar({
                         {voiceState.is_deafened ? "Server undeafen" : "Server deafen"}
                       </DropdownMenuItem>
                     )}
-                    {capabilities.canKickMembers && (
+                    {capabilities.canKickMembers && !isServerOwner && (
                       <DropdownMenuItem className="text-[#EF4444]" onClick={() => handleModerationAction(participantId, "kick")}>
                         <UserMinus size={14} className="mr-2" /> Kick
                       </DropdownMenuItem>
                     )}
-                    {capabilities.canBanMembers && (
+                    {capabilities.canBanMembers && !isServerOwner && (
                       <DropdownMenuItem className="text-[#EF4444]" onClick={() => handleModerationAction(participantId, "ban")}>
                         <Prohibit size={14} className="mr-2" /> Ban
                       </DropdownMenuItem>
@@ -760,7 +764,7 @@ export default function ChannelSidebar({
                           className="flex items-center gap-2 px-2 py-1.5 mt-2 text-[#71717A] hover:text-[#A1A1AA] text-sm w-full rounded-md hover:bg-[#27272A]/30 transition-colors"
                         >
                           <Plus size={14} weight="bold" />
-                          <span>{chType === "category" ? "Add Category" : "Add Channel"}</span>
+                          <span>{chType === "category" ? t("channel.addCategory") : t("channel.addChannel")}</span>
                         </button>
                       </DialogTrigger>
                       <DialogContent className="bg-[#18181B] border-[#27272A] text-white max-w-sm">
@@ -854,7 +858,7 @@ export default function ChannelSidebar({
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full bg-[#22C55E] ${voiceActivity.localSpeaking ? "voice-active" : ""}`} />
                 <span className="text-xs text-[#22C55E] font-medium">
-                  {voiceActivity.localSpeaking ? "Speaking" : "Voice Connected"}
+                  {voiceActivity.localSpeaking ? t("channel.speaking") : t("channel.voiceConnected")}
                 </span>
               </div>
               <p className="text-xs text-[#71717A] mb-2 truncate">{voiceChannel.name}</p>
@@ -867,7 +871,7 @@ export default function ChannelSidebar({
                   }`}
                 >
                   {isMuted ? <MicrophoneSlash size={14} /> : <Microphone size={14} />}
-                  {isMuted ? "Muted" : "Mute"}
+                  {isMuted ? t("channel.muted") : t("channel.mute")}
                 </button>
                 <button
                   onClick={toggleDeafen}
@@ -877,14 +881,14 @@ export default function ChannelSidebar({
                   }`}
                 >
                   {isDeafened ? <SpeakerSlash size={14} /> : <SpeakerHigh size={14} />}
-                  {isDeafened ? "Deafened" : "Deafen"}
+                  {isDeafened ? t("channel.deafened") : t("channel.deafen")}
                 </button>
                 <button
                   onClick={leaveVoice}
                   data-testid="voice-disconnect"
                   className="px-3 py-1.5 rounded-md bg-[#EF4444]/20 text-[#EF4444] text-xs font-medium hover:bg-[#EF4444]/30 transition-colors"
                 >
-                  Leave
+                  {t("channel.leave")}
                 </button>
               </div>
             </div>
@@ -926,6 +930,8 @@ export default function ChannelSidebar({
         channels={channels}
         members={members}
         roles={roles}
+        user={user}
+        onRefreshServers={onRefreshServers}
       />
       <GlobalSettingsOverlay
         open={userSettingsOpen}

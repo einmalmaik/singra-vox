@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import api, { formatError } from "@/lib/api";
@@ -9,8 +10,10 @@ import { Label } from "@/components/ui/label";
 import { ShieldCheck } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
+import { rememberPendingVerification } from "@/lib/pendingVerification";
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -43,6 +46,13 @@ export default function LoginPage() {
       }
       navigate("/");
     } catch (err) {
+      if (err.response?.status === 403 && err.response?.data?.detail?.code === "email_verification_required") {
+        const verificationEmail = err.response?.data?.detail?.email || email;
+        rememberPendingVerification(verificationEmail);
+        toast.info(t("auth.verifyEmail"));
+        navigate("/verify-email", { state: { email: verificationEmail } });
+        return;
+      }
       setError(formatError(err.response?.data?.detail) || err.message);
     } finally {
       setLoading(false);
@@ -79,13 +89,13 @@ export default function LoginPage() {
             <h1 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>Singra Vox</h1>
           </div>
 
-          <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>Welcome back</h2>
+          <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>{t("auth.welcomeBack")}</h2>
           <p className="text-[#71717A] text-sm mb-8">
-            Sign in to {setupStatus?.instance_name || "your self-hosted instance"}
+            {t("auth.signInSubtitle", { instance: setupStatus?.instance_name || "your self-hosted instance" })}
           </p>
           {pendingInvite?.code ? (
             <div className="mb-6 rounded-md border border-[#27272A] bg-[#121212] px-4 py-3 text-sm text-[#D4D4D8]">
-              This sign-in will continue your invite automatically.
+              {t("auth.pendingInviteLogin")}
             </div>
           ) : null}
 
@@ -96,7 +106,7 @@ export default function LoginPage() {
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Email</Label>
+              <Label htmlFor="email" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.email")}</Label>
               <Input
                 id="email" type="email" value={email} onChange={e => setEmail(e.target.value)}
                 placeholder="you@example.com" required data-testid="login-email-input"
@@ -104,7 +114,7 @@ export default function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Password</Label>
+              <Label htmlFor="password" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.password")}</Label>
               <Input
                 id="password" type="password" value={password} onChange={e => setPassword(e.target.value)}
                 placeholder="Enter your password" required data-testid="login-password-input"
@@ -115,15 +125,15 @@ export default function LoginPage() {
               type="submit" disabled={loading} data-testid="login-submit-button"
               className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
             >
-              {loading ? "Signing in..." : "Sign in"}
+              {loading ? t("auth.signingIn") : t("auth.signIn")}
             </Button>
           </form>
 
           {setupStatus?.allow_open_signup && (
             <p className="text-center text-[#71717A] text-sm mt-6">
-              No account yet?{" "}
+              {t("auth.noAccount")}{" "}
               <Link to="/register" className="text-[#6366F1] hover:text-[#4F46E5] font-medium" data-testid="register-link">
-                Create one
+                {t("auth.createOne")}
               </Link>
             </p>
           )}

@@ -4,6 +4,7 @@ Singra Vox backend application.
 from pathlib import Path
 import asyncio
 from datetime import datetime, timezone, timedelta
+import hashlib
 import logging
 import os
 import secrets
@@ -29,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from typing import Dict, List, Optional
+from app.emailing import render_verification_email, send_email
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
@@ -62,6 +64,9 @@ INSTANCE_SETTINGS_ID = "instance:primary"
 OWNER_ROLE = "owner"
 ADMIN_ROLE = "admin"
 USER_ROLE = "user"
+EMAIL_VERIFICATION_TTL_MINUTES = int(os.environ.get("EMAIL_VERIFICATION_TTL_MINUTES", "15"))
+EMAIL_VERIFICATION_PURPOSE = "verify_email"
+EMAIL_VERIFICATION_CODE_LENGTH = 6
 
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
@@ -96,6 +101,16 @@ def hash_pw(password: str) -> str:
 def verify_pw(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
+
+def hash_verification_code(*, email: str, purpose: str, code: str) -> str:
+    payload = f"{jwt_secret}:{email.lower().strip()}:{purpose}:{code}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def generate_numeric_code(length: int = EMAIL_VERIFICATION_CODE_LENGTH) -> str:
+    digits = "0123456789"
+    return "".join(secrets.choice(digits) for _ in range(length))
+
 def make_access_token(uid: str, email: str) -> str:
     return pyjwt.encode(
         {"sub": uid, "email": email, "exp": datetime.now(timezone.utc) + timedelta(hours=1), "type": "access"},
@@ -116,6 +131,8 @@ def sanitize_user(user: dict) -> dict:
     legacy_role = safe_user.get("role")
     if not safe_user.get("instance_role"):
         safe_user["instance_role"] = OWNER_ROLE if legacy_role == OWNER_ROLE else (ADMIN_ROLE if legacy_role == ADMIN_ROLE else USER_ROLE)
+    if "email_verified" not in safe_user:
+        safe_user["email_verified"] = True
     return safe_user
 
 
@@ -232,6 +249,59 @@ async def ensure_unique_identity(email: str, username: str):
         raise HTTPException(400, "Email already registered")
     if await db.users.find_one({"username": username}, {"_id": 0}):
         raise HTTPException(400, "Username taken")
+
+
+def email_verification_required_detail(email: str) -> dict:
+    return {
+        "code": "email_verification_required",
+        "message": "Verify your email before signing in",
+        "email": email,
+    }
+
+
+async def issue_email_verification(user: dict) -> dict:
+    code = generate_numeric_code()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=EMAIL_VERIFICATION_TTL_MINUTES)).isoformat()
+    email = user["email"].lower().strip()
+    await db.email_verifications.delete_many({
+        "user_id": user["id"],
+        "purpose": EMAIL_VERIFICATION_PURPOSE,
+    })
+    await db.email_verifications.insert_one({
+        "id": new_id(),
+        "user_id": user["id"],
+        "email": email,
+        "purpose": EMAIL_VERIFICATION_PURPOSE,
+        "code_hash": hash_verification_code(
+            email=email,
+            purpose=EMAIL_VERIFICATION_PURPOSE,
+            code=code,
+        ),
+        "expires_at": expires_at,
+        "created_at": now_utc(),
+    })
+
+    settings = await get_instance_settings()
+    subject, text_body, html_body = render_verification_email(
+        app_name="Singra Vox",
+        instance_name=settings.get("instance_name") or "Singra Vox",
+        code=code,
+        expires_minutes=EMAIL_VERIFICATION_TTL_MINUTES,
+    )
+    await send_email(
+        to_email=email,
+        subject=subject,
+        text_body=text_body,
+        html_body=html_body,
+    )
+    return {"email": email, "expires_at": expires_at}
+
+
+async def get_server_member(server_id: str, user_id: str) -> Optional[dict]:
+    return await db.server_members.find_one(
+        {"server_id": server_id, "user_id": user_id},
+        {"_id": 0},
+    )
 
 
 def auth_response_for_user(user: dict) -> dict:
@@ -474,7 +544,7 @@ async def create_default_community(owner: dict, name: str, description: str = ""
 class RegisterInput(BaseModel):
     email: str
     username: str
-    password: str
+    password: str = Field(min_length=8, max_length=256)
     display_name: str = ""
 
 class LoginInput(BaseModel):
@@ -484,6 +554,20 @@ class LoginInput(BaseModel):
 
 class RefreshInput(BaseModel):
     refresh_token: Optional[str] = None
+
+
+class VerifyEmailInput(BaseModel):
+    email: str
+    code: str = Field(min_length=4, max_length=8)
+
+
+class ResendVerificationInput(BaseModel):
+    email: str
+
+
+class PasswordChangeInput(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=256)
 
 
 class BootstrapInput(BaseModel):
@@ -547,6 +631,10 @@ class ModerationInput(BaseModel):
     user_id: str
     reason: str = ""
     duration_minutes: int = 0
+
+
+class OwnershipTransferInput(BaseModel):
+    user_id: str
 
 class ProfileUpdateInput(BaseModel):
     display_name: Optional[str] = None
@@ -676,14 +764,26 @@ async def register(inp: RegisterInput, response: Response):
         "id": uid, "email": email, "username": username,
         "display_name": inp.display_name or inp.username,
         "password_hash": hash_pw(inp.password),
-        "avatar_url": "", "status": "online", "public_key": "",
+        "avatar_url": "", "status": "offline", "public_key": "",
         "role": USER_ROLE, "instance_role": USER_ROLE,
+        "email_verified": False,
+        "email_verified_at": None,
         "created_at": now_utc(), "last_seen": now_utc()
     }
     await db.users.insert_one(user)
-    auth_payload = auth_response_for_user(user)
-    set_cookies(response, auth_payload["access_token"], auth_payload["refresh_token"])
-    return auth_payload
+    try:
+        verification_state = await issue_email_verification(user)
+    except Exception:
+        await db.users.delete_one({"id": uid})
+        raise HTTPException(503, "Verification email could not be sent")
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return {
+        "ok": True,
+        "verification_required": True,
+        "email": verification_state["email"],
+        "expires_at": verification_state["expires_at"],
+    }
 
 @auth_r.post("/login")
 async def login(inp: LoginInput, request: Request, response: Response):
@@ -706,12 +806,77 @@ async def login(inp: LoginInput, request: Request, response: Response):
             upsert=True
         )
         raise HTTPException(401, "Invalid credentials")
+    if not user.get("email_verified", True):
+        raise HTTPException(403, email_verification_required_detail(email))
     await db.login_attempts.delete_one({"identifier": ident})
     await db.users.update_one({"id": user["id"]}, {"$set": {"status": "online", "last_seen": now_utc()}})
     auth_payload = auth_response_for_user(user)
     set_cookies(response, auth_payload["access_token"], auth_payload["refresh_token"])
     await broadcast_presence_update(user["id"])
     return auth_payload
+
+
+@auth_r.post("/verify-email")
+async def verify_email(inp: VerifyEmailInput, response: Response):
+    email = inp.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        raise HTTPException(404, "Account not found")
+
+    if user.get("email_verified", True):
+        raise HTTPException(400, "Email is already verified")
+
+    verification = await db.email_verifications.find_one(
+        {"user_id": user["id"], "purpose": EMAIL_VERIFICATION_PURPOSE},
+        {"_id": 0},
+    )
+    if not verification:
+        raise HTTPException(400, "No verification code available")
+    if datetime.fromisoformat(verification["expires_at"]) <= datetime.now(timezone.utc):
+        await db.email_verifications.delete_one({"id": verification["id"]})
+        raise HTTPException(410, "Verification code expired")
+
+    expected_hash = hash_verification_code(
+        email=email,
+        purpose=EMAIL_VERIFICATION_PURPOSE,
+        code=inp.code.strip(),
+    )
+    if expected_hash != verification.get("code_hash"):
+        raise HTTPException(400, "Invalid verification code")
+
+    verified_at = now_utc()
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"email_verified": True, "email_verified_at": verified_at, "status": "online", "last_seen": verified_at}},
+    )
+    await db.email_verifications.delete_many({"user_id": user["id"], "purpose": EMAIL_VERIFICATION_PURPOSE})
+
+    verified_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    auth_payload = auth_response_for_user(verified_user)
+    set_cookies(response, auth_payload["access_token"], auth_payload["refresh_token"])
+    await broadcast_presence_update(verified_user["id"])
+    return auth_payload
+
+
+@auth_r.post("/resend-verification")
+async def resend_verification(inp: ResendVerificationInput):
+    email = inp.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        return {"ok": True}
+    if user.get("email_verified", True):
+        return {"ok": True, "already_verified": True}
+
+    try:
+        verification_state = await issue_email_verification(user)
+    except Exception:
+        raise HTTPException(503, "Verification email could not be sent")
+
+    return {
+        "ok": True,
+        "email": verification_state["email"],
+        "expires_at": verification_state["expires_at"],
+    }
 
 @auth_r.post("/logout")
 async def logout(request: Request, response: Response):
@@ -806,6 +971,8 @@ async def bootstrap(inp: BootstrapInput, response: Response):
         "public_key": "",
         "role": OWNER_ROLE,
         "instance_role": OWNER_ROLE,
+        "email_verified": True,
+        "email_verified_at": now_utc(),
         "created_at": now_utc(),
         "last_seen": now_utc(),
     }
@@ -907,7 +1074,7 @@ async def list_servers(request: Request):
 @servers_r.post("")
 async def create_server(inp: ServerCreateInput, request: Request):
     user = await current_user(request)
-    await require_instance_admin(user)
+    await require_instance_owner(user)
     server = await create_default_community(user, inp.name, inp.description)
     ws_mgr.add_server(user["id"], server["id"])
     server.pop("_id", None)
@@ -937,6 +1104,59 @@ async def update_server(server_id: str, request: Request):
     if server:
         await ws_mgr.broadcast_server(server_id, {"type": "server_updated", "server": server})
     return server
+
+
+@servers_r.post("/{server_id}/ownership/transfer")
+async def transfer_server_ownership(server_id: str, inp: OwnershipTransferInput, request: Request):
+    actor = await current_user(request)
+    server = await db.servers.find_one({"id": server_id}, {"_id": 0})
+    if not server:
+        raise HTTPException(404, "Server not found")
+    if server.get("owner_id") != actor["id"]:
+        raise HTTPException(403, "Only the current server owner can transfer ownership")
+    if inp.user_id == actor["id"]:
+        raise HTTPException(400, "You already own this server")
+
+    target_member = await get_server_member(server_id, inp.user_id)
+    if not target_member or target_member.get("is_banned"):
+        raise HTTPException(404, "Target member not found")
+
+    await db.servers.update_one({"id": server_id}, {"$set": {"owner_id": inp.user_id}})
+    updated_server = await db.servers.find_one({"id": server_id}, {"_id": 0})
+    await log_audit(
+        server_id,
+        actor["id"],
+        "ownership_transfer",
+        "server",
+        server_id,
+        {"from_user_id": actor["id"], "to_user_id": inp.user_id},
+    )
+    await ws_mgr.broadcast_server(server_id, {"type": "server_updated", "server": updated_server})
+    return updated_server
+
+
+@servers_r.post("/{server_id}/leave")
+async def leave_server(server_id: str, request: Request):
+    user = await current_user(request)
+    server = await db.servers.find_one({"id": server_id}, {"_id": 0})
+    if not server:
+        raise HTTPException(404, "Server not found")
+
+    membership = await get_server_member(server_id, user["id"])
+    if not membership or membership.get("is_banned"):
+        raise HTTPException(403, "Not a member")
+
+    if server.get("owner_id") == user["id"]:
+        raise HTTPException(400, "Transfer ownership before leaving this server")
+
+    await clear_voice_membership(user["id"], server_id=server_id, force_reason="left")
+    await db.server_members.delete_one({"server_id": server_id, "user_id": user["id"]})
+    ws_mgr.remove_server(user["id"], server_id)
+    await log_audit(server_id, user["id"], "member_leave", "user", user["id"], {})
+    payload = {"type": "member_left", "server_id": server_id, "user_id": user["id"]}
+    await ws_mgr.broadcast_server(server_id, payload)
+    await ws_mgr.send(user["id"], {"type": "server_left", "server_id": server_id, "user_id": user["id"]})
+    return {"ok": True}
 
 # --- Channels ---
 @servers_r.get("/{server_id}/channels")
@@ -1013,6 +1233,28 @@ async def list_members(server_id: str, request: Request):
             result.append(m)
     return result
 
+
+@servers_r.get("/{server_id}/moderation/bans")
+async def list_bans(server_id: str, request: Request):
+    actor = await current_user(request)
+    if not (
+        await check_permission(actor["id"], server_id, "ban_members")
+        or await check_permission(actor["id"], server_id, "manage_members")
+    ):
+        raise HTTPException(403, "No permission")
+
+    banned_members = await db.server_members.find(
+        {"server_id": server_id, "is_banned": True},
+        {"_id": 0},
+    ).to_list(500)
+    result = []
+    for member in banned_members:
+        banned_user = await db.users.find_one({"id": member["user_id"]}, {"_id": 0, "password_hash": 0})
+        if banned_user:
+            member["user"] = sanitize_user(banned_user)
+            result.append(member)
+    return result
+
 @servers_r.put("/{server_id}/members/{user_id}")
 async def update_member(server_id: str, user_id: str, request: Request):
     actor = await current_user(request)
@@ -1039,6 +1281,9 @@ async def kick_member(server_id: str, user_id: str, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "kick_members"):
         raise HTTPException(403, "No permission")
+    server = await db.servers.find_one({"id": server_id}, {"_id": 0, "owner_id": 1})
+    if server and server.get("owner_id") == user_id:
+        raise HTTPException(400, "Cannot remove the server owner")
     await clear_voice_membership(user_id, server_id=server_id, force_reason="kicked")
     await db.server_members.delete_one({"server_id": server_id, "user_id": user_id})
     ws_mgr.remove_server(user_id, server_id)
@@ -1111,6 +1356,9 @@ async def ban_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "ban_members"):
         raise HTTPException(403, "No permission")
+    server = await db.servers.find_one({"id": server_id}, {"_id": 0, "owner_id": 1})
+    if server and server.get("owner_id") == inp.user_id:
+        raise HTTPException(400, "Cannot ban the server owner")
     await clear_voice_membership(inp.user_id, server_id=server_id, force_reason="banned")
     await db.server_members.update_one(
         {"server_id": server_id, "user_id": inp.user_id},
@@ -1128,11 +1376,34 @@ async def unban_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "ban_members"):
         raise HTTPException(403, "No permission")
+    membership = await get_server_member(server_id, inp.user_id)
+    if not membership or not membership.get("is_banned"):
+        raise HTTPException(404, "Banned member not found")
     await db.server_members.update_one(
         {"server_id": server_id, "user_id": inp.user_id},
         {"$set": {"is_banned": False, "ban_reason": ""}}
     )
     ws_mgr.add_server(inp.user_id, server_id)
+    member_payload = await build_member_payload(server_id, inp.user_id)
+    await log_audit(server_id, actor["id"], "member_unban", "user", inp.user_id, {})
+    await ws_mgr.broadcast_server(
+        server_id,
+        {
+            "type": "member_unbanned",
+            "server_id": server_id,
+            "user_id": inp.user_id,
+            "member": member_payload,
+        },
+    )
+    await ws_mgr.send(
+        inp.user_id,
+        {
+            "type": "member_unbanned",
+            "server_id": server_id,
+            "user_id": inp.user_id,
+            "member": member_payload,
+        },
+    )
     return {"ok": True}
 
 @servers_r.post("/{server_id}/moderation/mute")
@@ -1795,6 +2066,22 @@ async def update_profile(inp: ProfileUpdateInput, request: Request):
         await broadcast_presence_update(user["id"])
     return await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
 
+
+@users_r.put("/me/password")
+async def change_password(inp: PasswordChangeInput, request: Request):
+    user = await current_user(request)
+    stored_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
+    if not stored_user or not verify_pw(inp.current_password, stored_user["password_hash"]):
+        raise HTTPException(400, "Current password is incorrect")
+    if inp.current_password == inp.new_password:
+        raise HTTPException(400, "New password must be different from the current password")
+
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_pw(inp.new_password)}},
+    )
+    return {"ok": True}
+
 @users_r.post("/me/public-key")
 async def set_public_key(request: Request):
     user = await current_user(request)
@@ -1890,6 +2177,15 @@ async def migrate_default_roles():
     if default_roles:
         logger.info("Normalized default roles to @everyone")
 
+
+async def migrate_email_verification_state():
+    result = await db.users.update_many(
+        {"email_verified": {"$exists": False}},
+        {"$set": {"email_verified": True, "email_verified_at": now_utc()}},
+    )
+    if result.modified_count:
+        logger.info("Marked %s legacy users as email verified", result.modified_count)
+
 # ============================================================
 # WebSocket
 # ============================================================
@@ -1964,6 +2260,8 @@ async def startup():
     await db.server_members.create_index([("server_id", 1), ("user_id", 1)], unique=True)
     await db.roles.create_index("id", unique=True)
     await db.invites.create_index("code", unique=True)
+    await db.email_verifications.create_index([("user_id", 1), ("purpose", 1)], unique=True)
+    await db.email_verifications.create_index("expires_at")
     await db.voice_states.create_index("user_id")
     await db.audit_log.create_index([("server_id", 1), ("created_at", -1)])
     await db.login_attempts.create_index("identifier")
@@ -1972,13 +2270,14 @@ async def startup():
 
     await migrate_legacy_instance_state()
     await migrate_default_roles()
+    await migrate_email_verification_state()
 
     Path("/app/memory").mkdir(exist_ok=True)
     with open("/app/memory/test_credentials.md", "w") as f:
         f.write("# Singra Vox Setup\n\n")
         f.write("- Open `/setup` on the instance after the first start.\n")
         f.write("- The first admin is created through the setup wizard.\n\n")
-        f.write("## Auth Endpoints\n- POST /api/setup/bootstrap\n- POST /api/auth/register\n- POST /api/auth/login\n- POST /api/auth/logout\n- GET /api/auth/me\n- POST /api/auth/refresh\n")
+        f.write("## Auth Endpoints\n- POST /api/setup/bootstrap\n- POST /api/auth/register\n- POST /api/auth/verify-email\n- POST /api/auth/resend-verification\n- POST /api/auth/login\n- POST /api/auth/logout\n- GET /api/auth/me\n- POST /api/auth/refresh\n")
 
     logger.info("Singra Vox backend started")
 

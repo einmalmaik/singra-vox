@@ -1,10 +1,12 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { RuntimeProvider, useRuntime } from "@/contexts/RuntimeContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import ConnectPage from "@/pages/ConnectPage";
 import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
+import VerifyEmailPage from "@/pages/VerifyEmailPage";
 import SetupPage from "@/pages/SetupPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import InvitePage from "@/pages/InvitePage";
@@ -26,8 +28,9 @@ function LoadingScreen({ label = "Connecting..." }) {
 }
 
 function ProtectedRoute({ children }) {
+  const { t } = useTranslation();
   const { user, loading } = useAuth();
-  if (loading) return <LoadingScreen />;
+  if (loading) return <LoadingScreen label={t("app.connecting")} />;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
@@ -35,9 +38,10 @@ function ProtectedRoute({ children }) {
 function AppRoutes() {
   const { ready, config, setupStatus } = useRuntime();
   const { user, loading } = useAuth();
+  const { t } = useTranslation();
 
   if (!ready) {
-    return <LoadingScreen label="Loading instance..." />;
+    return <LoadingScreen label={t("app.loadingInstance")} />;
   }
 
   if (config?.needsConnection) {
@@ -59,7 +63,7 @@ function AppRoutes() {
   }
 
   if (loading) {
-    return <LoadingScreen />;
+    return <LoadingScreen label={t("app.connecting")} />;
   }
 
   return (
@@ -77,6 +81,7 @@ function AppRoutes() {
               : <RegisterPage />
         }
       />
+      <Route path="/verify-email" element={user ? <Navigate to="/" replace /> : <VerifyEmailPage />} />
       <Route path="/invite/:code" element={<InvitePage />} />
       <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
       <Route path="/*" element={<ProtectedRoute><MainLayout /></ProtectedRoute>} />
