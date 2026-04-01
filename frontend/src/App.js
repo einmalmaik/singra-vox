@@ -16,13 +16,16 @@ import MainLayout from "@/pages/MainLayout";
 import DesktopInviteBridge from "@/components/invites/DesktopInviteBridge";
 import "@/App.css";
 
-function LoadingScreen({ label = "Connecting..." }) {
+function LoadingScreen({ label }) {
+  const { t } = useTranslation();
+  const resolvedLabel = label || t("app.connecting");
+
   return (
     <div className="flex items-center justify-center h-screen bg-[#0A0A0A]" data-testid="loading-screen">
       <div className="flex flex-col items-center gap-4">
         <div className="w-10 h-10 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin" />
         <p className="text-[#A1A1AA] text-sm font-medium" style={{ fontFamily: "Manrope, sans-serif" }}>
-          {label}
+          {resolvedLabel}
         </p>
       </div>
     </div>

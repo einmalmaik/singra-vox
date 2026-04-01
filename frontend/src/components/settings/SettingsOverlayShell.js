@@ -1,4 +1,5 @@
 import { X } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 
 export default function SettingsOverlayShell({
   open,
@@ -9,6 +10,7 @@ export default function SettingsOverlayShell({
   onClose,
   children,
 }) {
+  const { t } = useTranslation();
   if (!open) return null;
 
   return (
@@ -17,7 +19,7 @@ export default function SettingsOverlayShell({
         <div className="w-[260px] border-r border-[#27272A] bg-[#121212] p-4">
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Settings</p>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.settings")}</p>
               <h2 className="mt-1 text-xl font-bold" style={{ fontFamily: "Manrope" }}>{title}</h2>
             </div>
             <button

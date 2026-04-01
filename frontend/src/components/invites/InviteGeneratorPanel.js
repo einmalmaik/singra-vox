@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, Copy, LinkSimple, Sparkle } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { formatError } from "@/lib/api";
@@ -7,20 +8,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  INVITE_EXPIRY_OPTIONS,
   buildDesktopInviteLink,
   buildInviteLink,
-  describeInviteExpiry,
-  describeInviteUsage,
 } from "@/lib/inviteLinks";
 
 export default function InviteGeneratorPanel({ serverId }) {
+  const { t } = useTranslation();
   const { config } = useRuntime();
   const [maxUses, setMaxUses] = useState("0");
   const [expiresHours, setExpiresHours] = useState("24");
   const [invite, setInvite] = useState(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const expiryOptions = useMemo(() => ([
+    { value: "0", label: t("inviteGenerator.expiryNever") },
+    { value: "1", label: t("inviteGenerator.expiryHour", { count: 1 }) },
+    { value: "6", label: t("inviteGenerator.expiryHours", { count: 6 }) },
+    { value: "12", label: t("inviteGenerator.expiryHours", { count: 12 }) },
+    { value: "24", label: t("inviteGenerator.expiryDay", { count: 1 }) },
+    { value: "168", label: t("inviteGenerator.expiryDays", { count: 7 }) },
+    { value: "720", label: t("inviteGenerator.expiryDays", { count: 30 }) },
+  ]), [t]);
 
   const inviteLink = useMemo(() => {
     if (!invite?.code) return "";
@@ -34,17 +42,41 @@ export default function InviteGeneratorPanel({ serverId }) {
     return buildDesktopInviteLink(baseUrl, invite.code);
   }, [config?.instanceUrl, invite?.code]);
 
+  const usageSummary = useMemo(() => {
+    const parsedMaxUses = Number(invite?.max_uses || 0);
+    const parsedUses = Number(invite?.uses || 0);
+    if (!parsedMaxUses) {
+      return t("inviteGenerator.unlimitedUses");
+    }
+
+    const remainingUses = Math.max(parsedMaxUses - parsedUses, 0);
+    return `${t("inviteGenerator.maxUsesCount", { count: parsedMaxUses })} · ${t("inviteGenerator.usesLeft", { count: remainingUses })}`;
+  }, [invite?.max_uses, invite?.uses, t]);
+
+  const expirySummary = useMemo(() => {
+    if (!invite?.expires_at) {
+      return t("inviteGenerator.doesNotExpire");
+    }
+
+    const expiresDate = new Date(invite.expires_at);
+    if (Number.isNaN(expiresDate.getTime())) {
+      return t("inviteGenerator.expiresSoon");
+    }
+
+    return t("inviteGenerator.expiresAt", { value: expiresDate.toLocaleString() });
+  }, [invite?.expires_at, t]);
+
   const generateInvite = async () => {
     const parsedMaxUses = Number.parseInt(maxUses || "0", 10);
     const parsedExpiry = Number.parseInt(expiresHours || "24", 10);
 
     if (Number.isNaN(parsedMaxUses) || parsedMaxUses < 0) {
-      toast.error("Max uses must be 0 or greater");
+      toast.error(t("inviteGenerator.maxUsesInvalid"));
       return;
     }
 
     if (Number.isNaN(parsedExpiry) || parsedExpiry < 0) {
-      toast.error("Expiry must be 0 or greater");
+      toast.error(t("inviteGenerator.expiryInvalid"));
       return;
     }
 
@@ -55,7 +87,7 @@ export default function InviteGeneratorPanel({ serverId }) {
         expires_hours: parsedExpiry,
       });
       setInvite(response.data);
-      toast.success("Invite created");
+      toast.success(t("inviteGenerator.created"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     } finally {
@@ -69,10 +101,10 @@ export default function InviteGeneratorPanel({ serverId }) {
     try {
       await navigator.clipboard.writeText(inviteLink);
       setCopied(true);
-      toast.success("Invite link copied");
+      toast.success(t("inviteGenerator.copied"));
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("Failed to copy invite link");
+      toast.error(t("inviteGenerator.copyFailed"));
     }
   };
 
@@ -81,7 +113,7 @@ export default function InviteGeneratorPanel({ serverId }) {
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">
-            Max Uses
+            {t("inviteGenerator.maxUses")}
           </Label>
           <Input
             type="number"
@@ -91,35 +123,35 @@ export default function InviteGeneratorPanel({ serverId }) {
             onChange={(event) => setMaxUses(event.target.value)}
             className="bg-[#0A0A0A] border-[#27272A] text-white"
           />
-          <p className="text-xs text-[#71717A]">Use 0 for unlimited invites.</p>
+          <p className="text-xs text-[#71717A]">{t("inviteGenerator.maxUsesHelp")}</p>
         </div>
 
         <div className="space-y-2">
           <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">
-            Expiry
+            {t("inviteGenerator.expiry")}
           </Label>
           <select
             value={expiresHours}
             onChange={(event) => setExpiresHours(event.target.value)}
             className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white outline-none focus:border-[#6366F1]"
           >
-            {INVITE_EXPIRY_OPTIONS.map((option) => (
+            {expiryOptions.map((option) => (
               <option key={option.value} value={option.value} className="bg-[#18181B] text-white">
                 {option.label}
               </option>
             ))}
           </select>
-          <p className="text-xs text-[#71717A]">Choose how long the invite stays valid.</p>
+          <p className="text-xs text-[#71717A]">{t("inviteGenerator.expiryHelp")}</p>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={generateInvite} disabled={loading} className="bg-[#6366F1] hover:bg-[#4F46E5]">
           <Sparkle size={14} className="mr-2" />
-          {loading ? "Generating..." : invite ? "Regenerate Invite" : "Generate Invite"}
+          {loading ? t("inviteGenerator.generating") : invite ? t("inviteGenerator.regenerate") : t("inviteGenerator.generate")}
         </Button>
         <p className="text-sm text-[#71717A]">
-          Links use the current instance URL, so domain and IP deployments both work.
+          {t("inviteGenerator.linkModeHelp")}
         </p>
       </div>
 
@@ -127,9 +159,9 @@ export default function InviteGeneratorPanel({ serverId }) {
         <div className="space-y-3 rounded-xl border border-[#27272A] bg-[#0A0A0A] p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-white">Share this invite link</p>
+              <p className="text-sm font-semibold text-white">{t("inviteGenerator.shareLink")}</p>
               <p className="mt-1 text-xs text-[#71717A]">
-                {describeInviteUsage(invite.max_uses, invite.uses)} · {describeInviteExpiry(invite.expires_at)}
+                {`${usageSummary} · ${expirySummary}`}
               </p>
             </div>
             <div className="rounded-md border border-[#27272A] bg-[#121212] px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-[#71717A]">
@@ -151,10 +183,10 @@ export default function InviteGeneratorPanel({ serverId }) {
           <div className="rounded-lg border border-[#27272A] bg-[#121212] px-3 py-3">
             <div className="flex items-center gap-2 text-sm font-medium text-white">
               <LinkSimple size={14} className="text-[#A5B4FC]" />
-              Desktop handoff
+              {t("inviteGenerator.desktopHandoff")}
             </div>
             <p className="mt-2 break-all text-xs text-[#71717A]">
-              Installed desktop apps can also open this invite via <span className="text-[#A1A1AA]">{desktopInviteLink}</span>
+              {t("inviteGenerator.desktopHandoffHelp", { link: desktopInviteLink })}
             </p>
           </div>
         </div>

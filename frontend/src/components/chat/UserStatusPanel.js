@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Circle, Moon, MinusCircle, Prohibit, Microphone, SpeakerHigh,
   Keyboard, CaretDown
@@ -11,20 +12,20 @@ import { Switch } from "@/components/ui/switch";
 import api from "@/lib/api";
 import { toast } from "sonner";
 
-const STATUS_OPTIONS = [
-  { value: "online", label: "Online", icon: Circle, color: "#22C55E" },
-  { value: "away", label: "Away", icon: Moon, color: "#F59E0B" },
-  { value: "dnd", label: "Do Not Disturb", icon: MinusCircle, color: "#EF4444" },
-  { value: "offline", label: "Invisible", icon: Prohibit, color: "#71717A" },
-];
-
 export default function UserStatusPanel({ user, voiceEngineRef }) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState(user?.status || "online");
   const [pttEnabled, setPttEnabled] = useState(false);
   const [pttKey, setPttKey] = useState("Space");
   const [audioDevices, setAudioDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [listeningForKey, setListeningForKey] = useState(false);
+  const statusOptions = [
+    { value: "online", label: t("statusMenu.online"), icon: Circle, color: "#22C55E" },
+    { value: "away", label: t("statusMenu.away"), icon: Moon, color: "#F59E0B" },
+    { value: "dnd", label: t("statusMenu.dnd"), icon: MinusCircle, color: "#EF4444" },
+    { value: "offline", label: t("statusMenu.invisible"), icon: Prohibit, color: "#71717A" },
+  ];
 
   // Load audio devices
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
       e.preventDefault();
       setPttKey(e.code);
       setListeningForKey(false);
-      toast.success(`PTT key set to ${e.code}`);
+      toast.success(t("statusMenu.keySet", { key: e.code }));
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -88,14 +89,14 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
     if (engine) {
       try {
         await engine.init(deviceId);
-        toast.success("Audio device changed");
+        toast.success(t("statusMenu.audioDeviceChanged"));
       } catch {
-        toast.error("Failed to switch device");
+        toast.error(t("statusMenu.audioDeviceFailed"));
       }
     }
   };
 
-  const currentStatus = STATUS_OPTIONS.find(s => s.value === status) || STATUS_OPTIONS[0];
+  const currentStatus = statusOptions.find(s => s.value === status) || statusOptions[0];
   const StatusIcon = currentStatus.icon;
 
   return (
@@ -117,7 +118,7 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent className="bg-[#18181B] border-[#27272A] text-white w-56" side="top" align="start">
         {/* Status options */}
-        {STATUS_OPTIONS.map(opt => {
+        {statusOptions.map(opt => {
           const Icon = opt.icon;
           return (
             <DropdownMenuItem key={opt.value} onClick={() => changeStatus(opt.value)}
@@ -132,9 +133,9 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
         <DropdownMenuSeparator className="bg-[#27272A]" />
 
         {/* PTT Toggle */}
-        <div className="flex items-center justify-between px-2 py-1.5">
+            <div className="flex items-center justify-between px-2 py-1.5">
           <span className="text-xs text-[#A1A1AA] flex items-center gap-1.5">
-            <Keyboard size={14} /> Push-to-Talk
+            <Keyboard size={14} /> {t("statusMenu.pushToTalk")}
           </span>
           <Switch checked={pttEnabled} onCheckedChange={setPttEnabled} className="scale-75" data-testid="ptt-toggle" />
         </div>
@@ -147,7 +148,7 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
                   ? 'border-[#6366F1] text-[#6366F1] bg-[#6366F1]/10'
                   : 'border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]'
               }`}>
-              {listeningForKey ? "Press any key..." : `Key: ${pttKey}`}
+              {listeningForKey ? t("statusMenu.pressAnyKey") : t("statusMenu.keyLabel", { key: pttKey })}
             </button>
           </div>
         )}
@@ -156,9 +157,9 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
 
         {/* Audio Device Selection */}
         {audioDevices.length > 0 && (
-          <DropdownMenuSub>
+            <DropdownMenuSub>
             <DropdownMenuSubTrigger className="text-[#A1A1AA] focus:bg-[#27272A] focus:text-white cursor-pointer">
-              <Microphone size={14} className="mr-2" /> Input Device
+              <Microphone size={14} className="mr-2" /> {t("statusMenu.inputDevice")}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="bg-[#18181B] border-[#27272A] text-white">
               {audioDevices.map(d => (
@@ -168,7 +169,7 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
                   className={`cursor-pointer text-xs focus:bg-[#27272A] ${
                     selectedDevice === d.deviceId ? 'text-[#6366F1]' : 'text-[#A1A1AA]'
                   }`}>
-                  {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+                  {d.label || t("statusMenu.microphone", { id: d.deviceId.slice(0, 8) })}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuSubContent>

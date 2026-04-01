@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { PushPin, X } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 
 export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessage, refreshKey }) {
+  const { t } = useTranslation();
   const [pins, setPins] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,7 +40,7 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
         <div className="flex items-center gap-2">
           <PushPin size={16} weight="fill" className="text-[#F59E0B]" />
           <h3 className="text-sm font-bold text-white" style={{ fontFamily: 'Manrope' }}>
-            Pinned Messages
+            {t("pinned.title")}
           </h3>
           <span className="text-[10px] text-[#71717A] bg-[#27272A] rounded-full px-1.5">{pins.length}</span>
         </div>
@@ -52,10 +54,10 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
             <div className="w-5 h-5 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : pins.length === 0 ? (
-          <div className="text-center py-8">
-            <PushPin size={32} className="text-[#27272A] mx-auto mb-2" />
-            <p className="text-sm text-[#71717A]">No pinned messages yet</p>
-            <p className="text-xs text-[#52525B] mt-1">Pin important messages for easy access</p>
+            <div className="text-center py-8">
+              <PushPin size={32} className="text-[#27272A] mx-auto mb-2" />
+            <p className="text-sm text-[#71717A]">{t("pinned.empty")}</p>
+            <p className="text-xs text-[#52525B] mt-1">{t("pinned.emptyHelp")}</p>
           </div>
         ) : (
           pins.map(pin => (
@@ -77,7 +79,7 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
                 {pin.reply_to_id && (
                   <MessageReferencePreview
                     message={null}
-                    placeholder="Reply reference available in channel"
+                    placeholder={t("pinned.replyReference")}
                     className="bg-[#111214]"
                   />
                 )}
@@ -89,7 +91,7 @@ export default function PinnedMessagesPanel({ channelId, onClose, onJumpToMessag
                       onClick={() => onJumpToMessage(pin.id)}
                       className="rounded-md border border-[#3F3F46] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#D4D4D8] transition-colors hover:border-[#6366F1] hover:text-white"
                     >
-                      Jump
+                      {t("pinned.jump")}
                     </button>
                   )}
                 </div>

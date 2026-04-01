@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { X, PaperPlaneRight } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 
 export default function ThreadPanel({ messageId, channelId, onClose, user, onReplySent }) {
+  const { t } = useTranslation();
   const [thread, setThread] = useState(null);
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
@@ -18,9 +20,9 @@ export default function ThreadPanel({ messageId, channelId, onClose, user, onRep
       const res = await api.get(`/messages/${messageId}/thread`);
       setThread(res.data);
     } catch {
-      toast.error("Failed to load thread");
+      toast.error(t("thread.loadFailed"));
     }
-  }, [messageId]);
+  }, [messageId, t]);
 
   useEffect(() => {
     if (messageId) {
@@ -59,7 +61,7 @@ export default function ThreadPanel({ messageId, channelId, onClose, user, onRep
       onReplySent?.(response.data, messageId);
       loadThread();
     } catch {
-      toast.error("Failed to send reply");
+      toast.error(t("thread.replyFailed"));
     } finally {
       setSending(false);
     }
@@ -77,7 +79,7 @@ export default function ThreadPanel({ messageId, channelId, onClose, user, onRep
     <div className="w-[360px] bg-[#121212] border-l border-[#27272A] flex flex-col shrink-0" data-testid="thread-panel">
       {/* Header */}
       <div className="h-12 flex items-center justify-between px-4 border-b border-[#27272A] shrink-0">
-        <h3 className="text-sm font-bold text-white" style={{ fontFamily: 'Manrope' }}>Thread</h3>
+        <h3 className="text-sm font-bold text-white" style={{ fontFamily: 'Manrope' }}>{t("thread.title")}</h3>
         <button onClick={onClose} data-testid="close-thread" className="text-[#71717A] hover:text-white transition-colors">
           <X size={18} weight="bold" />
         </button>
@@ -99,7 +101,9 @@ export default function ThreadPanel({ messageId, channelId, onClose, user, onRep
 
       {/* Replies */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3">
-        <p className="text-xs text-[#71717A] text-center py-1">{thread.reply_count} {thread.reply_count === 1 ? 'reply' : 'replies'}</p>
+        <p className="text-xs text-[#71717A] text-center py-1">
+          {t("thread.replyCount", { count: thread.reply_count })}
+        </p>
         {thread.replies?.map(reply => (
           <div key={reply.id} className="flex gap-2.5 fade-in" data-testid={`thread-reply-${reply.id}`}>
             <div className="w-7 h-7 rounded-full bg-[#27272A] flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
@@ -131,10 +135,10 @@ export default function ThreadPanel({ messageId, channelId, onClose, user, onRep
         <div className="flex items-center gap-2 bg-[#27272A] rounded-lg px-3 py-2">
           <input
             value={content} onChange={e => setContent(e.target.value)}
-            placeholder="Reply in thread..." data-testid="thread-reply-input"
+            placeholder={t("thread.placeholder")} data-testid="thread-reply-input"
             className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none"
           />
-          <button type="submit" disabled={!content.trim() || sending} data-testid="thread-reply-send"
+            <button type="submit" disabled={!content.trim() || sending} data-testid="thread-reply-send"
             className="text-[#6366F1] hover:text-[#4F46E5] disabled:text-[#52525B] transition-colors">
             <PaperPlaneRight size={18} weight="fill" />
           </button>

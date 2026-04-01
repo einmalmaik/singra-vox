@@ -60,27 +60,6 @@ const SECTION_CONFIG = [
   { id: "audit", icon: <ClipboardText size={16} /> },
 ];
 
-const PERMISSION_LABELS = {
-  manage_server: "Manage Server",
-  manage_channels: "Manage Channels",
-  manage_roles: "Manage Roles",
-  manage_members: "Manage Members",
-  kick_members: "Kick Members",
-  ban_members: "Ban Members",
-  send_messages: "Send Messages",
-  read_messages: "Read Messages",
-  read_message_history: "Read Message History",
-  manage_messages: "Manage Messages",
-  attach_files: "Attach Files",
-  mention_everyone: "Mention @everyone and all roles",
-  join_voice: "Join Voice",
-  speak: "Speak",
-  mute_members: "Mute Members",
-  deafen_members: "Deafen Members",
-  priority_speaker: "Priority Speaker",
-  create_invites: "Create Invites",
-};
-
 export default function ServerSettingsOverlay({
   open,
   onClose,
@@ -240,6 +219,26 @@ export default function ServerSettingsOverlay({
     { ...SECTION_CONFIG[4], label: t("server.invites") },
     { ...SECTION_CONFIG[5], label: t("server.audit") },
   ]), [t]);
+  const permissionLabels = useMemo(() => ({
+    manage_server: t("permissions.manageServer"),
+    manage_channels: t("permissions.manageChannels"),
+    manage_roles: t("permissions.manageRoles"),
+    manage_members: t("permissions.manageMembers"),
+    kick_members: t("permissions.kickMembers"),
+    ban_members: t("permissions.banMembers"),
+    send_messages: t("permissions.sendMessages"),
+    read_messages: t("permissions.readMessages"),
+    read_message_history: t("permissions.readMessageHistory"),
+    manage_messages: t("permissions.manageMessages"),
+    attach_files: t("permissions.attachFiles"),
+    mention_everyone: t("permissions.mentionEveryone"),
+    join_voice: t("permissions.joinVoice"),
+    speak: t("permissions.speak"),
+    mute_members: t("permissions.muteMembers"),
+    deafen_members: t("permissions.deafenMembers"),
+    priority_speaker: t("permissions.prioritySpeaker"),
+    create_invites: t("permissions.createInvites"),
+  }), [t]);
 
   const saveGeneral = async () => {
     try {
@@ -247,9 +246,9 @@ export default function ServerSettingsOverlay({
         name: serverName,
         description: serverDescription,
       });
-      toast.success("Server updated");
+      toast.success(t("serverSettings.updated"));
     } catch {
-      toast.error("Failed to update server");
+      toast.error(t("serverSettings.updateFailed"));
     }
   };
 
@@ -262,7 +261,7 @@ export default function ServerSettingsOverlay({
         is_private: !!channelDraft.is_private,
         parent_id: channelDraft.type === "category" ? null : (channelDraft.parent_id === "__root__" ? null : channelDraft.parent_id),
       });
-      toast.success("Channel updated");
+      toast.success(t("serverSettings.channelUpdated"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
@@ -272,7 +271,7 @@ export default function ServerSettingsOverlay({
     if (!selectedChannel) return;
     try {
       await api.delete(`/channels/${selectedChannel.id}`);
-      toast.success("Channel deleted");
+      toast.success(t("serverSettings.channelDeleted"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
@@ -290,7 +289,7 @@ export default function ServerSettingsOverlay({
       setNewChannelType("text");
       setNewChannelParentId("__root__");
       setSelectedChannelId(res.data.id);
-      toast.success(newChannelType === "category" ? "Category created" : "Channel created");
+      toast.success(newChannelType === "category" ? t("serverSettings.categoryCreated") : t("serverSettings.channelCreated"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
@@ -349,31 +348,36 @@ export default function ServerSettingsOverlay({
 
     try {
       await reorderChannels(items);
-      toast.success("Channel order updated");
+      toast.success(t("serverSettings.channelOrderUpdated"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
-  }, [channels, reorderChannels]);
+  }, [channels, reorderChannels, t]);
 
   const renameChannelQuick = async (channel) => {
-    const label = channel.type === "category" ? "category" : "channel";
-    const nextName = window.prompt(`Rename ${label}`, channel.name);
+    const nextName = window.prompt(
+      channel.type === "category" ? t("serverSettings.renameCategoryPrompt") : t("serverSettings.renameChannelPrompt"),
+      channel.name,
+    );
     if (!nextName || nextName.trim() === channel.name) return;
     try {
       await api.put(`/channels/${channel.id}`, { name: nextName.trim() });
-      toast.success(`${channel.type === "category" ? "Category" : "Channel"} renamed`);
+      toast.success(channel.type === "category" ? t("serverSettings.categoryRenamed") : t("serverSettings.channelRenamed"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
   };
 
   const deleteChannelQuick = async (channel) => {
-    const label = channel.type === "category" ? "category" : "channel";
-    const confirmed = window.confirm(`Delete ${label} "${channel.name}"?`);
+    const confirmed = window.confirm(
+      channel.type === "category"
+        ? t("serverSettings.deleteCategoryConfirm", { name: channel.name })
+        : t("serverSettings.deleteChannelConfirm", { name: channel.name }),
+    );
     if (!confirmed) return;
     try {
       await api.delete(`/channels/${channel.id}`);
-      toast.success(`${channel.type === "category" ? "Category" : "Channel"} deleted`);
+      toast.success(channel.type === "category" ? t("serverSettings.categoryDeleted") : t("serverSettings.channelDeleted"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
@@ -390,11 +394,11 @@ export default function ServerSettingsOverlay({
     }
     try {
       await reorderChannels(items);
-      toast.success("Moved to the top level");
+      toast.success(t("serverSettings.movedToTopLevel"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
-  }, [channels, reorderChannels]);
+  }, [channels, reorderChannels, t]);
 
   const renderChannelTreeRow = (channel, { nested = false } = {}) => {
     const isCategory = channel.type === "category";
@@ -448,20 +452,20 @@ export default function ServerSettingsOverlay({
         <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
           {isCategory ? (
             <>
-              <ContextMenuItem onClick={() => prepareChannelCreate("text", channel.id)}>Create Text Channel</ContextMenuItem>
-              <ContextMenuItem onClick={() => prepareChannelCreate("voice", channel.id)}>Create Voice Channel</ContextMenuItem>
-              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>Rename Category</ContextMenuItem>
-              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>Delete Category</ContextMenuItem>
+              <ContextMenuItem onClick={() => prepareChannelCreate("text", channel.id)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => prepareChannelCreate("voice", channel.id)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameCategoryAction")}</ContextMenuItem>
+              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteCategoryAction")}</ContextMenuItem>
             </>
           ) : (
             <>
-              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>Rename Channel</ContextMenuItem>
+              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameChannelAction")}</ContextMenuItem>
               {channel.parent_id && (
                 <ContextMenuItem onClick={() => { void moveChannelToRoot(channel.id); }}>
-                  Move To Root
+                  {t("serverSettings.moveToRoot")}
                 </ContextMenuItem>
               )}
-              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>Delete Channel</ContextMenuItem>
+              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteChannelAction")}</ContextMenuItem>
             </>
           )}
         </ContextMenuContent>
@@ -495,7 +499,7 @@ export default function ServerSettingsOverlay({
                         : "border-[#27272A] bg-[#111113] text-[#71717A]"
                     }`}
                   >
-                    Drop channel into {category.name}
+                    {t("serverSettings.dropIntoCategory", { name: category.name })}
                   </div>
                 )}
               </ChannelContainerDropZone>
@@ -510,7 +514,7 @@ export default function ServerSettingsOverlay({
               })}
             </SortableContext>
             {!childIds.length && !canDropIntoCategory && (
-              <div className="ml-4 px-3 py-1 text-[11px] text-[#52525B]">No channels yet</div>
+              <div className="ml-4 px-3 py-1 text-[11px] text-[#52525B]">{t("channel.noChannelsYet")}</div>
             )}
           </div>
         )}
@@ -529,7 +533,7 @@ export default function ServerSettingsOverlay({
       setNewRoleName("");
       setNewRoleMentionable(false);
       setSelectedRoleId(res.data.id);
-      toast.success("Role created");
+      toast.success(t("serverSettings.roleCreated"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
@@ -547,7 +551,7 @@ export default function ServerSettingsOverlay({
             mentionable: roleDraft.mentionable,
           };
       await api.put(`/servers/${server.id}/roles/${selectedRole.id}`, payload);
-      toast.success("Role updated");
+      toast.success(t("serverSettings.roleUpdated"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
@@ -567,9 +571,9 @@ export default function ServerSettingsOverlay({
     if (!selectedRole || selectedRole.is_default) return;
     try {
       await api.delete(`/servers/${server.id}/roles/${selectedRole.id}`);
-      toast.success("Role deleted");
+      toast.success(t("serverSettings.roleDeleted"));
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to delete role");
+      toast.error(error.response?.data?.detail || t("serverSettings.roleDeleteFailed"));
     }
   };
 
@@ -580,7 +584,7 @@ export default function ServerSettingsOverlay({
 
     try {
       await api.put(`/servers/${server.id}/members/${member.user_id}`, { roles: nextRoles });
-      toast.success("Member updated");
+      toast.success(t("serverSettings.memberUpdated"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
@@ -591,7 +595,10 @@ export default function ServerSettingsOverlay({
       if (action === "kick") {
         await api.delete(`/servers/${server.id}/members/${memberId}`);
       } else if (action === "ban") {
-        await api.post(`/servers/${server.id}/moderation/ban`, { user_id: memberId, reason: "Banned by admin" });
+        await api.post(`/servers/${server.id}/moderation/ban`, {
+          user_id: memberId,
+          reason: t("serverSettings.defaultBanReason"),
+        });
       } else if (action === "unban") {
         await api.post(`/servers/${server.id}/moderation/unban`, { user_id: memberId });
       } else if (action === "mute") {
@@ -599,12 +606,12 @@ export default function ServerSettingsOverlay({
       }
       toast.success(
         action === "mute"
-          ? "Member muted"
+          ? t("serverSettings.memberMuted")
           : action === "kick"
-            ? "Member kicked"
+            ? t("serverSettings.memberKicked")
             : action === "unban"
-              ? "Member unbanned"
-              : "Member banned",
+              ? t("serverSettings.memberUnbanned")
+              : t("serverSettings.memberBanned"),
       );
       if (action === "unban") {
         await loadBans();
@@ -612,17 +619,23 @@ export default function ServerSettingsOverlay({
         await loadBans();
       }
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail || `Failed to ${action} member`));
+      const actionLabel = {
+        mute: t("memberList.mute"),
+        kick: t("memberList.kick"),
+        ban: t("memberList.ban"),
+        unban: t("server.unban"),
+      }[action] || action;
+      toast.error(formatError(error.response?.data?.detail || t("serverSettings.memberActionFailed", { action: actionLabel })));
     }
   };
 
   const handleTransferOwnership = async () => {
     if (!ownershipTargetId) {
-      toast.error("Select a member first");
+      toast.error(t("serverSettings.transferSelectFirst"));
       return;
     }
 
-    const confirmed = window.confirm("Transfer server ownership to the selected member?");
+    const confirmed = window.confirm(t("serverSettings.transferConfirm"));
     if (!confirmed) {
       return;
     }
@@ -630,7 +643,7 @@ export default function ServerSettingsOverlay({
     setTransferringOwnership(true);
     try {
       await api.post(`/servers/${server.id}/ownership/transfer`, { user_id: ownershipTargetId });
-      toast.success("Server ownership transferred");
+      toast.success(t("serverSettings.transferSuccess"));
       await onRefreshServers?.();
       onClose?.();
     } catch (error) {
@@ -642,11 +655,11 @@ export default function ServerSettingsOverlay({
 
   const handleLeaveServer = async () => {
     if (isServerOwner) {
-      toast.error("Transfer ownership before leaving this server");
+      toast.error(t("serverSettings.leaveOwnerGuard"));
       return;
     }
     const confirmed = window.confirm(
-      `Leave "${server.name}"?`,
+      t("serverSettings.leaveConfirm", { name: server.name }),
     );
     if (!confirmed) {
       return;
@@ -655,7 +668,7 @@ export default function ServerSettingsOverlay({
     setLeavingServer(true);
     try {
       await api.post(`/servers/${server.id}/leave`);
-      toast.success("Left server");
+      toast.success(t("serverSettings.leaveSuccess"));
       await onRefreshServers?.();
       onClose?.();
     } catch (error) {
@@ -670,7 +683,7 @@ export default function ServerSettingsOverlay({
   return (
     <SettingsOverlayShell
       open={open}
-      title={`${server.name} Settings`}
+      title={t("server.settingsTitle", { name: server.name })}
       sections={sectionConfig}
       activeSection={activeSection}
       onSectionChange={setActiveSection}
@@ -686,11 +699,11 @@ export default function ServerSettingsOverlay({
                 <Input value={serverName} onChange={(event) => setServerName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Description</Label>
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.descriptionLabel")}</Label>
                 <Input value={serverDescription} onChange={(event) => setServerDescription(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
               </div>
             </div>
-            <Button onClick={saveGeneral} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">Save Changes</Button>
+            <Button onClick={saveGeneral} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">{t("serverSettings.saveChanges")}</Button>
           </section>
 
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
@@ -698,7 +711,7 @@ export default function ServerSettingsOverlay({
               <div>
                 <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.ownership")}</h3>
                 <p className="mt-1 text-sm text-[#71717A]">
-                  The current owner controls deletion-sensitive actions and can transfer the crown before leaving.
+                  {t("serverSettings.ownershipBanner")}
                 </p>
               </div>
               <div className="rounded-full border border-[#27272A] bg-[#0A0A0A] px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#A1A1AA]">
@@ -715,7 +728,7 @@ export default function ServerSettingsOverlay({
                   disabled={!isServerOwner || transferCandidates.length === 0}
                   className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white disabled:opacity-50"
                 >
-                  <option value="">Select a member</option>
+                  <option value="">{t("serverSettings.selectMember")}</option>
                   {transferCandidates.map((member) => (
                     <option key={member.user_id} value={member.user_id}>
                       {member.user?.display_name || member.user?.username}
@@ -724,8 +737,8 @@ export default function ServerSettingsOverlay({
                 </select>
                 <p className="text-xs text-[#71717A]">
                   {isServerOwner
-                    ? "Transfer ownership before leaving so the server keeps an active owner."
-                    : "Only the current server owner can transfer ownership."}
+                    ? t("serverSettings.ownershipHelpOwner")
+                    : t("serverSettings.ownershipHelpMember")}
                 </p>
               </div>
               <div className="flex items-end">
@@ -734,7 +747,7 @@ export default function ServerSettingsOverlay({
                   disabled={!isServerOwner || !ownershipTargetId || transferringOwnership}
                   className="w-full bg-[#6366F1] hover:bg-[#4F46E5]"
                 >
-                  {transferringOwnership ? "Transferring..." : t("server.transferOwnership")}
+                  {transferringOwnership ? t("serverSettings.transferring") : t("server.transferOwnership")}
                 </Button>
               </div>
             </div>
@@ -745,8 +758,8 @@ export default function ServerSettingsOverlay({
                   <p className="text-sm font-medium text-white">{t("server.leaveServer")}</p>
                   <p className="mt-1 text-xs text-[#71717A]">
                     {isServerOwner
-                      ? "Owners must transfer ownership before they can leave."
-                      : "Leave this community while preserving it for the remaining members."}
+                      ? t("serverSettings.leaveOwnerHelp")
+                      : t("serverSettings.leaveMemberHelp")}
                   </p>
                 </div>
                 <Button
@@ -755,7 +768,7 @@ export default function ServerSettingsOverlay({
                   variant="outline"
                   className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10"
                 >
-                  {leavingServer ? "Leaving..." : t("server.leaveServer")}
+                  {leavingServer ? t("serverSettings.leaving") : t("server.leaveServer")}
                 </Button>
               </div>
             </div>
@@ -767,10 +780,10 @@ export default function ServerSettingsOverlay({
         <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]">
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-4">
             <div className="mb-4 flex items-center justify-between">
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Channels</p>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.channelsPanelTitle")}</p>
               <Button size="sm" variant="outline" onClick={createChannel} className="border-[#27272A] bg-[#0A0A0A] text-white hover:bg-[#1A1A1A]">
                 <Plus size={14} className="mr-2" />
-                Create
+                {t("common.create")}
               </Button>
             </div>
             <div className="space-y-3">
@@ -778,14 +791,14 @@ export default function ServerSettingsOverlay({
                 <Input
                   value={newChannelName}
                   onChange={(event) => setNewChannelName(event.target.value)}
-                  placeholder="new-channel"
+                  placeholder={t("serverSettings.createChannelPlaceholder")}
                   className="bg-[#0A0A0A] border-[#27272A] text-white"
                 />
                 <div className="grid gap-2 md:grid-cols-2">
                   <select value={newChannelType} onChange={(event) => setNewChannelType(event.target.value)} className="h-10 rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white">
-                    <option value="text">Text</option>
-                    <option value="voice">Voice</option>
-                    <option value="category">Category</option>
+                    <option value="text">{t("serverSettings.channelTypeText")}</option>
+                    <option value="voice">{t("serverSettings.channelTypeVoice")}</option>
+                    <option value="category">{t("serverSettings.channelTypeCategory")}</option>
                   </select>
                   <select
                     value={newChannelParentId}
@@ -793,7 +806,7 @@ export default function ServerSettingsOverlay({
                     disabled={newChannelType === "category"}
                     className="h-10 rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white disabled:opacity-50"
                   >
-                    <option value="__root__">No Category</option>
+                    <option value="__root__">{t("common.noCategory")}</option>
                     {categoryChannels.map((category) => (
                       <option key={category.id} value={category.id}>{category.name}</option>
                     ))}
@@ -836,7 +849,7 @@ export default function ServerSettingsOverlay({
                                   : "border-[#27272A] bg-[#111113] text-[#71717A]"
                               }`}
                             >
-                              Drop here to move to the top level
+                              {t("serverSettings.dropToTopLevel")}
                             </div>
                           )}
                         </ChannelContainerDropZone>
@@ -844,9 +857,9 @@ export default function ServerSettingsOverlay({
                     </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
-                    <ContextMenuItem onClick={() => prepareChannelCreate("category")}>Create Category</ContextMenuItem>
-                    <ContextMenuItem onClick={() => prepareChannelCreate("text")}>Create Text Channel</ContextMenuItem>
-                    <ContextMenuItem onClick={() => prepareChannelCreate("voice")}>Create Voice Channel</ContextMenuItem>
+                    <ContextMenuItem onClick={() => prepareChannelCreate("category")}>{t("serverSettings.createCategory")}</ContextMenuItem>
+                    <ContextMenuItem onClick={() => prepareChannelCreate("text")}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+                    <ContextMenuItem onClick={() => prepareChannelCreate("voice")}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
 
@@ -876,18 +889,18 @@ export default function ServerSettingsOverlay({
               <>
                 <div className="mb-5 flex items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Edit Channel</h3>
+                    <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("serverSettings.editChannel")}</h3>
                     <p className="mt-1 text-sm text-[#71717A]">
-                      Drag channels in the list to reorder them or move them into a category.
+                      {t("serverSettings.editChannelHelp")}
                     </p>
                   </div>
                   <div className="rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#71717A]">
-                    Drag & Drop
+                    {t("serverSettings.dragDrop")}
                   </div>
                 </div>
                 <div className="grid gap-4 xl:grid-cols-2">
                   <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Name</Label>
+                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.name")}</Label>
                     <Input
                       value={channelDraft.name}
                       onChange={(event) => setChannelDraft((previous) => ({ ...previous, name: event.target.value }))}
@@ -895,7 +908,7 @@ export default function ServerSettingsOverlay({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Topic</Label>
+                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.topicLabel")}</Label>
                     <Input
                       value={channelDraft.topic}
                       onChange={(event) => setChannelDraft((previous) => ({ ...previous, topic: event.target.value }))}
@@ -906,20 +919,20 @@ export default function ServerSettingsOverlay({
                 </div>
                 <div className="mt-5 grid gap-4 xl:grid-cols-2">
                   <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Type</Label>
+                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.type")}</Label>
                     <div className="h-10 flex items-center rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-[#A1A1AA]">
-                      {channelDraft.type === "category" ? "Category" : channelDraft.type === "voice" ? "Voice" : "Text"}
+                      {channelDraft.type === "category" ? t("serverSettings.channelTypeCategory") : channelDraft.type === "voice" ? t("serverSettings.channelTypeVoice") : t("serverSettings.channelTypeText")}
                     </div>
                   </div>
                   {channelDraft.type !== "category" && (
                     <div className="space-y-2">
-                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Category</Label>
+                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.category")}</Label>
                       <select
                         value={channelDraft.parent_id}
                         onChange={(event) => setChannelDraft((previous) => ({ ...previous, parent_id: event.target.value }))}
                         className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
                       >
-                        <option value="__root__">No Category</option>
+                        <option value="__root__">{t("common.noCategory")}</option>
                         {categoryChannels.map((category) => (
                           <option key={category.id} value={category.id}>{category.name}</option>
                         ))}
@@ -929,8 +942,8 @@ export default function ServerSettingsOverlay({
                 </div>
                 <div className="mt-5 flex items-center justify-between rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3">
                   <div>
-                    <p className="text-sm text-white">Private Channel</p>
-                    <p className="text-xs text-[#71717A]">Only explicitly allowed users and roles can access it.</p>
+                    <p className="text-sm text-white">{t("serverSettings.privateChannel")}</p>
+                    <p className="text-xs text-[#71717A]">{t("serverSettings.privateChannelHelp")}</p>
                   </div>
                   <Switch
                     checked={channelDraft.is_private}
@@ -939,15 +952,15 @@ export default function ServerSettingsOverlay({
                   />
                 </div>
                 <div className="mt-5 flex gap-2">
-                  <Button onClick={saveChannel} className="bg-[#6366F1] hover:bg-[#4F46E5]">Save Channel</Button>
+                  <Button onClick={saveChannel} className="bg-[#6366F1] hover:bg-[#4F46E5]">{t("serverSettings.saveChannel")}</Button>
                   <Button onClick={deleteChannel} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
                     <Trash size={14} className="mr-2" />
-                    Delete
+                    {t("common.delete")}
                   </Button>
                 </div>
               </>
             ) : (
-              <p className="text-sm text-[#71717A]">No channel selected.</p>
+              <p className="text-sm text-[#71717A]">{t("serverSettings.noChannelSelected")}</p>
             )}
           </section>
         </div>
@@ -960,7 +973,7 @@ export default function ServerSettingsOverlay({
               <Input
                 value={newRoleName}
                 onChange={(event) => setNewRoleName(event.target.value)}
-                placeholder="New role"
+                placeholder={t("serverSettings.newRolePlaceholder")}
                 className="bg-[#0A0A0A] border-[#27272A] text-white"
               />
               <input
@@ -972,14 +985,14 @@ export default function ServerSettingsOverlay({
             </div>
             <div className="mb-4 flex items-center justify-between rounded-lg border border-[#27272A] bg-[#0A0A0A] px-3 py-2.5">
               <div>
-                <p className="text-sm text-white">Allow role mentions</p>
-                <p className="text-xs text-[#71717A]">Members can ping this role without elevated mention rights.</p>
+                <p className="text-sm text-white">{t("serverSettings.allowRoleMentions")}</p>
+                <p className="text-xs text-[#71717A]">{t("serverSettings.allowRoleMentionsHelp")}</p>
               </div>
               <Switch checked={newRoleMentionable} onCheckedChange={setNewRoleMentionable} />
             </div>
             <Button onClick={createRole} disabled={!newRoleName.trim()} className="mb-4 w-full bg-[#6366F1] hover:bg-[#4F46E5]">
               <Plus size={14} className="mr-2" />
-              Create Role
+              {t("common.create")} {t("server.roles")}
             </Button>
 
             <div className="space-y-1">
@@ -1002,18 +1015,18 @@ export default function ServerSettingsOverlay({
             {selectedRole ? (
               <>
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Role Editor</h3>
+                  <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("serverSettings.roleEditor")}</h3>
                   {!selectedRole.is_default && (
                     <Button onClick={deleteRole} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
                       <Trash size={14} className="mr-2" />
-                      Delete
+                      {t("common.delete")}
                     </Button>
                   )}
                 </div>
 
                 <div className="mt-5 grid gap-4 md:grid-cols-3">
                   <div className="space-y-2 md:col-span-2">
-                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Role Name</Label>
+                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("server.roles")} {t("common.name")}</Label>
                     <Input
                       value={roleDraft.name}
                       onChange={(event) => setRoleDraft((previous) => ({ ...previous, name: event.target.value }))}
@@ -1022,7 +1035,7 @@ export default function ServerSettingsOverlay({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Color</Label>
+                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.color")}</Label>
                     <input
                       type="color"
                       value={roleDraft.color}
@@ -1035,14 +1048,14 @@ export default function ServerSettingsOverlay({
 
                 {selectedRole.is_default ? (
                   <div className="mt-4 rounded-lg border border-[#3F3F46] bg-[#0A0A0A] px-4 py-3">
-                    <p className="text-sm text-white">@everyone is the fixed default role</p>
-                    <p className="mt-1 text-xs text-[#71717A]">You can adjust its base permissions, but not rename, recolor or delete it.</p>
+                    <p className="text-sm text-white">{t("serverSettings.everyoneFixedTitle")}</p>
+                    <p className="mt-1 text-xs text-[#71717A]">{t("serverSettings.everyoneFixedHelp")}</p>
                   </div>
                 ) : (
                   <div className="mt-4 flex items-center justify-between rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3">
                     <div>
-                      <p className="text-sm text-white">Allow role mentions</p>
-                      <p className="text-xs text-[#71717A]">Members can ping this role without global mention rights.</p>
+                      <p className="text-sm text-white">{t("serverSettings.allowRoleMentions")}</p>
+                      <p className="text-xs text-[#71717A]">{t("serverSettings.allowRoleMentionsHelp")}</p>
                     </div>
                     <Switch
                       checked={!!roleDraft.mentionable}
@@ -1051,10 +1064,10 @@ export default function ServerSettingsOverlay({
                   </div>
                 )}
 
-                <Button onClick={saveRole} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">Save Role</Button>
+                <Button onClick={saveRole} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">{t("serverSettings.saveRole")}</Button>
 
                 <div className="mt-6 grid gap-3 md:grid-cols-2">
-                  {Object.entries(PERMISSION_LABELS).map(([permissionKey, label]) => (
+                  {Object.entries(permissionLabels).map(([permissionKey, label]) => (
                     <div key={permissionKey} className="flex items-center justify-between rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3">
                       <span className="text-sm text-white">{label}</span>
                       <Switch
@@ -1066,7 +1079,7 @@ export default function ServerSettingsOverlay({
                 </div>
               </>
             ) : (
-              <p className="text-sm text-[#71717A]">No role selected.</p>
+              <p className="text-sm text-[#71717A]">{t("serverSettings.noRoleSelected")}</p>
             )}
           </section>
         </div>
@@ -1110,20 +1123,20 @@ export default function ServerSettingsOverlay({
 
                         <div className="flex gap-2">
                           {capabilities.canMuteMembers && (
-                            <Button onClick={() => moderateMember(member.user_id, "mute")} variant="outline" className="border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]">Mute</Button>
+                            <Button onClick={() => moderateMember(member.user_id, "mute")} variant="outline" className="border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]">{t("memberList.mute")}</Button>
                           )}
                           {!isOwner && (
                             <>
                               {capabilities.canKickMembers && (
                                 <Button onClick={() => moderateMember(member.user_id, "kick")} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
                                   <UserMinus size={14} className="mr-2" />
-                                  Kick
+                                  {t("memberList.kick")}
                                 </Button>
                               )}
                               {capabilities.canBanMembers && (
                                 <Button onClick={() => moderateMember(member.user_id, "ban")} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
                                   <Trash size={14} className="mr-2" />
-                                  Ban
+                                  {t("memberList.ban")}
                                 </Button>
                               )}
                             </>
@@ -1141,7 +1154,7 @@ export default function ServerSettingsOverlay({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.bannedMembers")}</h3>
-                <p className="mt-1 text-sm text-[#71717A]">Restore access for previously banned users.</p>
+                <p className="mt-1 text-sm text-[#71717A]">{t("serverSettings.bannedMembersHelp")}</p>
               </div>
               <Button
                 variant="outline"
@@ -1155,9 +1168,9 @@ export default function ServerSettingsOverlay({
 
             <ScrollArea className="mt-5 h-[560px] pr-4">
               {!capabilities.canBanMembers && !capabilities.canManageMembers ? (
-                <p className="text-sm text-[#71717A]">You do not have permission to view the ban list.</p>
+                <p className="text-sm text-[#71717A]">{t("serverSettings.noBanPermission")}</p>
               ) : bannedMembers.length === 0 ? (
-                <p className="text-sm text-[#71717A]">No banned members.</p>
+                <p className="text-sm text-[#71717A]">{t("serverSettings.noBannedMembers")}</p>
               ) : (
                 <div className="space-y-3">
                   {bannedMembers.map((member) => (
@@ -1167,7 +1180,7 @@ export default function ServerSettingsOverlay({
                           <p className="text-sm font-semibold text-white">{member.user?.display_name || member.user?.username}</p>
                           <p className="text-xs text-[#71717A]">@{member.user?.username}</p>
                           {member.ban_reason ? (
-                            <p className="mt-2 text-xs text-[#A1A1AA]">Reason: {member.ban_reason}</p>
+                            <p className="mt-2 text-xs text-[#A1A1AA]">{t("serverSettings.bannedReason", { reason: member.ban_reason })}</p>
                           ) : null}
                         </div>
                         <Button
@@ -1188,9 +1201,9 @@ export default function ServerSettingsOverlay({
 
         {activeSection === "invites" && (
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Invites</h3>
+            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.invites")}</h3>
             <p className="mt-1 text-sm text-[#71717A]">
-              Generate shareable invite links with expiry and usage limits.
+              {t("serverSettings.invitesDescription")}
             </p>
             <div className="mt-5">
               <InviteGeneratorPanel serverId={server.id} />
@@ -1200,16 +1213,16 @@ export default function ServerSettingsOverlay({
 
       {activeSection === "audit" && (
         <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-          <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Audit Log</h3>
+          <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("serverSettings.auditTitle")}</h3>
           <ScrollArea className="mt-5 h-[560px] pr-4">
             {auditLogs.length === 0 ? (
-              <p className="text-sm text-[#71717A]">No audit entries yet.</p>
+              <p className="text-sm text-[#71717A]">{t("serverSettings.auditEmpty")}</p>
             ) : (
               <div className="space-y-3">
                 {auditLogs.map((entry) => (
                   <div key={entry.id} className="rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3">
                     <p className="text-sm text-white">
-                      <span className="font-semibold">{entry.actor?.display_name || "System"}</span>
+                      <span className="font-semibold">{entry.actor?.display_name || t("common.system")}</span>
                       {" "}
                       <span className="text-[#A1A1AA]">{entry.action.replace(/_/g, " ")}</span>
                     </p>

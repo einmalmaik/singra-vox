@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Bell, Check, Trash, ChatCircle, At, ArrowBendUpLeft } from "@phosphor-icons/react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuTrigger
@@ -7,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import api from "@/lib/api";
 
 export default function NotificationPanel() {
+  const { t } = useTranslation();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
@@ -65,17 +67,17 @@ export default function NotificationPanel() {
       </DropdownMenuTrigger>
       <DropdownMenuContent className="bg-[#18181B] border-[#27272A] text-white w-80 max-h-[400px] p-0" align="end">
         <div className="flex items-center justify-between px-3 py-2 border-b border-[#27272A]">
-          <h4 className="text-sm font-bold" style={{ fontFamily: 'Manrope' }}>Notifications</h4>
+          <h4 className="text-sm font-bold" style={{ fontFamily: 'Manrope' }}>{t("notifications.title")}</h4>
           {unreadCount > 0 && (
             <button onClick={markAllRead} data-testid="mark-all-read"
               className="text-[10px] text-[#6366F1] hover:text-[#4F46E5] font-medium">
-              Mark all read
+              {t("notifications.markAllRead")}
             </button>
           )}
         </div>
         <ScrollArea className="max-h-[350px]">
           {notifications.length === 0 ? (
-            <p className="text-[#71717A] text-xs text-center py-8">No notifications</p>
+            <p className="text-[#71717A] text-xs text-center py-8">{t("notifications.empty")}</p>
           ) : (
             notifications.map(n => (
               <div key={n.id}

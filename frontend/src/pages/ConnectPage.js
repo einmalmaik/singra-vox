@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { DesktopTower, LinkSimple } from "@phosphor-icons/react";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { formatError } from "@/lib/api";
 
 export default function ConnectPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { connectToInstance } = useRuntime();
   const [instanceUrl, setInstanceUrl] = useState("http://localhost:8080");
@@ -23,7 +25,7 @@ export default function ConnectPage() {
       const { status } = await connectToInstance(instanceUrl);
       navigate(status?.initialized ? "/login" : "/setup");
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || "Could not reach the instance.");
+      setError(formatError(err.response?.data?.detail) || t("connect.couldNotReach"));
     } finally {
       setLoading(false);
     }
@@ -35,8 +37,8 @@ export default function ConnectPage() {
         <div className="flex items-center gap-3 mb-8">
           <DesktopTower size={40} weight="fill" className="text-[#6366F1]" />
           <div>
-            <h1 className="text-3xl font-bold" style={{ fontFamily: "Manrope" }}>Connect Desktop Client</h1>
-            <p className="text-[#71717A] text-sm">Enter the URL or IP:Port of your self-hosted Singra Vox instance.</p>
+            <h1 className="text-3xl font-bold" style={{ fontFamily: "Manrope" }}>{t("connect.title")}</h1>
+            <p className="text-[#71717A] text-sm">{t("connect.subtitle")}</p>
           </div>
         </div>
 
@@ -49,11 +51,11 @@ export default function ConnectPage() {
             )}
 
             <div className="space-y-2">
-              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Instance URL</Label>
+              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("connect.instanceUrl")}</Label>
               <Input
                 value={instanceUrl}
                 onChange={(e) => setInstanceUrl(e.target.value)}
-                placeholder="https://chat.example.com"
+                placeholder={t("connect.instanceUrlPlaceholder")}
                 required
                 data-testid="instance-url-input"
                 className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
@@ -62,7 +64,7 @@ export default function ConnectPage() {
 
             <div className="rounded-lg border border-[#27272A] bg-[#18181B] px-4 py-3 text-xs text-[#71717A] flex gap-2">
               <LinkSimple size={16} className="text-[#6366F1] shrink-0 mt-0.5" />
-              For local tests you can use `http://localhost:8080`. For production use your domain with HTTPS.
+              {t("connect.helpText")}
             </div>
 
             <Button
@@ -71,7 +73,7 @@ export default function ConnectPage() {
               data-testid="connect-submit-button"
               className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
             >
-              {loading ? "Connecting..." : "Connect"}
+              {loading ? t("connect.connecting") : t("connect.connect")}
             </Button>
           </form>
         </div>
@@ -79,4 +81,3 @@ export default function ConnectPage() {
     </div>
   );
 }
-

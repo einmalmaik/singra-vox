@@ -207,7 +207,7 @@ export default function ChannelSidebar({
         type: chType,
         parent_id: chType === "category" ? null : (chParentId === "__root__" ? null : chParentId),
       });
-      toast.success(chType === "category" ? "Category created" : "Channel created");
+      toast.success(chType === "category" ? t("serverSettings.categoryCreated") : t("serverSettings.channelCreated"));
       setShowCreate(false);
       setChName("");
       onRefreshChannels?.();
@@ -216,7 +216,7 @@ export default function ChannelSidebar({
     } finally {
       setCreating(false);
     }
-  }, [chName, chParentId, chType, onRefreshChannels, server?.id]);
+  }, [chName, chParentId, chType, onRefreshChannels, server?.id, t]);
 
   const syncChannelOrder = useCallback(async (items) => {
     if (!items?.length) {
@@ -266,11 +266,11 @@ export default function ChannelSidebar({
 
     try {
       await syncChannelOrder(payload);
-      toast.success("Channel order updated");
+      toast.success(t("serverSettings.channelOrderUpdated"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
-  }, [channels, syncChannelOrder]);
+  }, [channels, syncChannelOrder, t]);
 
   const joinVoice = useCallback(async (channel) => {
     try {
@@ -300,12 +300,12 @@ export default function ChannelSidebar({
       setIsMuted(false);
       setIsDeafened(false);
       onRefreshChannels?.();
-      toast.success("Voice connected");
+      toast.success(t("channel.voiceConnected"));
     } catch (error) {
       console.error("Voice join error:", error);
-      toast.error(formatError(error?.response?.data?.detail || "Failed to join voice"));
+      toast.error(formatError(error?.response?.data?.detail || t("channel.joinVoiceFailed")));
     }
-  }, [bindVoiceEngine, isDesktop, onRefreshChannels, server?.id, user?.id, voiceChannel?.id, voiceEngineRef]);
+  }, [bindVoiceEngine, isDesktop, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
 
   const leaveVoice = useCallback(async () => {
     if (!voiceChannel) return;
@@ -320,9 +320,9 @@ export default function ChannelSidebar({
       setIsDeafened(false);
       onRefreshChannels?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail || "Failed to leave voice"));
+      toast.error(formatError(error.response?.data?.detail || t("channel.leaveVoiceFailed")));
     }
-  }, [onRefreshChannels, server?.id, voiceChannel, voiceEngineRef]);
+  }, [onRefreshChannels, server?.id, t, voiceChannel, voiceEngineRef]);
 
   const toggleMute = async () => {
     if (!voiceChannel) return;
@@ -332,7 +332,7 @@ export default function ChannelSidebar({
     try {
       await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_muted: nextMuted });
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail || "Failed to update mute state"));
+      toast.error(formatError(error.response?.data?.detail || t("channel.muteUpdateFailed")));
     }
   };
 
@@ -344,7 +344,7 @@ export default function ChannelSidebar({
     try {
       await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_deafened: nextDeafened });
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail || "Failed to update deafen state"));
+      toast.error(formatError(error.response?.data?.detail || t("channel.deafenUpdateFailed")));
     }
   };
 
@@ -362,19 +362,21 @@ export default function ChannelSidebar({
         await api.post(`/servers/${server.id}/moderation/ban`, { user_id: participantId, reason: "Banned by moderator" });
       }
       onRefreshChannels?.();
-      toast.success("Member updated");
+      toast.success(t("serverSettings.memberUpdated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail || "Action failed"));
+      toast.error(formatError(error.response?.data?.detail || t("serverSettings.memberActionGenericFailed")));
     }
   };
 
   const renameChannelQuick = async (channel) => {
-    const label = channel.type === "category" ? "category" : "channel";
-    const nextName = window.prompt(`Rename ${label}`, channel.name);
+    const nextName = window.prompt(
+      channel.type === "category" ? t("serverSettings.renameCategoryPrompt") : t("serverSettings.renameChannelPrompt"),
+      channel.name,
+    );
     if (!nextName || nextName.trim() === channel.name) return;
     try {
       await api.put(`/channels/${channel.id}`, { name: nextName.trim() });
-      toast.success(`${channel.type === "category" ? "Category" : "Channel"} renamed`);
+      toast.success(channel.type === "category" ? t("serverSettings.categoryRenamed") : t("serverSettings.channelRenamed"));
       onRefreshChannels?.();
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
@@ -382,12 +384,15 @@ export default function ChannelSidebar({
   };
 
   const deleteChannelQuick = async (channel) => {
-    const label = channel.type === "category" ? "category" : "channel";
-    const confirmed = window.confirm(`Delete ${label} "${channel.name}"?`);
+    const confirmed = window.confirm(
+      channel.type === "category"
+        ? t("serverSettings.deleteCategoryConfirm", { name: channel.name })
+        : t("serverSettings.deleteChannelConfirm", { name: channel.name }),
+    );
     if (!confirmed) return;
     try {
       await api.delete(`/channels/${channel.id}`);
-      toast.success(`${channel.type === "category" ? "Category" : "Channel"} deleted`);
+      toast.success(channel.type === "category" ? t("serverSettings.categoryDeleted") : t("serverSettings.channelDeleted"));
       onRefreshChannels?.();
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
@@ -405,11 +410,11 @@ export default function ChannelSidebar({
     }
     try {
       await syncChannelOrder(payload);
-      toast.success("Moved to the top level");
+      toast.success(t("serverSettings.movedToTopLevel"));
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail));
     }
-  }, [channels, syncChannelOrder]);
+  }, [channels, syncChannelOrder, t]);
 
   const renderChannelRow = (channel, { nested = false } = {}) => {
     const unread = unreadMap?.[channel.id];
@@ -500,22 +505,22 @@ export default function ChannelSidebar({
         {capabilities.canManageChannels && (
           <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
             {channel.type === "category" ? (
-              <>
-                <ContextMenuItem onClick={() => openCreateDialog("text", channel.id)}>Create Text Channel</ContextMenuItem>
-                <ContextMenuItem onClick={() => openCreateDialog("voice", channel.id)}>Create Voice Channel</ContextMenuItem>
-                <ContextMenuItem onClick={() => renameChannelQuick(channel)}>Rename Category</ContextMenuItem>
-                <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>Delete Category</ContextMenuItem>
-              </>
-            ) : (
-              <>
-                <ContextMenuItem onClick={() => renameChannelQuick(channel)}>Rename Channel</ContextMenuItem>
+            <>
+              <ContextMenuItem onClick={() => openCreateDialog("text", channel.id)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => openCreateDialog("voice", channel.id)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameCategoryAction")}</ContextMenuItem>
+              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteCategoryAction")}</ContextMenuItem>
+            </>
+          ) : (
+            <>
+              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameChannelAction")}</ContextMenuItem>
                 {channel.parent_id && (
                   <ContextMenuItem onClick={() => { void moveChannelToRoot(channel.id); }}>
-                    Move To Root
+                    {t("serverSettings.moveToRoot")}
                   </ContextMenuItem>
                 )}
-                <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>Delete Channel</ContextMenuItem>
-                <ContextMenuItem onClick={() => setServerSettingsOpen(true)}>Open Channel Settings</ContextMenuItem>
+                <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteChannelAction")}</ContextMenuItem>
+                <ContextMenuItem onClick={() => setServerSettingsOpen(true)}>{t("serverSettings.editChannel")}</ContextMenuItem>
               </>
             )}
           </ContextMenuContent>
@@ -547,7 +552,7 @@ export default function ChannelSidebar({
                         : "border-[#27272A] bg-[#111113] text-[#52525B]"
                     }`}
                   >
-                    Drop channel into {category.name}
+                    {t("serverSettings.dropIntoCategory", { name: category.name })}
                   </div>
                 )}
               </ChannelContainerDropZone>
@@ -567,7 +572,7 @@ export default function ChannelSidebar({
               })}
             </SortableContext>
             {childIds.length === 0 && !canDropIntoCategory && (
-              <div className="px-7 py-1 text-[11px] text-[#5A5A63]">No channels yet</div>
+              <div className="px-7 py-1 text-[11px] text-[#5A5A63]">{t("channel.noChannelsYet")}</div>
             )}
           </div>
         )}
@@ -598,17 +603,17 @@ export default function ChannelSidebar({
                   }`}>
                     {voiceState.user?.display_name?.[0]?.toUpperCase() || "?"}
                   </div>
-                  <span className="truncate flex-1">{voiceState.user?.display_name || "User"}</span>
+                  <span className="truncate flex-1">{voiceState.user?.display_name || t("common.unknown")}</span>
                   {voiceState.is_muted && <MicrophoneSlash size={12} className="text-[#EF4444]" />}
                   {voiceState.is_deafened && <SpeakerSlash size={12} className="text-[#EF4444]" />}
                   {locallyMuted && <Prohibit size={12} className="text-[#F59E0B]" />}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-64 border-[#27272A] bg-[#18181B] text-white">
-                <DropdownMenuLabel>{voiceState.user?.display_name || "User"}</DropdownMenuLabel>
+                <DropdownMenuLabel>{voiceState.user?.display_name || t("common.unknown")}</DropdownMenuLabel>
                 <div className="px-3 py-2 space-y-2">
                   <div className="flex items-center justify-between text-xs text-[#71717A]">
-                    <span>User Volume</span>
+                    <span>{t("channel.userVolume")}</span>
                     <span>{participantVolume}%</span>
                   </div>
                   <Slider
@@ -627,7 +632,7 @@ export default function ChannelSidebar({
                     void updateLocalPreferences({ locallyMutedParticipants: { [participantId]: checked } });
                   }}
                 >
-                  Mute for me
+                  {t("channel.muteForMe")}
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuItem
                   onClick={() => {
@@ -637,7 +642,7 @@ export default function ChannelSidebar({
                     });
                   }}
                 >
-                  Reset local audio
+                  {t("channel.resetLocalAudio")}
                 </DropdownMenuItem>
                 {participantId !== user?.id && (
                   <>
@@ -646,22 +651,22 @@ export default function ChannelSidebar({
                     )}
                     {capabilities.canMuteMembers && (
                       <DropdownMenuItem onClick={() => handleModerationAction(participantId, "mute")}>
-                        Server mute (10 min)
+                        {t("channel.serverMute")}
                       </DropdownMenuItem>
                     )}
                     {capabilities.canDeafenMembers && (
                       <DropdownMenuItem onClick={() => handleModerationAction(participantId, voiceState.is_deafened ? "server-undeafen" : "server-deafen")}>
-                        {voiceState.is_deafened ? "Server undeafen" : "Server deafen"}
+                        {voiceState.is_deafened ? t("channel.serverUndeafen") : t("channel.serverDeafen")}
                       </DropdownMenuItem>
                     )}
                     {capabilities.canKickMembers && !isServerOwner && (
                       <DropdownMenuItem className="text-[#EF4444]" onClick={() => handleModerationAction(participantId, "kick")}>
-                        <UserMinus size={14} className="mr-2" /> Kick
+                        <UserMinus size={14} className="mr-2" /> {t("memberList.kick")}
                       </DropdownMenuItem>
                     )}
                     {capabilities.canBanMembers && !isServerOwner && (
                       <DropdownMenuItem className="text-[#EF4444]" onClick={() => handleModerationAction(participantId, "ban")}>
-                        <Prohibit size={14} className="mr-2" /> Ban
+                        <Prohibit size={14} className="mr-2" /> {t("memberList.ban")}
                       </DropdownMenuItem>
                     )}
                   </>
@@ -686,9 +691,9 @@ export default function ChannelSidebar({
             </ContextMenuTrigger>
             {capabilities.canManageChannels && (
               <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
-                <ContextMenuItem onClick={() => openCreateDialog("category", null)}>Create Category</ContextMenuItem>
-                <ContextMenuItem onClick={() => openCreateDialog("text", null)}>Create Text Channel</ContextMenuItem>
-                <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>Create Voice Channel</ContextMenuItem>
+                <ContextMenuItem onClick={() => openCreateDialog("category", null)}>{t("serverSettings.createCategory")}</ContextMenuItem>
+                <ContextMenuItem onClick={() => openCreateDialog("text", null)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+                <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
               </ContextMenuContent>
             )}
           </ContextMenu>
@@ -749,7 +754,7 @@ export default function ChannelSidebar({
                                 : "border-[#27272A] bg-[#111113] text-[#71717A]"
                             }`}
                           >
-                            Drop here to move to the top level
+                            {t("serverSettings.dropToTopLevel")}
                           </div>
                         )}
                       </ChannelContainerDropZone>
@@ -770,43 +775,43 @@ export default function ChannelSidebar({
                       <DialogContent className="bg-[#18181B] border-[#27272A] text-white max-w-sm">
                         <DialogHeader>
                           <DialogTitle style={{ fontFamily: "Manrope" }}>
-                            {chType === "category" ? "Create Category" : "Create Channel"}
+                            {chType === "category" ? t("serverSettings.createCategory") : t("channel.addChannel")}
                           </DialogTitle>
                         </DialogHeader>
                         <form onSubmit={createChannel} className="space-y-4 mt-2">
                           <div className="space-y-2">
                             <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">
-                              {chType === "category" ? "Category Name" : "Channel Name"}
+                              {chType === "category" ? t("serverSettings.categoryName") : t("serverSettings.channelName")}
                             </Label>
                             <Input
                               value={chName}
                               onChange={(event) => setChName(event.target.value)}
-                              placeholder={chType === "category" ? "New Category" : "new-channel"}
+                              placeholder={chType === "category" ? t("serverSettings.newCategoryPlaceholder") : t("serverSettings.createChannelPlaceholder")}
                               className="bg-[#121212] border-[#27272A] focus:border-[#6366F1] text-white"
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Type</Label>
+                            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("common.type")}</Label>
                             <Select value={chType} onValueChange={setChType}>
                               <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
-                                <SelectItem value="text">Text</SelectItem>
-                                <SelectItem value="voice">Voice</SelectItem>
-                                <SelectItem value="category">Category</SelectItem>
+                                <SelectItem value="text">{t("serverSettings.channelTypeText")}</SelectItem>
+                                <SelectItem value="voice">{t("serverSettings.channelTypeVoice")}</SelectItem>
+                                <SelectItem value="category">{t("serverSettings.channelTypeCategory")}</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
                           {chType !== "category" && (
                             <div className="space-y-2">
-                              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">Category</Label>
+                              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("common.category")}</Label>
                               <Select value={chParentId} onValueChange={setChParentId}>
                                 <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
-                                  <SelectItem value="__root__">No Category</SelectItem>
+                                  <SelectItem value="__root__">{t("common.noCategory")}</SelectItem>
                                   {categories.map((category) => (
                                     <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
                                   ))}
@@ -815,7 +820,7 @@ export default function ChannelSidebar({
                             </div>
                           )}
                           <Button type="submit" disabled={creating || !chName.trim()} className="w-full bg-[#6366F1] hover:bg-[#4F46E5]">
-                            {creating ? "Creating..." : "Create"}
+                            {creating ? t("server.creating") : t("common.create")}
                           </Button>
                         </form>
                       </DialogContent>
@@ -825,9 +830,9 @@ export default function ChannelSidebar({
               </ContextMenuTrigger>
               {capabilities.canManageChannels && (
                 <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
-                  <ContextMenuItem onClick={() => openCreateDialog("category", null)}>Create Category</ContextMenuItem>
-                  <ContextMenuItem onClick={() => openCreateDialog("text", null)}>Create Text Channel</ContextMenuItem>
-                  <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>Create Voice Channel</ContextMenuItem>
+                  <ContextMenuItem onClick={() => openCreateDialog("category", null)}>{t("serverSettings.createCategory")}</ContextMenuItem>
+                  <ContextMenuItem onClick={() => openCreateDialog("text", null)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+                  <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
                 </ContextMenuContent>
               )}
             </ContextMenu>

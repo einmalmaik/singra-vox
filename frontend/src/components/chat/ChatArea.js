@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Hash, PaperPlaneRight, Paperclip, ChatText, Pencil, Trash, PushPin, PushPinSlash, X, At
 } from "@phosphor-icons/react";
@@ -53,6 +54,7 @@ export default function ChatArea({
   typingUsers,
   onChannelRead,
 }) {
+  const { t } = useTranslation();
   const { config } = useRuntime();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
@@ -200,8 +202,8 @@ export default function ChatArea({
       setSelectedMentions([]);
       setActiveMention(null);
       setActiveMentionIndex(0);
-    } catch (err) {
-      toast.error("Failed to send message");
+    } catch {
+      toast.error(t("chat.sendFailed"));
     } finally {
       setSending(false);
     }
@@ -220,7 +222,7 @@ export default function ChatArea({
       setMessages(prev => prev.map(m => m.id === msgId ? res.data : m));
       setEditingId(null);
     } catch {
-      toast.error("Failed to edit");
+      toast.error(t("chat.editFailed"));
     }
   };
 
@@ -229,7 +231,7 @@ export default function ChatArea({
       await api.delete(`/messages/${msgId}`);
       setMessages(prev => prev.filter(m => m.id !== msgId));
     } catch {
-      toast.error("Failed to delete");
+      toast.error(t("chat.deleteFailed"));
     }
   };
 
@@ -245,8 +247,8 @@ export default function ChatArea({
     try {
       await api.post(`/messages/${msgId}/pin`);
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, is_pinned: true } : m));
-      toast.success("Message pinned");
-    } catch { toast.error("Failed to pin"); }
+      toast.success(t("chat.messagePinned"));
+    } catch { toast.error(t("chat.pinFailed")); }
   };
 
   const handleUnpin = async (msgId) => {
@@ -259,16 +261,16 @@ export default function ChatArea({
   const saveTopic = async () => {
     try {
       await api.put(`/channels/${channel.id}/topic`, { topic: topicDraft });
-      toast.success("Topic updated");
+      toast.success(t("chat.topicUpdated"));
       setEditingTopic(false);
-    } catch { toast.error("Failed to update topic"); }
+    } catch { toast.error(t("chat.topicUpdateFailed")); }
   };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
-      toast.error("File too large (max 10 MB)");
+      toast.error(t("chat.fileTooLarge"));
       return;
     }
     const reader = new FileReader();
@@ -283,7 +285,7 @@ export default function ChatArea({
           { id: uploadRes.data.id, name: file.name, type: file.type, url: uploadRes.data.url },
         ]);
       } catch {
-        toast.error("Upload failed");
+        toast.error(t("chat.uploadFailed"));
       }
     };
     reader.readAsDataURL(file);
@@ -357,7 +359,7 @@ export default function ChatArea({
     } catch {
       pendingJumpMessageId.current = null;
       suppressAutoScroll.current = false;
-      toast.error("Original message not available");
+      toast.error(t("chat.originalUnavailable"));
     }
   };
 
@@ -384,7 +386,7 @@ export default function ChatArea({
   if (!channel) {
     return (
       <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]" data-testid="no-channel-selected">
-        <p>Select a channel to start chatting</p>
+        <p>{t("chat.selectChannel")}</p>
       </div>
     );
   }
@@ -402,8 +404,8 @@ export default function ChatArea({
                 <input value={topicDraft} onChange={e => setTopicDraft(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') saveTopic(); if (e.key === 'Escape') setEditingTopic(false); }}
                   className="flex-1 bg-[#27272A] rounded px-2 py-0.5 text-xs text-white outline-none" autoFocus data-testid="topic-edit-input" />
-                <button onClick={saveTopic} className="text-[#6366F1] text-xs font-medium">Save</button>
-                <button onClick={() => setEditingTopic(false)} className="text-[#71717A] text-xs">Cancel</button>
+                <button onClick={saveTopic} className="text-[#6366F1] text-xs font-medium">{t("common.save")}</button>
+                <button onClick={() => setEditingTopic(false)} className="text-[#71717A] text-xs">{t("common.cancel")}</button>
               </div>
             ) : channel.topic ? (
               <button onClick={() => { setTopicDraft(channel.topic); setEditingTopic(true); }}
@@ -414,7 +416,7 @@ export default function ChatArea({
             ) : (
               <button onClick={() => { setTopicDraft(""); setEditingTopic(true); }}
                 className="ml-3 text-xs text-[#52525B] border-l border-[#27272A] pl-3 hidden md:inline hover:text-[#71717A] transition-colors">
-                Set a topic...
+                {t("chat.setTopic")}
               </button>
             )}
           </div>
@@ -427,7 +429,7 @@ export default function ChatArea({
                     <PushPin size={16} weight={showPins ? "fill" : "bold"} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom"><p>Pinned Messages</p></TooltipContent>
+                <TooltipContent side="bottom"><p>{t("chat.pinnedMessages")}</p></TooltipContent>
               </Tooltip>
             </TooltipProvider>
             <NotificationPanel />
@@ -440,8 +442,8 @@ export default function ChatArea({
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-[#71717A]">
               <Hash size={48} weight="bold" className="mb-4 opacity-30" />
-              <p className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>Welcome to #{channel.name}</p>
-              <p className="text-sm">This is the start of the channel.</p>
+              <p className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>{t("chat.welcomeToChannel", { name: channel.name })}</p>
+              <p className="text-sm">{t("chat.startOfChannel")}</p>
             </div>
           )}
 
@@ -483,12 +485,12 @@ export default function ChatArea({
                   {!compact && (
                     <div className="flex items-baseline gap-2 mb-0.5">
                       <span className="text-sm font-semibold" style={{ color: msg.author?.role === 'admin' ? '#E74C3C' : '#FFFFFF' }}>
-                        {msg.author?.display_name || msg.author?.username || 'Unknown'}
+                        {msg.author?.display_name || msg.author?.username || t("common.unknown")}
                       </span>
                       <span className="text-[10px] text-[#52525B]">
                         {new Date(msg.created_at).toLocaleString()}
                       </span>
-                      {msg.edited_at && <span className="text-[10px] text-[#52525B]">(edited)</span>}
+                      {msg.edited_at && <span className="text-[10px] text-[#52525B]">{t("chat.edited")}</span>}
                     </div>
                   )}
 
@@ -500,8 +502,8 @@ export default function ChatArea({
                         className="flex-1 bg-[#27272A] rounded px-2 py-1 text-sm text-white outline-none"
                         data-testid="edit-message-input" autoFocus
                       />
-                      <button onClick={() => handleEdit(msg.id)} className="text-[#6366F1] text-xs font-medium">Save</button>
-                      <button onClick={() => setEditingId(null)} className="text-[#71717A] text-xs">Cancel</button>
+                      <button onClick={() => handleEdit(msg.id)} className="text-[#6366F1] text-xs font-medium">{t("common.save")}</button>
+                      <button onClick={() => setEditingId(null)} className="text-[#71717A] text-xs">{t("common.cancel")}</button>
                     </div>
                   ) : (
                     <>
@@ -509,14 +511,14 @@ export default function ChatArea({
                         <div className="mb-2 max-w-[540px]">
                           <MessageReferencePreview
                             message={replyTarget}
-                            placeholder="Original message unavailable"
+                            placeholder={t("chat.originalUnavailable")}
                             onClick={replyTarget?.id ? () => revealMessage(replyTarget.id) : undefined}
                           />
                         </div>
                       )}
                       {msg.is_pinned && (
                         <div className="flex items-center gap-1 text-[10px] text-[#F59E0B] mb-0.5">
-                          <PushPin size={10} weight="fill" /> Pinned
+                          <PushPin size={10} weight="fill" /> {t("chat.pinned")}
                         </div>
                       )}
                       {msg.content ? (
@@ -568,7 +570,7 @@ export default function ChatArea({
                     <button onClick={() => setThreadMsgId(msg.id)} data-testid={`thread-btn-${msg.id}`}
                       className="flex items-center gap-1.5 mt-1.5 text-[#6366F1] text-xs font-medium hover:text-[#4F46E5] transition-colors">
                       <ChatText size={14} weight="bold" />
-                      {msg.thread_count} {msg.thread_count === 1 ? 'reply' : 'replies'}
+                      {t("thread.replyCount", { count: msg.thread_count })}
                     </button>
                   )}
                     </>
@@ -585,7 +587,7 @@ export default function ChatArea({
                           <span className="text-xs">+</span>
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="top"><p>React</p></TooltipContent>
+                      <TooltipContent side="top"><p>{t("chat.react")}</p></TooltipContent>
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -594,7 +596,7 @@ export default function ChatArea({
                           <ChatText size={14} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="top"><p>Reply in Thread</p></TooltipContent>
+                      <TooltipContent side="top"><p>{t("chat.replyInThread")}</p></TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                   {msg.author_id === user?.id && (
@@ -639,7 +641,7 @@ export default function ChatArea({
             <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-0.5" />
             <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-0.5" />
             <span className="typing-dot inline-block w-1 h-1 bg-[#71717A] rounded-full mr-2" />
-            {typingNames.join(", ")} {typingNames.length === 1 ? "is" : "are"} typing...
+            {t("chat.typing", { names: typingNames.join(", "), count: typingNames.length })}
           </div>
         )}
 
@@ -710,7 +712,7 @@ export default function ChatArea({
                   setActiveMentionIndex(0);
                 }
               }}
-              placeholder={`Message #${channel.name}`}
+              placeholder={t("chat.messagePlaceholder", { name: channel.name })}
               data-testid="message-input"
               className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none"
             />

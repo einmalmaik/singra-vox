@@ -32,7 +32,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
   const handleKick = async (userId) => {
     try {
       await api.delete(`/servers/${serverId}/members/${userId}`);
-      toast.success("Member kicked");
+      toast.success(t("memberList.kicked"));
       onRefreshMembers();
     } catch (err) {
       toast.error(formatError(err.response?.data?.detail));
@@ -41,8 +41,11 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
 
   const handleBan = async (userId) => {
     try {
-      await api.post(`/servers/${serverId}/moderation/ban`, { user_id: userId, reason: "Banned by admin" });
-      toast.success("Member banned");
+      await api.post(`/servers/${serverId}/moderation/ban`, {
+        user_id: userId,
+        reason: t("serverSettings.defaultBanReason"),
+      });
+      toast.success(t("memberList.banned"));
       onRefreshMembers();
     } catch (err) {
       toast.error(formatError(err.response?.data?.detail));
@@ -52,7 +55,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
   const handleMute = async (userId) => {
     try {
       await api.post(`/servers/${serverId}/moderation/mute`, { user_id: userId, duration_minutes: 10 });
-      toast.success("Member muted for 10 minutes");
+      toast.success(t("memberList.muted"));
     } catch (err) {
       toast.error(formatError(err.response?.data?.detail));
     }
@@ -102,27 +105,27 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
           </div>
           {!isSelf && (
             <>
-              <DropdownMenuItem onClick={() => onStartDM(member.user)} className="cursor-pointer text-[#A1A1AA] focus:text-white focus:bg-[#27272A]"
-                data-testid={`dm-member-${member.user?.username}`}>
-                <ChatCircle size={16} className="mr-2" /> Message
+                <DropdownMenuItem onClick={() => onStartDM(member.user)} className="cursor-pointer text-[#A1A1AA] focus:text-white focus:bg-[#27272A]"
+                  data-testid={`dm-member-${member.user?.username}`}>
+                <ChatCircle size={16} className="mr-2" /> {t("memberList.message")}
               </DropdownMenuItem>
               {canModerate && <DropdownMenuSeparator className="bg-[#27272A]" />}
               {capabilities.canMuteMembers && (
                 <DropdownMenuItem onClick={() => handleMute(member.user?.id)} className="cursor-pointer text-[#F59E0B] focus:text-[#F59E0B] focus:bg-[#27272A]"
                   data-testid={`mute-member-${member.user?.username}`}>
-                  <Timer size={16} className="mr-2" /> Mute (10 min)
+                  <Timer size={16} className="mr-2" /> {t("memberList.mute")}
                 </DropdownMenuItem>
               )}
               {capabilities.canKickMembers && !isServerOwner && (
                 <DropdownMenuItem onClick={() => handleKick(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
                   data-testid={`kick-member-${member.user?.username}`}>
-                  <UserMinus size={16} className="mr-2" /> Kick
+                  <UserMinus size={16} className="mr-2" /> {t("memberList.kick")}
                 </DropdownMenuItem>
               )}
               {capabilities.canBanMembers && !isServerOwner && (
                 <DropdownMenuItem onClick={() => handleBan(member.user?.id)} className="cursor-pointer text-[#EF4444] focus:text-[#EF4444] focus:bg-[#27272A]"
                   data-testid={`ban-member-${member.user?.username}`}>
-                  <Prohibit size={16} className="mr-2" /> Ban
+                  <Prohibit size={16} className="mr-2" /> {t("memberList.ban")}
                 </DropdownMenuItem>
               )}
             </>
@@ -143,7 +146,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
         {onlineMembers.length > 0 && (
           <>
             <p className="text-[#71717A] text-xs font-bold uppercase tracking-[0.2em] px-2 mb-2">
-              Online &mdash; {onlineMembers.length}
+              {t("memberList.online")} &mdash; {onlineMembers.length}
             </p>
             {onlineMembers.map(m => <MemberItem key={m.user_id} member={m} />)}
           </>
@@ -151,7 +154,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
         {offlineMembers.length > 0 && (
           <>
             <p className="text-[#71717A] text-xs font-bold uppercase tracking-[0.2em] px-2 mb-2 mt-4">
-              Offline &mdash; {offlineMembers.length}
+              {t("memberList.offline")} &mdash; {offlineMembers.length}
             </p>
             {offlineMembers.map(m => <MemberItem key={m.user_id} member={m} />)}
           </>

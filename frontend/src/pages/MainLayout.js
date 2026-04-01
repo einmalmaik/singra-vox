@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ShieldCheck, List, UsersThree } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -80,6 +81,7 @@ function upsertVoiceState(channels, channelId, nextState) {
 }
 
 export default function MainLayout() {
+  const { t } = useTranslation();
   const { user, token, logout, setUser } = useAuth();
   const { config } = useRuntime();
   const navigate = useNavigate();
@@ -216,9 +218,9 @@ export default function MainLayout() {
     try {
       await loadServerSnapshot(server.id);
     } catch {
-      toast.error("Failed to load server");
+      toast.error(t("chat.loadServerFailed"));
     }
-  }, [loadServerSnapshot]);
+  }, [loadServerSnapshot, t]);
 
   const loadServers = useCallback(async () => {
     try {
@@ -249,10 +251,10 @@ export default function MainLayout() {
       if (error.response?.status === 401) {
         navigate("/login");
       } else {
-        toast.error("Failed to load servers");
+        toast.error(t("chat.loadServersFailed"));
       }
     }
-  }, [navigate, selectServer]);
+  }, [navigate, selectServer, t]);
 
   const selectDmUser = useCallback(async (dmUser) => {
     setCurrentDmUser(dmUser);
@@ -404,7 +406,7 @@ export default function MainLayout() {
         if (data.user_id === user?.id && data.server_id === currentServerRef.current?.id) {
           await handleRemovedFromServer(
             data.server_id,
-            data.type === "member_kicked" ? "You were removed from this server" : "You were banned from this server",
+            data.type === "member_kicked" ? t("server.removedFromServer") : t("server.bannedFromServer"),
           );
         }
         break;
@@ -425,7 +427,7 @@ export default function MainLayout() {
 
       case "server_left":
         if (data.user_id === user?.id) {
-          await handleRemovedFromServer(data.server_id, "You left this server");
+          await handleRemovedFromServer(data.server_id, t("server.left"));
         }
         break;
 
@@ -466,7 +468,7 @@ export default function MainLayout() {
       default:
         break;
     }
-  }, [handleRemovedFromServer, loadDmConversations, loadServers, refreshUnread, user?.id]);
+  }, [handleRemovedFromServer, loadDmConversations, loadServers, refreshUnread, t, user?.id]);
 
   const connectWs = useCallback(() => {
     if (!token || !config?.wsBase) return;
@@ -635,7 +637,7 @@ export default function MainLayout() {
         <>
           <div className="w-[280px] bg-[#121212] border-r border-[#27272A] flex flex-col" data-testid="dm-sidebar">
             <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0">
-              <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>Direct Messages</h3>
+              <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>{t("server.directMessages")}</h3>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
               {dmConversations.map((conversation) => (
@@ -702,13 +704,13 @@ export default function MainLayout() {
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]">
-              Select a conversation
+              {t("dm.selectConversation")}
             </div>
           )}
         </>
       ) : (
         <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]">
-          Loading...
+          {t("app.loading")}
         </div>
       )}
     </div>
@@ -716,6 +718,7 @@ export default function MainLayout() {
 }
 
 function DmInput({ userId, onSent }) {
+  const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
   const [e2eeReady, setE2eeReady] = useState(false);
@@ -767,7 +770,7 @@ function DmInput({ userId, onSent }) {
       onSent(res.data);
       setContent("");
     } catch {
-      toast.error("Failed to send");
+      toast.error(t("dm.sendFailed"));
     } finally {
       setSending(false);
     }
@@ -779,7 +782,7 @@ function DmInput({ userId, onSent }) {
         <input
           value={content}
           onChange={(event) => setContent(event.target.value)}
-          placeholder={e2eeReady ? "Encrypted message..." : "Send a message..."}
+          placeholder={e2eeReady ? t("dm.encryptedMessage") : t("dm.sendMessage")}
           data-testid="dm-message-input"
           className="flex-1 bg-[#27272A] border border-[#27272A]/50 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#52525B] outline-none focus:border-[#6366F1]/50"
         />
@@ -789,12 +792,12 @@ function DmInput({ userId, onSent }) {
           data-testid="dm-send-button"
           className="bg-[#6366F1] hover:bg-[#4F46E5] text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
         >
-          Send
+          {t("common.send")}
         </button>
       </div>
       {e2eeReady && (
         <p className="text-[10px] text-[#6366F1] mt-1 flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" /> End-to-end encrypted
+          <span className="w-1.5 h-1.5 rounded-full bg-[#22C55E]" /> {t("dm.e2eeEncrypted")}
         </p>
       )}
     </form>
@@ -802,6 +805,7 @@ function DmInput({ userId, onSent }) {
 }
 
 function DecryptedContent({ msg, currentUserId }) {
+  const { t } = useTranslation();
   const [text, setText] = useState(null);
 
   const decrypt = useCallback(async () => {
@@ -809,7 +813,7 @@ function DecryptedContent({ msg, currentUserId }) {
       const { loadKeyPair, deriveSharedKey, decryptMessage } = await import("@/lib/crypto");
       const keyPair = loadKeyPair();
       if (!keyPair) {
-        setText("[Cannot decrypt - no keys]");
+        setText(t("dm.cannotDecryptNoKeys"));
         return;
       }
       const otherId = msg.sender_id === currentUserId ? msg.receiver_id : msg.sender_id;
@@ -820,12 +824,12 @@ function DecryptedContent({ msg, currentUserId }) {
         const plain = await decryptMessage(shared, msg.encrypted_content, msg.nonce);
         setText(plain);
       } else {
-        setText("[Cannot decrypt]");
+        setText(t("dm.cannotDecrypt"));
       }
     } catch {
-      setText("[Encrypted message]");
+      setText(t("dm.encryptedFallback"));
     }
-  }, [currentUserId, msg]);
+  }, [currentUserId, msg, t]);
 
   useEffect(() => {
     if (msg.is_encrypted && msg.encrypted_content && msg.nonce) {
@@ -834,5 +838,5 @@ function DecryptedContent({ msg, currentUserId }) {
   }, [decrypt, msg.encrypted_content, msg.is_encrypted, msg.nonce]);
 
   if (!msg.is_encrypted) return msg.content;
-  return <span className="italic text-[#A1A1AA]">{text || "Decrypting..."}</span>;
+  return <span className="italic text-[#A1A1AA]">{text || t("dm.decrypting")}</span>;
 }
