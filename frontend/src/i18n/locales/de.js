@@ -128,6 +128,7 @@ const de = {
   pttMicOpen: "offen",
   pttMicClosed: "geschlossen",
   pttRegistrationError: "Registrierungsfehler: {{error}}",
+  pttSystemWarning: "Das aktuelle Desktop-PTT nutzt einen Betriebssystem-Hotkey. Manche Spiele oder als Administrator gestartete Apps können die Taste vorher abfangen, und Einzel-Tasten-Bindings können mit Vordergrundsteuerungen kollidieren.",
     noiseSuppression: "Rauschunterdrückung",
     echoCancellation: "Echounterdrückung",
     autoGainControl: "Automatische Pegelregelung",

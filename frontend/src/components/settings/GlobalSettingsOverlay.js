@@ -541,6 +541,11 @@ export default function GlobalSettingsOverlay({
                     ) : null}
                   </div>
                 )}
+                {isDesktop && (
+                  <p className="mt-3 text-xs text-[#71717A]">
+                    {t("settings.pttSystemWarning")}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-3 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">

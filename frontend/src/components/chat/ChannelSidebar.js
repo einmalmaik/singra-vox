@@ -218,6 +218,26 @@ export default function ChannelSidebar({
   }, []);
 
   useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    const joinedVoiceChannel = channels.find((channel) => (
+      channel.type === "voice"
+      && channel.voice_states?.some((state) => state.user_id === user.id)
+    )) || null;
+
+    if (joinedVoiceChannel && voiceChannel?.id !== joinedVoiceChannel.id) {
+      setVoiceChannel(joinedVoiceChannel);
+      return;
+    }
+
+    if (!joinedVoiceChannel && voiceChannel) {
+      setVoiceChannel(null);
+    }
+  }, [channels, user?.id, voiceChannel]);
+
+  useEffect(() => {
     if (!voiceChannel || !user?.id) return;
     const nextChannel = channels.find((channel) => channel.id === voiceChannel.id);
     const selfState = nextChannel?.voice_states?.find((state) => state.user_id === user.id);

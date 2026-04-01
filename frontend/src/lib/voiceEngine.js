@@ -612,13 +612,26 @@ export class VoiceEngine {
       200,
     ) / 100;
     const locallyMuted = Boolean(this.preferences.locallyMutedParticipants?.[userId]);
+    const shouldReceiveAudio = !(this.isDeafened || locallyMuted);
 
     this.audioElements.forEach((state) => {
       if (state.participantId !== userId) {
         return;
       }
-      state.element.muted = this.isDeafened || locallyMuted;
-      state.element.volume = this.isDeafened || locallyMuted ? 0 : Math.min(2, baseVolume * participantVolume);
+      state.element.muted = !shouldReceiveAudio;
+      state.element.volume = shouldReceiveAudio ? Math.min(2, baseVolume * participantVolume) : 0;
+
+      // Keep the transport subscription aligned with the local mute/deafen
+      // state. Relying on the HTMLAudioElement alone proved flaky across web and
+      // desktop, while publication.setEnabled(false) stops new data for this
+      // client without affecting other listeners.
+      const desiredEnabled = shouldReceiveAudio;
+      if (state.subscriptionEnabled !== desiredEnabled && typeof state.publication?.setEnabled === "function") {
+        state.subscriptionEnabled = desiredEnabled;
+        void state.publication.setEnabled(desiredEnabled).catch(() => {
+          state.subscriptionEnabled = !desiredEnabled;
+        });
+      }
     });
   }
 
@@ -782,7 +795,7 @@ export class VoiceEngine {
   _bindRoomEvents() {
     if (!this.room) return;
 
-    this.room.on(RoomEvent.TrackSubscribed, async (track, _publication, participant) => {
+    this.room.on(RoomEvent.TrackSubscribed, async (track, publication, participant) => {
       const source = track.source || Track.Source.Unknown;
       const trackKey = this._trackKey(participant.identity, source);
 
@@ -796,6 +809,8 @@ export class VoiceEngine {
           element: audioEl,
           participantId: participant.identity,
           source,
+          publication,
+          subscriptionEnabled: true,
         });
         this._applyParticipantAudio(participant.identity);
 

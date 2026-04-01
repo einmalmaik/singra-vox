@@ -128,6 +128,7 @@ const en = {
   pttMicOpen: "open",
   pttMicClosed: "closed",
   pttRegistrationError: "Registration error: {{error}}",
+  pttSystemWarning: "Current desktop PTT uses an OS-level hotkey. Some games or elevated apps can intercept the key first, and single-key bindings may conflict with foreground controls.",
     noiseSuppression: "Noise Suppression",
     echoCancellation: "Echo Cancellation",
     autoGainControl: "Auto Gain Control",
