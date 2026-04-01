@@ -13,6 +13,7 @@ import random
 import re
 import string
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -424,6 +425,7 @@ def run_acceptance() -> Dict[str, Any]:
     summary: Dict[str, Any] = {"checks": []}
     owner = create_owner_user()
     member = create_standard_user("e2ee_member")
+    outsider = create_standard_user("e2ee_outsider")
     summary["owner_email"] = owner.email
     summary["member_email"] = member.email
 
@@ -491,6 +493,14 @@ def run_acceptance() -> Dict[str, Any]:
     if decrypt_attachment(downloaded_private_blob, decrypted_private["attachments"][0]) != private_attachment_plaintext:
         raise AssertionError("Recipient could not decrypt the private channel attachment")
     summary["checks"].append("encrypted-private-channel")
+
+    outsider_private_blob = outsider.get(
+        channel_result["attachment"]["blob"]["url"].replace("/api", ""),
+        headers={"Accept": "application/octet-stream"},
+    )
+    if outsider_private_blob.status_code != 403:
+        raise AssertionError("Unauthorized user should not fetch encrypted private-channel blobs")
+    summary["checks"].append("encrypted-blob-authz")
 
     assert_ok(owner.post(f"/messages/{channel_result['message']['id']}/pin"))
     pinned_message = next(message for message in assert_ok(member.get(f"/channels/{private_text['id']}/pins")) if message["id"] == channel_result["message"]["id"])
@@ -580,4 +590,10 @@ def run_acceptance() -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    print(json.dumps(run_acceptance(), indent=2))
+    result = run_acceptance()
+    print(json.dumps(result, indent=2))
+    sys.stdout.flush()
+    # boto3 / local subprocess helpers can keep background resources alive long
+    # enough to hang desktop smoke runs after the result was already printed.
+    # The acceptance script is intentionally terminal and can exit hard here.
+    os._exit(0)

@@ -5,6 +5,7 @@ const VOICE_PREFERENCES_EVENT = "singravox:voice-preferences-updated";
 const DEFAULT_VOICE_PREFERENCES = {
   inputDeviceId: "",
   outputDeviceId: "",
+  cameraDeviceId: "",
   inputVolume: 100,
   outputVolume: 100,
   perUserVolumes: {},

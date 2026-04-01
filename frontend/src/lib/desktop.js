@@ -1,5 +1,7 @@
 const DESKTOP_SECRET_SERVICE = "com.singravox.desktop";
 let registeredDesktopPttShortcut = null;
+let desktopPttEventUnlisten = null;
+let desktopPttEventHandler = null;
 
 export function isDesktopApp() {
   return typeof window !== "undefined" && Boolean(window.__TAURI__ || window.__TAURI_INTERNALS__);
@@ -15,6 +17,15 @@ async function getGlobalShortcutApi() {
   if (!isDesktopApp()) return null;
   try {
     return await import("@tauri-apps/plugin-global-shortcut");
+  } catch {
+    return null;
+  }
+}
+
+async function getEventApi() {
+  if (!isDesktopApp()) return null;
+  try {
+    return await import("@tauri-apps/api/event");
   } catch {
     return null;
   }
@@ -69,6 +80,59 @@ export async function onDesktopDeepLinkOpen(handler) {
   const plugin = await getDeepLinkPlugin();
   if (!plugin?.onOpenUrl) return null;
   return plugin.onOpenUrl((urls) => handler(urls || []));
+}
+
+async function ensureDesktopPttEventBridge() {
+  if (desktopPttEventUnlisten) {
+    return desktopPttEventUnlisten;
+  }
+
+  const eventApi = await getEventApi();
+  if (!eventApi?.listen) {
+    return null;
+  }
+
+  desktopPttEventUnlisten = await eventApi.listen("desktop-ptt", (event) => {
+    desktopPttEventHandler?.(event?.payload || null);
+  });
+  return desktopPttEventUnlisten;
+}
+
+export async function getDesktopRuntimeInfo() {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  try {
+    return await invoke("get_desktop_runtime_info");
+  } catch {
+    return null;
+  }
+}
+
+export async function configureDesktopPttListener(shortcut, enabled, handler) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  const runtimeInfo = await getDesktopRuntimeInfo();
+  if (!runtimeInfo || runtimeInfo.pttMode !== "low-level-hook") {
+    return null;
+  }
+
+  await ensureDesktopPttEventBridge();
+  desktopPttEventHandler = typeof handler === "function" ? handler : null;
+  return invoke("configure_ptt_listener", {
+    shortcut: shortcut || null,
+    enabled: Boolean(enabled),
+  });
+}
+
+export async function clearDesktopPttListener() {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  desktopPttEventHandler = null;
+  try {
+    return await invoke("clear_ptt_listener");
+  } catch {
+    return null;
+  }
 }
 
 export async function registerDesktopPttHotkey(shortcut, handler) {

@@ -142,6 +142,14 @@ export class VoiceEngine {
 
     if (this.room && this._requiresTrackRestart(nextPreferences)) {
       await this.restartLocalTrack();
+    } else if (this.room && this.cameraTrack && Object.prototype.hasOwnProperty.call(nextPreferences, "cameraDeviceId")) {
+      const nextCameraDeviceId = this.preferences.cameraDeviceId;
+      if (nextCameraDeviceId && typeof this.room.switchActiveDevice === "function") {
+        await this.room.switchActiveDevice("videoinput", nextCameraDeviceId);
+      } else {
+        await this.stopCamera();
+        await this.toggleCamera();
+      }
     } else if (this.room && Object.prototype.hasOwnProperty.call(nextPreferences, "outputDeviceId")) {
       await this._applyOutputDevice();
     }
@@ -379,7 +387,10 @@ export class VoiceEngine {
       await this.stopCamera();
       return false;
     }
-    this.cameraTrack = await createLocalVideoTrack();
+    const options = this.preferences.cameraDeviceId
+      ? { deviceId: { exact: this.preferences.cameraDeviceId } }
+      : undefined;
+    this.cameraTrack = await createLocalVideoTrack(options);
     await this.room.localParticipant.publishTrack(this.cameraTrack);
     this._emitRemoteMediaUpdate();
     this._emit("camera_change", { enabled: true });

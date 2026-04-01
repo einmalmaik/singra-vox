@@ -30,6 +30,8 @@ next-env.d.ts
 dist/
 dist
 desktop/src-tauri/target/
+desktop/src-tauri/target-pttfix*/
+test_reports/
 
 # Environment files (comprehensive coverage)
 

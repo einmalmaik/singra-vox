@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  clearDesktopPttListener,
+  configureDesktopPttListener,
+  getDesktopRuntimeInfo,
   isDesktopApp,
   registerDesktopPttHotkey,
   unregisterDesktopPttHotkey,
@@ -26,6 +29,8 @@ export function useDesktopPtt({
   useEffect(() => {
     const engine = voiceEngineRef?.current;
     const normalizedShortcut = normalizePttShortcut(shortcut);
+    let desktopBackend = null;
+    let cancelled = false;
     if (engine) {
       engine.setPTT(Boolean(enabled && active));
       if (!enabled || !active) {
@@ -44,6 +49,7 @@ export function useDesktopPtt({
         error: "",
       });
       if (isDesktopApp()) {
+        void clearDesktopPttListener();
         void unregisterDesktopPttHotkey();
       }
       return undefined;
@@ -86,34 +92,89 @@ export function useDesktopPtt({
     window.addEventListener("keyup", keyUp, true);
 
     if (isDesktopApp()) {
-      void registerDesktopPttHotkey(normalizedShortcut, (payload) => {
-        if (!payload) {
+      void (async () => {
+        const runtimeInfo = await getDesktopRuntimeInfo();
+        if (cancelled) {
           return;
         }
-        const isPressed = payload.state === "Pressed";
+        if (runtimeInfo?.pttMode === "low-level-hook") {
+          desktopBackend = "low-level-hook";
+          try {
+            const registration = await configureDesktopPttListener(normalizedShortcut, true, (payload) => {
+              if (cancelled) {
+                return;
+              }
+              if (!payload) {
+                return;
+              }
+              const isPressed = payload.state === "Pressed";
+              voiceEngineRef?.current?.setPTTActive(isPressed);
+              setDebugState((current) => ({
+                ...current,
+                active: isPressed,
+                registered: true,
+                source: payload.source || "desktop-hook",
+                lastEventState: payload.state || "",
+                lastShortcut: normalizePttShortcut(payload.shortcut) || normalizedShortcut,
+                error: "",
+              }));
+            });
+            setDebugState((current) => ({
+              ...current,
+              registered: Boolean(registration?.registered),
+              source: "desktop-hook",
+              lastShortcut: normalizePttShortcut(registration?.shortcut) || normalizedShortcut,
+              error: registration?.lastError || "",
+            }));
+            return;
+          } catch (error) {
+            if (cancelled) {
+              return;
+            }
+            console.error("Desktop PTT low-level hook failed", error);
+            setDebugState((current) => ({
+              ...current,
+              registered: false,
+              error: error?.message || "Push-to-Talk shortcut could not be registered.",
+            }));
+            toast.error(error?.message || "Push-to-Talk shortcut could not be registered.");
+            return;
+          }
+        }
 
-        // Tauri emits canonical shortcut strings such as `control+KeyJ`. We
-        // only ever register one desktop PTT binding at a time, so the source
-        // shortcut is tracked for diagnostics but must not gate the mic update.
-        voiceEngineRef?.current?.setPTTActive(isPressed);
-        setDebugState((current) => ({
-          ...current,
-          active: isPressed,
-          registered: true,
-          source: "desktop",
-          lastEventState: payload.state || "",
-          lastShortcut: normalizePttShortcut(payload.shortcut) || normalizedShortcut,
-          error: "",
-        }));
-      }).catch((error) => {
-        console.error("Desktop PTT registration failed", error);
-        setDebugState((current) => ({
-          ...current,
-          registered: false,
-          error: error?.message || "Push-to-Talk shortcut could not be registered.",
-        }));
-        toast.error(error?.message || "Push-to-Talk shortcut could not be registered.");
-      });
+        desktopBackend = "global-shortcut";
+        await registerDesktopPttHotkey(normalizedShortcut, (payload) => {
+          if (cancelled || !payload) {
+            return;
+          }
+          const isPressed = payload.state === "Pressed";
+
+          // Tauri emits canonical shortcut strings such as `control+KeyJ`. We
+          // only ever register one desktop PTT binding at a time, so the source
+          // shortcut is tracked for diagnostics but must not gate the mic update.
+          voiceEngineRef?.current?.setPTTActive(isPressed);
+          setDebugState((current) => ({
+            ...current,
+            active: isPressed,
+            registered: true,
+            source: "desktop",
+            lastEventState: payload.state || "",
+            lastShortcut: normalizePttShortcut(payload.shortcut) || normalizedShortcut,
+            error: "",
+          }));
+        }).catch((error) => {
+          if (cancelled) {
+            return;
+          }
+          console.error("Desktop PTT registration failed", error);
+          setDebugState((current) => ({
+            ...current,
+            registered: false,
+            error: error?.message || "Push-to-Talk shortcut could not be registered.",
+          }));
+          toast.error(error?.message || "Push-to-Talk shortcut could not be registered.");
+        });
+      })();
     } else {
       setDebugState((current) => ({
         ...current,
@@ -122,6 +183,7 @@ export function useDesktopPtt({
     }
 
     return () => {
+      cancelled = true;
       window.removeEventListener("keydown", keyDown, true);
       window.removeEventListener("keyup", keyUp, true);
       engine?.setPTTActive(false);
@@ -130,7 +192,11 @@ export function useDesktopPtt({
         active: false,
       }));
       if (isDesktopApp()) {
-        void unregisterDesktopPttHotkey(normalizedShortcut).catch(() => {});
+        if (desktopBackend === "low-level-hook") {
+          void clearDesktopPttListener();
+        } else {
+          void unregisterDesktopPttHotkey(normalizedShortcut).catch(() => {});
+        }
       }
     };
   }, [active, enabled, shortcut, voiceEngineRef]);

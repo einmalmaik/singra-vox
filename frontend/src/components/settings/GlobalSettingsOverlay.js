@@ -10,6 +10,7 @@ import {
   SpeakerHigh,
   Trash,
   UserCircle,
+  VideoCamera,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { formatError } from "@/lib/api";
@@ -69,6 +70,7 @@ export default function GlobalSettingsOverlay({
   );
   const [audioInputs, setAudioInputs] = useState([]);
   const [audioOutputs, setAudioOutputs] = useState([]);
+  const [videoInputs, setVideoInputs] = useState([]);
   const [displayName, setDisplayName] = useState(user?.display_name || "");
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || "");
   const [status, setStatus] = useState(user?.status || "online");
@@ -141,10 +143,12 @@ export default function GlobalSettingsOverlay({
         if (cancelled) return;
         setAudioInputs(devices.filter((device) => device.kind === "audioinput"));
         setAudioOutputs(devices.filter((device) => device.kind === "audiooutput"));
+        setVideoInputs(devices.filter((device) => device.kind === "videoinput"));
       } catch {
         if (!cancelled) {
           setAudioInputs([]);
           setAudioOutputs([]);
+          setVideoInputs([]);
         }
       }
     })();
@@ -462,6 +466,25 @@ export default function GlobalSettingsOverlay({
                   <p className="text-xs text-[#71717A]">{t("settings.outputDeviceUnsupported")}</p>
                 )}
               </div>
+            </div>
+
+            <div className="mt-5 space-y-2">
+              <div className="flex items-center gap-2">
+                <VideoCamera size={16} className="text-[#71717A]" />
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.cameraDevice")}</Label>
+              </div>
+              <select
+                value={voicePreferences.cameraDeviceId || ""}
+                onChange={(event) => updateVoicePreferences({ cameraDeviceId: event.target.value })}
+                className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
+              >
+                <option value="">{t("settings.defaultCamera")}</option>
+                {videoInputs.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Camera ${device.deviceId.slice(0, 8)}`}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="mt-6 grid gap-5 md:grid-cols-2">
