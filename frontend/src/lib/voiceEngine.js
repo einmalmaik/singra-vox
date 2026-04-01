@@ -59,6 +59,7 @@ export class VoiceEngine {
     this.monitorDestination = null;
     this.monitorAudioElement = null;
     this.monitorStream = null;
+    this.mediaE2EEController = null;
 
     this.analysisSourceNode = null;
     this.analyserNode = null;
@@ -207,8 +208,9 @@ export class VoiceEngine {
 
     let encryptionOptions;
     if (tokenResponse.data.e2ee_required && this.runtimeConfig?.isDesktop) {
-      const { buildMediaE2EEOptions } = await import("@/lib/e2ee/media");
-      encryptionOptions = await buildMediaE2EEOptions(this.runtimeConfig, this.channelId);
+      const { createEncryptedMediaController } = await import("@/lib/e2ee/media");
+      this.mediaE2EEController = await createEncryptedMediaController(this.runtimeConfig, this.channelId);
+      encryptionOptions = this.mediaE2EEController.encryption;
     }
 
     this.room = new Room({
@@ -344,8 +346,16 @@ export class VoiceEngine {
       this.room.disconnect();
     }
     this.room = null;
+    this.mediaE2EEController = null;
     this._resetSpeakingState();
     this._emit("disconnected");
+  }
+
+  async syncEncryptedMediaParticipants(participantUserIds, reason = "membership") {
+    if (!this.mediaE2EEController) {
+      return { rotated: false, keyVersion: null, participantUserIds: [] };
+    }
+    return this.mediaE2EEController.syncParticipantSet(participantUserIds, reason);
   }
 
   async toggleCamera() {

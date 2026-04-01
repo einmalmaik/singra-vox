@@ -129,6 +129,14 @@ export default function ChannelSidebar({
     () => channelOrganization.topLevelItems.filter((channel) => channel.type === "category"),
     [channelOrganization],
   );
+  const currentVoiceParticipantIds = useMemo(() => {
+    if (!voiceChannel?.id) {
+      return [];
+    }
+    const nextChannel = channels.find((channel) => channel.id === voiceChannel.id);
+    const participantIds = (nextChannel?.voice_states || []).map((state) => state.user_id).filter(Boolean);
+    return [...new Set(participantIds)].sort();
+  }, [channels, voiceChannel?.id]);
   const activeDragChannel = activeDragId ? channelOrganization.byId[activeDragId] : null;
   const isDraggingChannel = Boolean(activeDragChannel);
   const canDropIntoCategory = activeDragChannel?.type && activeDragChannel.type !== "category";
@@ -191,6 +199,41 @@ export default function ChannelSidebar({
     setIsMuted(Boolean(selfState.is_muted));
     setIsDeafened(Boolean(selfState.is_deafened));
   }, [channels, user?.id, voiceChannel, voiceEngineRef]);
+
+  useEffect(() => {
+    if (!voiceChannel?.is_private || !voiceEngineRef?.current || currentVoiceParticipantIds.length === 0) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const participantSignature = currentVoiceParticipantIds.join(":");
+
+    const syncParticipants = async (reason) => {
+      try {
+        if (!cancelled) {
+          await voiceEngineRef.current.syncEncryptedMediaParticipants(currentVoiceParticipantIds, reason);
+        }
+      } catch (error) {
+        console.error("Encrypted media rotation failed", error);
+        if (!cancelled) {
+          toast.error(formatError(error?.response?.data?.detail || "Encrypted media keys could not be rotated."));
+        }
+      }
+    };
+
+    // Keep the LiveKit room key aligned with the current voice audience. This
+    // runs on membership changes and periodically during long-lived calls so a
+    // kicked or departed participant cannot continue using an old room key.
+    void syncParticipants("membership");
+    const intervalId = window.setInterval(() => {
+      void syncParticipants(`periodic-${participantSignature}`);
+    }, 10 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [currentVoiceParticipantIds, voiceChannel?.id, voiceChannel?.is_private, voiceEngineRef]);
 
   const updateLocalPreferences = useCallback(async (partialUpdate) => {
     const nextPreferences = saveVoicePreferences(user?.id, partialUpdate, { isDesktop });

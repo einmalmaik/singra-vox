@@ -25,6 +25,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.responses import Response as RawResponse
 from fastapi.middleware.cors import CORSMiddleware
 from livekit import api as livekit_api
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -471,6 +472,19 @@ async def list_channel_recipient_user_ids(channel: dict) -> List[str]:
     return list(allowed_users)
 
 
+async def list_active_voice_participant_user_ids(channel_id: str) -> List[str]:
+    """
+    Return the current voice participants for a channel as the authoritative
+    audience for encrypted media keys.
+
+    Media keys must only be distributable to devices that are actively present
+    in the voice channel. Otherwise a user who already left or got kicked could
+    keep a still-valid room key and continue to decrypt the SFU media stream.
+    """
+    states = await db.voice_states.find({"channel_id": channel_id}, {"_id": 0, "user_id": 1}).to_list(200)
+    return sorted({state["user_id"] for state in states if state.get("user_id")})
+
+
 async def ensure_private_channel_member_access(user_id: str, channel: dict) -> None:
     if not channel.get("is_private"):
         return
@@ -881,6 +895,7 @@ class EncryptedBlobContentInput(BaseModel):
 class EncryptedMediaKeyInput(BaseModel):
     sender_device_id: str
     key_version: str
+    participant_user_ids: List[str] = []
     key_envelopes: List[dict]
 
 class RoleCreateInput(BaseModel):
@@ -1553,6 +1568,9 @@ async def get_current_media_key(channel_id: str, request: Request):
     if not await check_permission(user["id"], channel["server_id"], "join_voice"):
         raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
+    active_voice_user_ids = await list_active_voice_participant_user_ids(channel_id)
+    if user["id"] not in active_voice_user_ids:
+        raise HTTPException(403, "You are not an active participant in this encrypted voice channel")
 
     media_key = await db.e2ee_media_keys.find_one(
         {"channel_id": channel_id},
@@ -1584,12 +1602,20 @@ async def rotate_media_key(channel_id: str, inp: EncryptedMediaKeyInput, request
         raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
 
+    participant_user_ids = sorted({participant_id for participant_id in (inp.participant_user_ids or []) if participant_id})
+    active_voice_user_ids = await list_active_voice_participant_user_ids(channel_id)
+    if participant_user_ids != active_voice_user_ids:
+        raise HTTPException(400, "Encrypted media rotation recipients must match the active voice participants")
+    if user["id"] not in participant_user_ids:
+        raise HTTPException(400, "Encrypted media rotation must include the rotating participant")
+
     record = {
         "id": new_id(),
         "channel_id": channel_id,
         "sender_user_id": user["id"],
         "sender_device_id": inp.sender_device_id,
         "key_version": inp.key_version,
+        "participant_user_ids": participant_user_ids,
         "key_envelopes": inp.key_envelopes,
         "created_at": now_utc(),
     }
