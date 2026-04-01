@@ -7,6 +7,8 @@ import ConnectPage from "@/pages/ConnectPage";
 import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
 import VerifyEmailPage from "@/pages/VerifyEmailPage";
+import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
+import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import SetupPage from "@/pages/SetupPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import InvitePage from "@/pages/InvitePage";
@@ -71,6 +73,8 @@ function AppRoutes() {
       <Route path="/connect" element={<Navigate to={user ? "/" : "/login"} replace />} />
       <Route path="/setup" element={<Navigate to={user ? "/onboarding" : "/login"} replace />} />
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />} />
+      <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPasswordPage />} />
       <Route
         path="/register"
         element={

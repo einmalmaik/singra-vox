@@ -23,13 +23,6 @@ import { Switch } from "@/components/ui/switch";
 import { loadVoicePreferences, saveVoicePreferences } from "@/lib/voicePreferences";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 
-const STATUS_OPTIONS = [
-  { value: "online", label: "Online" },
-  { value: "away", label: "Away" },
-  { value: "dnd", label: "Do Not Disturb" },
-  { value: "offline", label: "Invisible" },
-];
-
 const SECTION_CONFIG = [
   { id: "voice", icon: <SlidersHorizontal size={16} /> },
   { id: "account", icon: <UserCircle size={16} /> },
@@ -129,11 +122,11 @@ export default function GlobalSettingsOverlay({
       event.preventDefault();
       updateVoicePreferences({ pttKey: event.code, pttEnabled: true });
       setPttListening(false);
-      toast.success(`PTT key set to ${event.code}`);
+      toast.success(t("settings.pttKeySet", { key: event.code }));
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [pttListening, updateVoicePreferences]);
+  }, [pttListening, t, updateVoicePreferences]);
 
   const activeVoiceChannel = useMemo(() => {
     const activeChannelId = voiceEngineRef?.current?.channelId;
@@ -145,6 +138,13 @@ export default function GlobalSettingsOverlay({
     { ...SECTION_CONFIG[0], label: t("settings.voiceVideo") },
     { ...SECTION_CONFIG[1], label: t("settings.account") },
     { ...SECTION_CONFIG[2], label: t("settings.privacy") },
+  ]), [t]);
+
+  const statusOptions = useMemo(() => ([
+    { value: "online", label: t("settings.statusOnline") },
+    { value: "away", label: t("settings.statusAway") },
+    { value: "dnd", label: t("settings.statusDnd") },
+    { value: "offline", label: t("settings.statusInvisible") },
   ]), [t]);
 
   const remoteParticipants = useMemo(
@@ -217,7 +217,7 @@ export default function GlobalSettingsOverlay({
         status,
       });
       onUserUpdated?.(res.data);
-      toast.success("Account updated");
+      toast.success(t("settings.accountUpdated"));
     } catch (err) {
       toast.error(formatError(err?.response?.data?.detail));
     } finally {
@@ -236,7 +236,7 @@ export default function GlobalSettingsOverlay({
       anchor.download = `singravox-export-${user?.username}-${new Date().toISOString().slice(0, 10)}.json`;
       anchor.click();
       URL.revokeObjectURL(url);
-      toast.success("Data exported successfully");
+      toast.success(t("settings.exportSuccess"));
     } catch (err) {
       toast.error(formatError(err?.response?.data?.detail));
     } finally {
@@ -246,14 +246,14 @@ export default function GlobalSettingsOverlay({
 
   const handleDelete = async () => {
     if (confirmDelete !== user?.username) {
-      toast.error("Username doesn't match");
+      toast.error(t("settings.usernameMismatch"));
       return;
     }
 
     setDeleting(true);
     try {
       await api.delete("/users/me");
-      toast.success("Account deleted");
+      toast.success(t("settings.accountDeleted"));
       onClose?.();
       setTimeout(() => onLogout?.(), 600);
     } catch (err) {
@@ -265,11 +265,11 @@ export default function GlobalSettingsOverlay({
 
   const changePassword = async () => {
     if (newPassword.length < 8) {
-      toast.error("New password must be at least 8 characters");
+      toast.error(t("auth.passwordMinLengthError"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error("New password confirmation does not match");
+      toast.error(t("auth.passwordsDoNotMatch"));
       return;
     }
 
@@ -282,7 +282,7 @@ export default function GlobalSettingsOverlay({
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      toast.success("Password changed");
+      toast.success(t("settings.passwordChanged"));
     } catch (err) {
       toast.error(formatError(err?.response?.data?.detail));
     } finally {
@@ -314,7 +314,7 @@ export default function GlobalSettingsOverlay({
   return (
     <SettingsOverlayShell
       open={open}
-      title="User Settings"
+      title={t("settings.userSettingsTitle")}
       sections={sectionConfig}
       activeSection={activeSection}
       onSectionChange={setActiveSection}
@@ -324,19 +324,19 @@ export default function GlobalSettingsOverlay({
         <div className="space-y-8" data-testid="voice-settings-panel">
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
             <div className="mb-4">
-              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Voice & Video</h3>
-              <p className="mt-1 text-sm text-[#71717A]">Configure your microphone, speakers and local voice behavior.</p>
+              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.voiceVideo")}</h3>
+              <p className="mt-1 text-sm text-[#71717A]">{t("settings.voiceVideoDescription")}</p>
             </div>
 
             <div className="grid gap-5 md:grid-cols-2">
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Input Device</Label>
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.inputDevice")}</Label>
                 <select
                   value={voicePreferences.inputDeviceId || ""}
                   onChange={(event) => updateVoicePreferences({ inputDeviceId: event.target.value })}
                   className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
                 >
-                  <option value="">Default microphone</option>
+                  <option value="">{t("settings.defaultMicrophone")}</option>
                   {audioInputs.map((device) => (
                     <option key={device.deviceId} value={device.deviceId}>
                       {device.label || `Microphone ${device.deviceId.slice(0, 8)}`}
@@ -346,14 +346,14 @@ export default function GlobalSettingsOverlay({
               </div>
 
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Output Device</Label>
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.outputDevice")}</Label>
                 <select
                   value={voicePreferences.outputDeviceId || ""}
                   onChange={(event) => updateVoicePreferences({ outputDeviceId: event.target.value })}
                   disabled={!supportOutputDeviceSelection()}
                   className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white disabled:opacity-50"
                 >
-                  <option value="">Default output</option>
+                  <option value="">{t("settings.defaultOutput")}</option>
                   {audioOutputs.map((device) => (
                     <option key={device.deviceId} value={device.deviceId}>
                       {device.label || `Output ${device.deviceId.slice(0, 8)}`}
@@ -361,7 +361,7 @@ export default function GlobalSettingsOverlay({
                   ))}
                 </select>
                 {!supportOutputDeviceSelection() && (
-                  <p className="text-xs text-[#71717A]">Output-device switching is not supported by this browser.</p>
+                  <p className="text-xs text-[#71717A]">{t("settings.outputDeviceUnsupported")}</p>
                 )}
               </div>
             </div>
@@ -369,7 +369,7 @@ export default function GlobalSettingsOverlay({
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Input Volume</Label>
+                  <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.inputVolume")}</Label>
                   <span className="text-xs text-[#A1A1AA]">{voicePreferences.inputVolume}%</span>
                 </div>
                 <Slider
@@ -383,7 +383,7 @@ export default function GlobalSettingsOverlay({
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Output Volume</Label>
+                  <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.outputVolume")}</Label>
                   <span className="text-xs text-[#A1A1AA]">{voicePreferences.outputVolume}%</span>
                 </div>
                 <Slider
@@ -399,19 +399,19 @@ export default function GlobalSettingsOverlay({
 
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
             <div className="mb-4">
-              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Push-to-Talk & Audio Processing</h3>
+              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.pushToTalkAndAudioProcessing")}</h3>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-white">Push-to-Talk</p>
-                    <p className="text-xs text-[#71717A]">
-                      {isDesktop
-                        ? "Desktop uses the in-app keybind path for push-to-talk."
-                        : "Disabled in web because browsers do not provide a reliable global hotkey and focus path for push-to-talk."}
-                    </p>
+                      <p className="text-sm font-medium text-white">{t("settings.pushToTalk")}</p>
+                      <p className="text-xs text-[#71717A]">
+                        {isDesktop
+                          ? t("settings.pushToTalkDesktopHelp")
+                          : t("settings.pushToTalkWebDisabled")}
+                      </p>
                   </div>
                   <Switch
                     checked={voicePreferences.pttEnabled}
@@ -426,15 +426,15 @@ export default function GlobalSettingsOverlay({
                   disabled={!isDesktop}
                 >
                   <Keyboard size={14} className="mr-2" />
-                  {pttListening ? "Press any key..." : `Key: ${voicePreferences.pttKey}`}
+                  {pttListening ? t("settings.pressAnyKey") : t("settings.keyLabel", { key: voicePreferences.pttKey })}
                 </Button>
               </div>
 
               <div className="space-y-3 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
                 {[
-                  ["noiseSuppression", "Noise Suppression"],
-                  ["echoCancellation", "Echo Cancellation"],
-                  ["autoGainControl", "Auto Gain Control"],
+                  ["noiseSuppression", t("settings.noiseSuppression")],
+                  ["echoCancellation", t("settings.echoCancellation")],
+                  ["autoGainControl", t("settings.autoGainControl")],
                 ].map(([key, label]) => (
                   <div key={key} className="flex items-center justify-between">
                     <span className="text-sm text-white">{label}</span>
@@ -451,15 +451,15 @@ export default function GlobalSettingsOverlay({
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
             <div className="mb-4 flex items-center gap-2">
               <Microphone size={18} className="text-[#6366F1]" />
-              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>Mic Test & Sensitivity</h3>
+              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.micTestAndSensitivity")}</h3>
             </div>
             <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
               <div className="space-y-5 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium text-white">Mic Test</p>
+                    <p className="text-sm font-medium text-white">{t("settings.micTest")}</p>
                     <p className="mt-1 text-xs text-[#71717A]">
-                      Hear your own microphone locally. While active, your live voice transmission is muted so other users do not hear the test.
+                      {t("settings.micTestDescription")}
                     </p>
                   </div>
                   <Switch checked={voicePreferences.micTestEnabled} onCheckedChange={toggleMicTest} />
@@ -467,7 +467,7 @@ export default function GlobalSettingsOverlay({
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">
-                    <span>Input Level</span>
+                    <span>{t("settings.inputLevel")}</span>
                     <span>{Math.round(inputLevel * 100)}%</span>
                   </div>
                   <div className="relative h-3 overflow-hidden rounded-full bg-[#18181B]">
@@ -486,8 +486,8 @@ export default function GlobalSettingsOverlay({
                   </div>
                   <p className="text-xs text-[#71717A]">
                     {voicePreferences.autoInputSensitivity
-                      ? "Sensitivity is adjusted automatically from the live background noise floor."
-                      : "Move the threshold until your voice crosses the orange marker without idle noise doing so."}
+                      ? t("settings.autoSensitivityHelp")
+                      : t("settings.manualSensitivityHelp")}
                   </p>
                 </div>
               </div>
@@ -495,8 +495,8 @@ export default function GlobalSettingsOverlay({
               <div className="space-y-4 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-white">Automatically determine input sensitivity</p>
-                    <p className="text-xs text-[#71717A]">Recommended for changing rooms and background noise.</p>
+                    <p className="text-sm font-medium text-white">{t("settings.autoSensitivity")}</p>
+                    <p className="text-xs text-[#71717A]">{t("settings.autoSensitivityDescription")}</p>
                   </div>
                   <Switch
                     checked={voicePreferences.autoInputSensitivity}
@@ -506,7 +506,7 @@ export default function GlobalSettingsOverlay({
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Input Sensitivity</Label>
+                    <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.inputSensitivity")}</Label>
                     <span className="text-xs text-[#A1A1AA]">{voicePreferences.inputSensitivity}%</span>
                   </div>
                   <Slider
@@ -518,7 +518,7 @@ export default function GlobalSettingsOverlay({
                     onValueChange={([value]) => updateVoicePreferences({ inputSensitivity: value })}
                   />
                   <p className="text-xs text-[#71717A]">
-                    Lower values open the mic more easily. Higher values require a stronger input signal.
+                    {t("settings.inputSensitivityDescription")}
                   </p>
                 </div>
               </div>
@@ -533,17 +533,17 @@ export default function GlobalSettingsOverlay({
               <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.profile")}</h3>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Display Name</Label>
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.displayName")}</Label>
                 <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Avatar URL</Label>
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.avatarUrl")}</Label>
                 <Input value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Status</Label>
+                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.status")}</Label>
                 <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white">
-                  {STATUS_OPTIONS.map((option) => (
+                  {statusOptions.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
@@ -621,9 +621,9 @@ export default function GlobalSettingsOverlay({
               <Export size={20} className="mt-0.5 text-[#6366F1]" />
               <div>
                 <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.exportData")}</h3>
-                <p className="mt-1 text-sm text-[#71717A]">Download profile, memberships, messages and DM data as JSON.</p>
+                <p className="mt-1 text-sm text-[#71717A]">{t("settings.exportDescription")}</p>
                 <Button onClick={handleExport} disabled={exporting} className="mt-4 bg-[#6366F1] hover:bg-[#4F46E5]">
-                  {exporting ? "Exporting..." : "Download Export"}
+                  {exporting ? t("settings.exporting") : t("settings.downloadExport")}
                 </Button>
               </div>
             </div>
@@ -634,11 +634,11 @@ export default function GlobalSettingsOverlay({
               <Trash size={20} className="mt-0.5 text-[#EF4444]" />
               <div className="flex-1">
                 <h3 className="text-lg font-bold text-[#EF4444]" style={{ fontFamily: "Manrope" }}>{t("settings.deleteAccount")}</h3>
-                <p className="mt-1 text-sm text-[#71717A]">Type your username to confirm permanent deletion.</p>
+                <p className="mt-1 text-sm text-[#71717A]">{t("settings.deleteDescription")}</p>
                 <Input
                   value={confirmDelete}
                   onChange={(event) => setConfirmDelete(event.target.value)}
-                  placeholder={user?.username || "username"}
+                  placeholder={user?.username || t("auth.usernamePlaceholder")}
                   className="mt-4 bg-[#0A0A0A] border-[#27272A] text-white"
                 />
                 <Button
@@ -646,7 +646,7 @@ export default function GlobalSettingsOverlay({
                   disabled={deleting || confirmDelete !== user?.username}
                   className="mt-4 bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40"
                 >
-                  {deleting ? "Deleting..." : "Delete Account Permanently"}
+                  {deleting ? t("settings.deleting") : t("settings.deletePermanently")}
                 </Button>
               </div>
             </div>

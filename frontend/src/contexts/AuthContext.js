@@ -156,6 +156,20 @@ export function AuthProvider({ children }) {
     return res.data;
   }, []);
 
+  const forgotPassword = useCallback(async (email) => {
+    const res = await api.post("/auth/forgot-password", { email });
+    return res.data;
+  }, []);
+
+  const resetPassword = useCallback(async (email, code, newPassword) => {
+    const res = await api.post("/auth/reset-password", {
+      email,
+      code,
+      new_password: newPassword,
+    });
+    return res.data;
+  }, []);
+
   const bootstrap = useCallback(async (payload) => {
     const res = await api.post("/setup/bootstrap", payload);
     await refreshSetupStatus();
@@ -179,10 +193,24 @@ export function AuthProvider({ children }) {
     register,
     verifyEmail,
     resendVerification,
+    forgotPassword,
+    resetPassword,
     bootstrap,
     logout,
     setUser,
-  }), [bootstrap, loading, login, logout, register, resendVerification, token, user, verifyEmail]);
+  }), [
+    bootstrap,
+    forgotPassword,
+    loading,
+    login,
+    logout,
+    register,
+    resendVerification,
+    resetPassword,
+    token,
+    user,
+    verifyEmail,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

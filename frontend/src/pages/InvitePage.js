@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { ArrowSquareOut, DesktopTower, ShieldCheck, SignIn, UserPlus } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { formatError } from "@/lib/api";
@@ -20,6 +21,7 @@ import {
 import { isDesktopApp } from "@/lib/desktop";
 
 export default function InvitePage() {
+  const { t } = useTranslation();
   const { code } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -59,7 +61,7 @@ export default function InvitePage() {
       const response = await api.post(`/invites/${code}/accept`);
       clearPendingInvite();
       rememberPreferredServer(response.data.server_id);
-      toast.success("Joined community");
+      toast.success(t("invite.joinedCommunity"));
       navigate("/", { replace: true });
     } catch (err) {
       setError(formatError(err.response?.data?.detail));
@@ -67,7 +69,7 @@ export default function InvitePage() {
     } finally {
       setAccepting(false);
     }
-  }, [code, navigate]);
+  }, [code, navigate, t]);
 
   useEffect(() => {
     if (!code) return;
@@ -106,26 +108,26 @@ export default function InvitePage() {
         {loading ? (
           <div className="flex flex-col items-center gap-4 py-10">
             <div className="h-8 w-8 rounded-full border-2 border-[#6366F1] border-t-transparent animate-spin" />
-            <p className="text-sm text-[#A1A1AA]">Loading invite…</p>
+            <p className="text-sm text-[#A1A1AA]">{t("invite.loading")}</p>
           </div>
         ) : error && !inviteInfo ? (
           <div className="mt-6 text-center">
             <h2 className="text-2xl font-bold text-white" style={{ fontFamily: "Manrope" }}>
-              Invite unavailable
+              {t("invite.unavailable")}
             </h2>
             <p className="mt-3 text-sm text-[#A1A1AA]">{error}</p>
             <Button
               onClick={() => navigate("/login")}
               className="mt-6 w-full bg-[#27272A] hover:bg-[#3F3F46] text-white"
             >
-              Return to Sign In
-            </Button>
+                {t("invite.returnToSignIn")}
+              </Button>
           </div>
         ) : inviteInfo ? (
           <div className="mt-5 text-center">
-            <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#71717A]">Invite</p>
+            <p className="text-xs font-bold uppercase tracking-[0.3em] text-[#71717A]">{t("invite.invite")}</p>
             <h2 className="mt-3 text-3xl font-bold text-white" style={{ fontFamily: "Manrope" }}>
-              Join {inviteInfo.server?.name}
+              {t("invite.joinServer", { server: inviteInfo.server?.name })}
             </h2>
             <p className="mt-2 text-sm text-[#A1A1AA]">
               {describeInviteUsage(inviteInfo.invite?.max_uses, inviteInfo.invite?.uses)} · {describeInviteExpiry(inviteInfo.invite?.expires_at)}
@@ -135,17 +137,17 @@ export default function InvitePage() {
               <div className="mt-6 rounded-xl border border-[#27272A] bg-[#0A0A0A] px-4 py-4 text-left">
                 <div className="flex items-center gap-2 text-sm font-semibold text-white">
                   <DesktopTower size={16} className="text-[#A5B4FC]" />
-                  Open in desktop app
+                  {t("invite.openDesktop")}
                 </div>
                 <p className="mt-2 text-xs text-[#71717A]">
-                  If Singra Vox is installed, the browser should hand this invite off automatically. You can also retry manually.
+                  {t("invite.openDesktopHelp")}
                 </p>
                 <Button
                   onClick={() => attemptDesktopInviteLaunch(inviteLink)}
                   className="mt-4 w-full bg-[#27272A] hover:bg-[#3F3F46] text-white"
                 >
                   <ArrowSquareOut size={14} className="mr-2" />
-                  Open Desktop App
+                  {t("invite.openDesktopAction")}
                 </Button>
               </div>
             )}
@@ -163,14 +165,14 @@ export default function InvitePage() {
                   disabled={accepting}
                   className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white"
                 >
-                  {accepting ? "Joining..." : "Join Community"}
+                  {accepting ? t("invite.joining") : t("invite.joinCommunity")}
                 </Button>
                 <Button
                   onClick={() => navigate("/", { replace: true })}
                   variant="outline"
                   className="w-full border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]"
                 >
-                  Not now
+                  {t("common.notNow")}
                 </Button>
               </div>
             ) : (
@@ -180,7 +182,7 @@ export default function InvitePage() {
                   className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white"
                 >
                   <SignIn size={14} className="mr-2" />
-                  Sign In to Join
+                  {t("invite.signInToJoin")}
                 </Button>
                 {setupStatus?.allow_open_signup ? (
                   <Button
@@ -189,7 +191,7 @@ export default function InvitePage() {
                     className="w-full border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]"
                   >
                     <UserPlus size={14} className="mr-2" />
-                    Create Account and Join
+                    {t("invite.createAccountAndJoin")}
                   </Button>
                 ) : null}
               </div>

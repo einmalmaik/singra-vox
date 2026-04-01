@@ -43,19 +43,23 @@ def load_mail_settings() -> MailSettings:
     )
 
 
-def render_verification_email(
+def _render_code_email(
     *,
     app_name: str,
     instance_name: str,
+    title: str,
+    intro: str,
     code: str,
     expires_minutes: int,
+    outro: str,
 ) -> Tuple[str, str, str]:
-    subject = f"{app_name}: Verify your email"
+    subject = f"{app_name}: {title}"
     text_body = (
-        f"Verify your email for {instance_name or app_name}\n\n"
-        f"Your verification code is: {code}\n\n"
+        f"{title} for {instance_name or app_name}\n\n"
+        f"{intro}\n\n"
+        f"Your code is: {code}\n\n"
         f"This code expires in {expires_minutes} minutes.\n"
-        "If you did not create this account, you can ignore this message."
+        f"{outro}"
     )
     html_body = f"""
     <html>
@@ -64,9 +68,9 @@ def render_verification_email(
           <p style="margin: 0 0 12px; color: #A1A1AA; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;">
             {app_name}
           </p>
-          <h1 style="margin: 0 0 12px; font-size: 24px;">Verify your email</h1>
+          <h1 style="margin: 0 0 12px; font-size: 24px;">{title}</h1>
           <p style="margin: 0 0 18px; color: #D4D4D8; line-height: 1.6;">
-            Use the following code to finish setting up your account for
+            {intro}
             <strong>{instance_name or app_name}</strong>.
           </p>
           <div style="margin: 0 0 18px; padding: 18px; border-radius: 14px; background: #18181B; border: 1px solid #27272A; text-align: center;">
@@ -74,13 +78,49 @@ def render_verification_email(
           </div>
           <p style="margin: 0 0 8px; color: #A1A1AA;">This code expires in {expires_minutes} minutes.</p>
           <p style="margin: 0; color: #71717A; font-size: 13px;">
-            If you did not create this account, you can ignore this message.
+            {outro}
           </p>
         </div>
       </body>
     </html>
     """.strip()
     return subject, text_body, html_body
+
+
+def render_verification_email(
+    *,
+    app_name: str,
+    instance_name: str,
+    code: str,
+    expires_minutes: int,
+) -> Tuple[str, str, str]:
+    return _render_code_email(
+        app_name=app_name,
+        instance_name=instance_name,
+        title="Verify your email",
+        intro="Use the following code to finish setting up your account for",
+        code=code,
+        expires_minutes=expires_minutes,
+        outro="If you did not create this account, you can ignore this message.",
+    )
+
+
+def render_password_reset_email(
+    *,
+    app_name: str,
+    instance_name: str,
+    code: str,
+    expires_minutes: int,
+) -> Tuple[str, str, str]:
+    return _render_code_email(
+        app_name=app_name,
+        instance_name=instance_name,
+        title="Reset your password",
+        intro="Use the following code to reset the password for",
+        code=code,
+        expires_minutes=expires_minutes,
+        outro="If you did not request a password reset, you can ignore this message.",
+    )
 
 
 def _deliver_message(message: EmailMessage, settings: MailSettings) -> None:

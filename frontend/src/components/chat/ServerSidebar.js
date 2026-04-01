@@ -37,7 +37,7 @@ export default function ServerSidebar({
     setCreating(true);
     try {
       const res = await api.post("/servers", { name: name.trim() });
-      toast.success("Server created!");
+      toast.success(t("server.serverCreated"));
       setShowCreate(false);
       setName("");
       onRefreshServers();
@@ -138,7 +138,7 @@ export default function ServerSidebar({
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="My Server"
+                    placeholder={t("server.serverNamePlaceholder")}
                     data-testid="new-server-name-input"
                     className="bg-[#121212] border-[#27272A] focus:border-[#6366F1] text-white"
                   />
@@ -149,7 +149,7 @@ export default function ServerSidebar({
                   data-testid="create-server-submit"
                   className="w-full bg-[#6366F1] hover:bg-[#4F46E5]"
                 >
-                  {creating ? "Creating..." : t("server.create")}
+                  {creating ? t("server.creating") : t("server.create")}
                 </Button>
               </form>
             </DialogContent>

@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from typing import Dict, List, Optional
-from app.emailing import render_verification_email, send_email
+from app.emailing import render_password_reset_email, render_verification_email, send_email
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
@@ -66,6 +66,8 @@ ADMIN_ROLE = "admin"
 USER_ROLE = "user"
 EMAIL_VERIFICATION_TTL_MINUTES = int(os.environ.get("EMAIL_VERIFICATION_TTL_MINUTES", "15"))
 EMAIL_VERIFICATION_PURPOSE = "verify_email"
+PASSWORD_RESET_TTL_MINUTES = int(os.environ.get("PASSWORD_RESET_TTL_MINUTES", "15"))
+PASSWORD_RESET_PURPOSE = "password_reset"
 EMAIL_VERIFICATION_CODE_LENGTH = 6
 
 client = AsyncIOMotorClient(mongo_url)
@@ -260,21 +262,45 @@ def email_verification_required_detail(email: str) -> dict:
 
 
 async def issue_email_verification(user: dict) -> dict:
+    return await issue_auth_code(
+        user=user,
+        purpose=EMAIL_VERIFICATION_PURPOSE,
+        expires_minutes=EMAIL_VERIFICATION_TTL_MINUTES,
+        email_renderer=render_verification_email,
+    )
+
+
+async def issue_password_reset(user: dict) -> dict:
+    return await issue_auth_code(
+        user=user,
+        purpose=PASSWORD_RESET_PURPOSE,
+        expires_minutes=PASSWORD_RESET_TTL_MINUTES,
+        email_renderer=render_password_reset_email,
+    )
+
+
+async def issue_auth_code(
+    *,
+    user: dict,
+    purpose: str,
+    expires_minutes: int,
+    email_renderer,
+) -> dict:
     code = generate_numeric_code()
-    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=EMAIL_VERIFICATION_TTL_MINUTES)).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)).isoformat()
     email = user["email"].lower().strip()
     await db.email_verifications.delete_many({
         "user_id": user["id"],
-        "purpose": EMAIL_VERIFICATION_PURPOSE,
+        "purpose": purpose,
     })
     await db.email_verifications.insert_one({
         "id": new_id(),
         "user_id": user["id"],
         "email": email,
-        "purpose": EMAIL_VERIFICATION_PURPOSE,
+        "purpose": purpose,
         "code_hash": hash_verification_code(
             email=email,
-            purpose=EMAIL_VERIFICATION_PURPOSE,
+            purpose=purpose,
             code=code,
         ),
         "expires_at": expires_at,
@@ -282,11 +308,11 @@ async def issue_email_verification(user: dict) -> dict:
     })
 
     settings = await get_instance_settings()
-    subject, text_body, html_body = render_verification_email(
+    subject, text_body, html_body = email_renderer(
         app_name="Singra Vox",
         instance_name=settings.get("instance_name") or "Singra Vox",
         code=code,
-        expires_minutes=EMAIL_VERIFICATION_TTL_MINUTES,
+        expires_minutes=expires_minutes,
     )
     await send_email(
         to_email=email,
@@ -563,6 +589,16 @@ class VerifyEmailInput(BaseModel):
 
 class ResendVerificationInput(BaseModel):
     email: str
+
+
+class ForgotPasswordInput(BaseModel):
+    email: str
+
+
+class ResetPasswordInput(BaseModel):
+    email: str
+    code: str = Field(min_length=4, max_length=8)
+    new_password: str = Field(min_length=8, max_length=256)
 
 
 class PasswordChangeInput(BaseModel):
@@ -877,6 +913,62 @@ async def resend_verification(inp: ResendVerificationInput):
         "email": verification_state["email"],
         "expires_at": verification_state["expires_at"],
     }
+
+
+@auth_r.post("/forgot-password")
+async def forgot_password(inp: ForgotPasswordInput):
+    email = inp.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user or not user.get("email_verified", True):
+        return {"ok": True}
+
+    try:
+        reset_state = await issue_password_reset(user)
+    except Exception:
+        logger.exception("Failed to issue password reset for %s", email)
+        return {"ok": True}
+
+    return {
+        "ok": True,
+        "email": reset_state["email"],
+        "expires_at": reset_state["expires_at"],
+    }
+
+
+@auth_r.post("/reset-password")
+async def reset_password(inp: ResetPasswordInput):
+    email = inp.email.lower().strip()
+    user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not user:
+        raise HTTPException(400, "Invalid reset code")
+
+    reset_request = await db.email_verifications.find_one(
+        {"user_id": user["id"], "purpose": PASSWORD_RESET_PURPOSE},
+        {"_id": 0},
+    )
+    if not reset_request:
+        raise HTTPException(400, "No reset code available")
+    if datetime.fromisoformat(reset_request["expires_at"]) <= datetime.now(timezone.utc):
+        await db.email_verifications.delete_one({"id": reset_request["id"]})
+        raise HTTPException(410, "Reset code expired")
+
+    expected_hash = hash_verification_code(
+        email=email,
+        purpose=PASSWORD_RESET_PURPOSE,
+        code=inp.code.strip(),
+    )
+    if expected_hash != reset_request.get("code_hash"):
+        raise HTTPException(400, "Invalid reset code")
+
+    if verify_pw(inp.new_password, user["password_hash"]):
+        raise HTTPException(400, "Choose a different password")
+
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_pw(inp.new_password), "last_seen": now_utc()}},
+    )
+    await db.email_verifications.delete_many({"user_id": user["id"], "purpose": PASSWORD_RESET_PURPOSE})
+    return {"ok": True}
 
 @auth_r.post("/logout")
 async def logout(request: Request, response: Response):
@@ -2080,6 +2172,7 @@ async def change_password(inp: PasswordChangeInput, request: Request):
         {"id": user["id"]},
         {"$set": {"password_hash": hash_pw(inp.new_password)}},
     )
+    await db.email_verifications.delete_many({"user_id": user["id"], "purpose": PASSWORD_RESET_PURPOSE})
     return {"ok": True}
 
 @users_r.post("/me/public-key")
@@ -2277,7 +2370,7 @@ async def startup():
         f.write("# Singra Vox Setup\n\n")
         f.write("- Open `/setup` on the instance after the first start.\n")
         f.write("- The first admin is created through the setup wizard.\n\n")
-        f.write("## Auth Endpoints\n- POST /api/setup/bootstrap\n- POST /api/auth/register\n- POST /api/auth/verify-email\n- POST /api/auth/resend-verification\n- POST /api/auth/login\n- POST /api/auth/logout\n- GET /api/auth/me\n- POST /api/auth/refresh\n")
+        f.write("## Auth Endpoints\n- POST /api/setup/bootstrap\n- POST /api/auth/register\n- POST /api/auth/verify-email\n- POST /api/auth/resend-verification\n- POST /api/auth/forgot-password\n- POST /api/auth/reset-password\n- POST /api/auth/login\n- POST /api/auth/logout\n- GET /api/auth/me\n- POST /api/auth/refresh\n")
 
     logger.info("Singra Vox backend started")
 

@@ -39,6 +39,7 @@ services:
       SMTP_USE_TLS: "${SMTP_USE_TLS:-false}"
       SMTP_USE_SSL: "${SMTP_USE_SSL:-false}"
       EMAIL_VERIFICATION_TTL_MINUTES: "${EMAIL_VERIFICATION_TTL_MINUTES:-15}"
+      PASSWORD_RESET_TTL_MINUTES: "${PASSWORD_RESET_TTL_MINUTES:-15}"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
       interval: 15s

@@ -28,7 +28,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
+    if (password.length < 8) { setError(t("auth.passwordMinLengthError")); return; }
     setLoading(true);
     try {
       const result = await register(email, username, password, displayName || username);
@@ -43,7 +43,7 @@ export default function RegisterPage() {
           const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
           clearPendingInvite();
           rememberPreferredServer(inviteResponse.data.server_id);
-          toast.success("Joined community");
+          toast.success(t("invite.joinedCommunity"));
           navigate("/", { replace: true });
           return;
         } catch (inviteError) {
@@ -71,7 +71,7 @@ export default function RegisterPage() {
 
         <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>{t("auth.createAccount")}</h2>
         <p className="text-[#71717A] text-sm mb-8">
-          {t("auth.registerSubtitle", { instance: setupStatus?.instance_name || "this privacy-first communication platform" })}
+          {t("auth.registerSubtitle", { instance: setupStatus?.instance_name || t("auth.defaultInstanceName") })}
         </p>
         {pendingInvite?.code ? (
           <div className="mb-6 rounded-md border border-[#27272A] bg-[#121212] px-4 py-3 text-sm text-[#D4D4D8]">
@@ -89,7 +89,7 @@ export default function RegisterPage() {
             <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.email")}</Label>
             <Input
               type="email" value={email} onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com" required data-testid="register-email-input"
+              placeholder={t("auth.emailPlaceholder")} required data-testid="register-email-input"
               className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
             />
           </div>
@@ -97,7 +97,7 @@ export default function RegisterPage() {
             <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.username")}</Label>
             <Input
               value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-              placeholder="username" required data-testid="register-username-input"
+              placeholder={t("auth.usernamePlaceholder")} required data-testid="register-username-input"
               className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
             />
           </div>
@@ -105,7 +105,7 @@ export default function RegisterPage() {
             <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.displayName")}</Label>
             <Input
               value={displayName} onChange={e => setDisplayName(e.target.value)}
-              placeholder="How others see you" data-testid="register-display-input"
+              placeholder={t("auth.displayNamePlaceholder")} data-testid="register-display-input"
               className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
             />
           </div>
@@ -113,7 +113,7 @@ export default function RegisterPage() {
             <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.password")}</Label>
             <Input
               type="password" value={password} onChange={e => setPassword(e.target.value)}
-              placeholder="Min. 8 characters" required data-testid="register-password-input"
+              placeholder={t("auth.passwordMinLength")} required data-testid="register-password-input"
               className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
             />
           </div>

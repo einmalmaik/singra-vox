@@ -77,7 +77,7 @@ export default function LoginPage() {
             </h1>
           </div>
           <p className="text-[#A1A1AA] text-lg max-w-md">
-            Privacy-first communication. Self-hosted. No telemetry. No tracking. Your data, your rules.
+            {t("auth.heroSubtitle")}
           </p>
         </div>
       </div>
@@ -91,7 +91,7 @@ export default function LoginPage() {
 
           <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>{t("auth.welcomeBack")}</h2>
           <p className="text-[#71717A] text-sm mb-8">
-            {t("auth.signInSubtitle", { instance: setupStatus?.instance_name || "your self-hosted instance" })}
+            {t("auth.signInSubtitle", { instance: setupStatus?.instance_name || t("setup.selfHostedInstance") })}
           </p>
           {pendingInvite?.code ? (
             <div className="mb-6 rounded-md border border-[#27272A] bg-[#121212] px-4 py-3 text-sm text-[#D4D4D8]">
@@ -109,7 +109,7 @@ export default function LoginPage() {
               <Label htmlFor="email" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.email")}</Label>
               <Input
                 id="email" type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="you@example.com" required data-testid="login-email-input"
+                placeholder={t("auth.emailPlaceholder")} required data-testid="login-email-input"
                 className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] text-white placeholder:text-[#52525B]"
               />
             </div>
@@ -117,9 +117,14 @@ export default function LoginPage() {
               <Label htmlFor="password" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.password")}</Label>
               <Input
                 id="password" type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="Enter your password" required data-testid="login-password-input"
+                placeholder={t("auth.passwordPlaceholder")} required data-testid="login-password-input"
                 className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] text-white placeholder:text-[#52525B]"
               />
+            </div>
+            <div className="flex justify-end">
+              <Link to="/forgot-password" className="text-sm text-[#6366F1] hover:text-[#4F46E5]">
+                {t("auth.forgotPassword")}
+              </Link>
             </div>
             <Button
               type="submit" disabled={loading} data-testid="login-submit-button"
