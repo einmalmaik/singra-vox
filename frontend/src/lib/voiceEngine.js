@@ -27,19 +27,6 @@ function computeRms(dataArray) {
   return Math.sqrt(sum / dataArray.length);
 }
 
-function base64ToBlob(base64, mimeType) {
-  if (!base64) {
-    return null;
-  }
-
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return new Blob([bytes], { type: mimeType || "image/jpeg" });
-}
-
 function createSyntheticVideoTrackDescriptor(mediaStreamTrack, source, stop) {
   const mediaStream = new MediaStream([mediaStreamTrack]);
   return {
@@ -708,41 +695,24 @@ export class VoiceEngine {
     this.nativeScreenShare.drawInFlight = true;
     try {
       const frame = await getDesktopCaptureFrame(this.nativeScreenShare.frameId);
-      if (!frame?.dataBase64) {
+      if (!frame?.data?.length) {
         return false;
       }
 
-      const blob = base64ToBlob(frame.dataBase64, frame.mimeType);
-      if (!blob) {
-        return false;
+      if (
+        this.nativeScreenShare.canvas.width !== frame.width
+        || this.nativeScreenShare.canvas.height !== frame.height
+      ) {
+        this.nativeScreenShare.canvas.width = frame.width;
+        this.nativeScreenShare.canvas.height = frame.height;
       }
 
-      const imageBitmap = await createImageBitmap(blob);
-      try {
-        if (
-          this.nativeScreenShare.canvas.width !== frame.width
-          || this.nativeScreenShare.canvas.height !== frame.height
-        ) {
-          this.nativeScreenShare.canvas.width = frame.width;
-          this.nativeScreenShare.canvas.height = frame.height;
-        }
-        this.nativeScreenShare.context.clearRect(
-          0,
-          0,
-          this.nativeScreenShare.canvas.width,
-          this.nativeScreenShare.canvas.height,
-        );
-        this.nativeScreenShare.context.drawImage(
-          imageBitmap,
-          0,
-          0,
-          this.nativeScreenShare.canvas.width,
-          this.nativeScreenShare.canvas.height,
-        );
-        this.nativeScreenShare.mediaStreamTrack?.requestFrame?.();
-      } finally {
-        imageBitmap.close?.();
-      }
+      const rgbaView = frame.data instanceof Uint8ClampedArray
+        ? frame.data
+        : new Uint8ClampedArray(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
+      const imageData = new ImageData(rgbaView, frame.width, frame.height);
+      this.nativeScreenShare.context.putImageData(imageData, 0, 0);
+      this.nativeScreenShare.mediaStreamTrack?.requestFrame?.();
 
       this.nativeScreenShare.frameId = frame.frameId;
       this.nativeScreenShare.lastFrameSettings = {

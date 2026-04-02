@@ -7,7 +7,21 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { useE2EE } from "@/contexts/E2EEContext";
 import api from "@/lib/api";
+import {
+  getCachedChannelMessages,
+  getCachedDmMessages,
+  getPersistedWorkspaceState,
+  setCachedChannelMessages,
+  setCachedDmMessages,
+  setPersistedWorkspaceState,
+} from "@/lib/chatPersistence";
+import { resolveAssetUrl } from "@/lib/assetUrls";
 import { consumePreferredServer } from "@/lib/inviteLinks";
+import {
+  getNotificationPreferences,
+  requestNotificationPermission,
+  subscribeToPush,
+} from "@/lib/pushNotifications";
 import ServerSidebar from "@/components/chat/ServerSidebar";
 import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import ChatArea from "@/components/chat/ChatArea";
@@ -95,6 +109,62 @@ function mergeMessages(previousMessages, nextMessage) {
   ));
 }
 
+const MESSAGE_PAGE_SIZE = 200;
+const MAX_HISTORY_PAGES = 50;
+
+async function fetchAllChannelMessages(channelId) {
+  const allMessages = [];
+  let before = null;
+
+  for (let page = 0; page < MAX_HISTORY_PAGES; page += 1) {
+    // The chat UI does not paginate older messages on scroll yet, so the
+    // initial channel load must walk backwards until the server has no older
+    // page left. Without this, users only ever saw the newest 50 messages.
+    const suffix = before ? `?before=${encodeURIComponent(before)}&limit=${MESSAGE_PAGE_SIZE}` : `?limit=${MESSAGE_PAGE_SIZE}`;
+    const res = await api.get(`/channels/${channelId}/messages${suffix}`);
+    const batch = Array.isArray(res.data) ? res.data : [];
+    if (batch.length === 0) {
+      break;
+    }
+    allMessages.unshift(...batch);
+    if (batch.length < MESSAGE_PAGE_SIZE) {
+      break;
+    }
+    before = batch[0]?.created_at || null;
+    if (!before) {
+      break;
+    }
+  }
+
+  return allMessages;
+}
+
+async function fetchAllDmMessages(otherUserId) {
+  const allMessages = [];
+  let before = null;
+
+  for (let page = 0; page < MAX_HISTORY_PAGES; page += 1) {
+    // DMs mirror the same restore behavior as channels so reloads and device
+    // switches do not appear to "lose" older parts of the conversation.
+    const suffix = before ? `?before=${encodeURIComponent(before)}&limit=${MESSAGE_PAGE_SIZE}` : `?limit=${MESSAGE_PAGE_SIZE}`;
+    const res = await api.get(`/dm/${otherUserId}${suffix}`);
+    const batch = Array.isArray(res.data) ? res.data : [];
+    if (batch.length === 0) {
+      break;
+    }
+    allMessages.unshift(...batch);
+    if (batch.length < MESSAGE_PAGE_SIZE) {
+      break;
+    }
+    before = batch[0]?.created_at || null;
+    if (!before) {
+      break;
+    }
+  }
+
+  return allMessages;
+}
+
 export default function MainLayout() {
   const { t } = useTranslation();
   const { user, token, logout, setUser } = useAuth();
@@ -109,6 +179,10 @@ export default function MainLayout() {
   const currentChannelRef = useRef(null);
   const currentDmUserRef = useRef(null);
   const latestChannelLoadRef = useRef(0);
+  const notificationPreferencesRef = useRef({
+    web_push_enabled: true,
+    desktop_push_enabled: true,
+  });
 
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
@@ -140,6 +214,42 @@ export default function MainLayout() {
   useEffect(() => {
     currentDmUserRef.current = currentDmUser;
   }, [currentDmUser]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+    const persistedState = getPersistedWorkspaceState(user.id);
+    if (persistedState.view === "dm") {
+      setView("dm");
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+    setPersistedWorkspaceState(user.id, {
+      view,
+      serverId: currentServer?.id || null,
+      channelId: view === "server" ? currentChannel?.id || null : null,
+      dmUserId: view === "dm" ? currentDmUser?.id || null : null,
+    });
+  }, [currentChannel?.id, currentDmUser?.id, currentServer?.id, user?.id, view]);
+
+  useEffect(() => {
+    if (!user?.id || currentChannel?.type !== "text") {
+      return;
+    }
+    setCachedChannelMessages(user.id, currentChannel.id, messages);
+  }, [currentChannel?.id, currentChannel?.type, messages, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !currentDmUser?.id) {
+      return;
+    }
+    setCachedDmMessages(user.id, currentDmUser.id, dmMessages);
+  }, [currentDmUser?.id, dmMessages, user?.id]);
 
   const refreshUnread = useCallback(async () => {
     try {
@@ -173,22 +283,27 @@ export default function MainLayout() {
     // blanking or replacing the current timeline.
     const requestId = latestChannelLoadRef.current + 1;
     latestChannelLoadRef.current = requestId;
+    const cachedMessages = getCachedChannelMessages(user?.id, channelId);
+    if (cachedMessages.length > 0) {
+      setMessages(cachedMessages);
+    }
 
     try {
-      const res = await api.get(`/channels/${channelId}/messages`);
-      if (latestChannelLoadRef.current !== requestId || currentChannelRef.current?.id !== channelId) {
+      const nextMessages = await fetchAllChannelMessages(channelId);
+      if (latestChannelLoadRef.current !== requestId) {
         return;
       }
-      setMessages(res.data);
+      setMessages(nextMessages);
     } catch {
-      if (latestChannelLoadRef.current !== requestId || currentChannelRef.current?.id !== channelId) {
+      if (latestChannelLoadRef.current !== requestId) {
         return;
       }
-      setMessages([]);
+      setMessages(cachedMessages);
     }
-  }, []);
+  }, [user?.id]);
 
-  const loadServerSnapshot = useCallback(async (serverId) => {
+  const loadServerSnapshot = useCallback(async (serverId, options = {}) => {
+    const { preferredChannelId = null } = options;
     const [channelRes, memberRes, roleRes] = await Promise.all([
       api.get(`/servers/${serverId}/channels`),
       api.get(`/servers/${serverId}/members`),
@@ -202,7 +317,9 @@ export default function MainLayout() {
     const nextChannel = (
       currentChannelRef.current && channelRes.data.some((channel) => channel.id === currentChannelRef.current.id)
         ? channelRes.data.find((channel) => channel.id === currentChannelRef.current.id) || currentChannelRef.current
-        : channelRes.data.find((channel) => channel.type === "text") || null
+        : preferredChannelId && channelRes.data.some((channel) => channel.id === preferredChannelId)
+          ? channelRes.data.find((channel) => channel.id === preferredChannelId) || null
+          : channelRes.data.find((channel) => channel.type === "text") || null
     );
 
     currentChannelRef.current = nextChannel;
@@ -228,13 +345,13 @@ export default function MainLayout() {
     await loadChannelMessages(channel.id);
   }, [loadChannelMessages]);
 
-  const selectServer = useCallback(async (server) => {
+  const selectServer = useCallback(async (server, options = {}) => {
     if (!server) return;
     setCurrentServer(server);
     setView("server");
 
     try {
-      await loadServerSnapshot(server.id);
+      await loadServerSnapshot(server.id, options);
     } catch {
       toast.error(t("chat.loadServerFailed"));
     }
@@ -260,11 +377,17 @@ export default function MainLayout() {
 
       // Invite accepts can hint which community should open next.
       const preferredServerId = consumePreferredServer();
+      const persistedState = getPersistedWorkspaceState(user?.id);
       const activeServer =
         nextServers.find((server) => server.id === preferredServerId)
         || nextServers.find((server) => server.id === currentServerRef.current?.id)
+        || nextServers.find((server) => server.id === persistedState.serverId)
         || nextServers[0];
-      await selectServer(activeServer);
+      await selectServer(activeServer, { preferredChannelId: persistedState.channelId });
+      if (persistedState.view === "dm") {
+        setView("dm");
+        void loadDmConversations();
+      }
     } catch (error) {
       if (error.response?.status === 401) {
         navigate("/login");
@@ -272,17 +395,25 @@ export default function MainLayout() {
         toast.error(t("chat.loadServersFailed"));
       }
     }
-  }, [navigate, selectServer, t]);
+  }, [loadDmConversations, navigate, selectServer, t, user?.id]);
 
   const selectDmUser = useCallback(async (dmUser) => {
-    setCurrentDmUser(dmUser);
-    try {
-      const res = await api.get(`/dm/${dmUser.id}`);
-      setDmMessages(res.data);
-    } catch {
-      setDmMessages([]);
+    if (!dmUser) {
+      return;
     }
-  }, []);
+    setView("dm");
+    setCurrentDmUser(dmUser);
+    const cachedMessages = getCachedDmMessages(user?.id, dmUser.id);
+    if (cachedMessages.length > 0) {
+      setDmMessages(cachedMessages);
+    }
+    try {
+      const nextMessages = await fetchAllDmMessages(dmUser.id);
+      setDmMessages(nextMessages);
+    } catch {
+      setDmMessages(cachedMessages);
+    }
+  }, [user?.id]);
 
   const switchToDm = useCallback(() => {
     setView("dm");
@@ -443,6 +574,9 @@ export default function MainLayout() {
         if (currentDmUserRef.current?.id === data.user_id) {
           setCurrentDmUser((previous) => ({ ...(previous || {}), ...(data.user || {}) }));
         }
+        if (user?.id === data.user_id) {
+          setUser((previous) => ({ ...(previous || {}), ...(data.user || {}) }));
+        }
         break;
 
       case "member_kicked":
@@ -512,8 +646,6 @@ export default function MainLayout() {
         break;
 
       case "notification":
-        // This is handled by NotificationPanel through interval polling currently,
-        // but we can add a toast or trigger a refresh.
         toast(data.notification.title, {
           description: data.notification.body,
           action: data.notification.link ? {
@@ -522,18 +654,34 @@ export default function MainLayout() {
           } : undefined
         });
         window.dispatchEvent(new CustomEvent("refresh-notifications"));
-        // If the user is on desktop, we can also show a native notification
-        if (config?.isDesktop) {
+        if (config?.isDesktop && notificationPreferencesRef.current?.desktop_push_enabled !== false) {
           import("@tauri-apps/plugin-notification").then(({ sendNotification }) => {
             sendNotification({ title: data.notification.title, body: data.notification.body });
           }).catch(() => {});
+        } else if (
+          !config?.isDesktop
+          && notificationPreferencesRef.current?.web_push_enabled !== false
+          && typeof window !== "undefined"
+          && "Notification" in window
+          && Notification.permission === "granted"
+          && document.visibilityState !== "visible"
+        ) {
+          const browserNotification = new Notification(data.notification.title, {
+            body: data.notification.body,
+          });
+          browserNotification.onclick = () => {
+            window.focus();
+            if (data.notification.link) {
+              navigate(data.notification.link);
+            }
+          };
         }
         break;
 
       default:
         break;
     }
-  }, [handleRemovedFromServer, loadDmConversations, loadServers, refreshUnread, t, user?.id]);
+  }, [config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id]);
 
   const connectWs = useCallback(() => {
     if (!token || !config?.wsBase) return;
@@ -589,7 +737,7 @@ export default function MainLayout() {
     };
 
     ws.onerror = () => ws.close();
-  }, [config?.wsBase, handleWsEvent, loadDmConversations, loadServerSnapshot, token]);
+  }, [config?.isDesktop, config?.wsBase, handleWsEvent, loadDmConversations, loadServerSnapshot, token]);
 
   useEffect(() => {
     void loadServers();
@@ -597,6 +745,59 @@ export default function MainLayout() {
     void refreshUnread();
     return () => window.clearInterval(unreadInterval);
   }, [loadServers, refreshUnread]);
+
+  useEffect(() => {
+    if (!token) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const nextPreferences = await getNotificationPreferences();
+        if (cancelled) {
+          return;
+        }
+        notificationPreferencesRef.current = nextPreferences;
+
+        const notificationsEnabled = config?.isDesktop
+          ? nextPreferences.desktop_push_enabled !== false
+          : nextPreferences.web_push_enabled !== false;
+        if (!notificationsEnabled) {
+          return;
+        }
+
+        const granted = await requestNotificationPermission();
+        if (!granted || cancelled) {
+          return;
+        }
+
+        if (!config?.isDesktop) {
+          await subscribeToPush();
+        }
+      } catch {
+        // Notification setup should never block the workspace bootstrap.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.isDesktop, token]);
+
+  useEffect(() => {
+    if (view !== "dm" || currentDmUser || dmConversations.length === 0 || !user?.id) {
+      return;
+    }
+    const persistedState = getPersistedWorkspaceState(user.id);
+    if (!persistedState.dmUserId) {
+      return;
+    }
+    const persistedConversation = dmConversations.find((conversation) => conversation.user?.id === persistedState.dmUserId);
+    if (persistedConversation?.user) {
+      void selectDmUser(persistedConversation.user);
+    }
+  }, [currentDmUser, dmConversations, selectDmUser, user?.id, view]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -784,7 +985,7 @@ export default function MainLayout() {
                 >
                   <div className="w-9 h-9 rounded-xl bg-zinc-800/80 flex items-center justify-center text-sm font-bold shrink-0">
                     {conversation.user.avatar_url ? (
-                      <img src={conversation.user.avatar_url} alt={conversation.user.display_name || conversation.user.username || "avatar"} className="h-full w-full rounded-xl object-cover" />
+                      <img src={resolveAssetUrl(conversation.user.avatar_url, config?.assetBase)} alt={conversation.user.display_name || conversation.user.username || "avatar"} className="h-full w-full rounded-xl object-cover" />
                     ) : (
                       conversation.user.display_name?.[0]?.toUpperCase() || "?"
                     )}
@@ -808,7 +1009,7 @@ export default function MainLayout() {
               <div className="h-12 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0">
                 <div className="w-8 h-8 rounded-xl bg-zinc-800/80 flex items-center justify-center text-xs font-bold mr-3">
                   {currentDmUser.avatar_url ? (
-                    <img src={currentDmUser.avatar_url} alt={currentDmUser.display_name || currentDmUser.username || "avatar"} className="h-full w-full rounded-xl object-cover" />
+                    <img src={resolveAssetUrl(currentDmUser.avatar_url, config?.assetBase)} alt={currentDmUser.display_name || currentDmUser.username || "avatar"} className="h-full w-full rounded-xl object-cover" />
                   ) : (
                     currentDmUser.display_name?.[0]?.toUpperCase()
                   )}
@@ -825,7 +1026,7 @@ export default function MainLayout() {
                   <div key={message.id} className="flex gap-3 fade-in" data-testid={`dm-msg-${message.id}`}>
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#27272A] text-xs font-bold">
                       {message.sender?.avatar_url ? (
-                        <img src={message.sender.avatar_url} alt={message.sender?.display_name || message.sender?.username || "avatar"} className="h-full w-full object-cover" />
+                        <img src={resolveAssetUrl(message.sender.avatar_url, config?.assetBase)} alt={message.sender?.display_name || message.sender?.username || "avatar"} className="h-full w-full object-cover" />
                       ) : (
                         message.sender?.display_name?.[0]?.toUpperCase() || "?"
                       )}

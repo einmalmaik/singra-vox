@@ -6,9 +6,12 @@ import {
 import api, { formatError } from "@/lib/api";
 import { toast } from "sonner";
 import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
+import { useRuntime } from "@/contexts/RuntimeContext";
+import { resolveAssetUrl } from "@/lib/assetUrls";
 
 export default function MemberSidebar({ members, roles, serverId, server, user, onStartDM, onRefreshMembers }) {
   const { t } = useTranslation();
+  const { config } = useRuntime();
   const onlineMembers = members.filter(m => m.user?.status === "online");
   const offlineMembers = members.filter(m => m.user?.status !== "online");
   const capabilities = buildWorkspaceCapabilities({ user, server, members, roles });
@@ -80,7 +83,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
                 isOnline ? 'bg-zinc-800/85' : 'bg-zinc-800/45'
               }`} style={{ color: getRoleColor(member) }}>
                 {member.user?.avatar_url ? (
-                  <img src={member.user.avatar_url} alt={member.user?.display_name || member.user?.username || "avatar"} className="h-full w-full object-cover" />
+                  <img src={resolveAssetUrl(member.user.avatar_url, config?.assetBase)} alt={member.user?.display_name || member.user?.username || "avatar"} className="h-full w-full object-cover" />
                 ) : (
                   member.user?.display_name?.[0]?.toUpperCase() || '?'
                 )}

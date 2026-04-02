@@ -16,6 +16,7 @@ import uuid
 import base64
 import re
 import jwt as pyjwt
+from app.permissions import get_message_history_cutoff as _shared_history_cutoff, has_server_permission
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -24,15 +25,6 @@ _client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = _client[os.environ['DB_NAME']]
 _jwt_secret = os.environ.get('JWT_SECRET', '')
 _JWT_ALG = "HS256"
-_DEFAULT_PERMISSIONS = {
-    "manage_server": False, "manage_channels": False, "manage_roles": False,
-    "manage_members": False, "kick_members": False, "ban_members": False,
-    "send_messages": True, "read_messages": True, "read_message_history": True, "manage_messages": False,
-    "attach_files": True, "mention_everyone": False,
-    "join_voice": True, "speak": True, "mute_members": False,
-    "deafen_members": False, "priority_speaker": False, "create_invites": True,
-    "pin_messages": False, "manage_emojis": False, "manage_webhooks": False,
-}
 _E2EE_DEVICE_HEADER = "X-Singra-Device-Id"
 
 
@@ -68,30 +60,11 @@ async def _user(request: Request):
 
 
 async def _has_perm(user_id, server_id, perm):
-    member = await db.server_members.find_one({"user_id": user_id, "server_id": server_id}, {"_id": 0})
-    if not member or member.get("is_banned"):
-        return False
-    server = await db.servers.find_one({"id": server_id}, {"_id": 0})
-    if server and server.get("owner_id") == user_id:
-        return True
-    allowed = _DEFAULT_PERMISSIONS.get(perm, False)
-    default_role = await db.roles.find_one({"server_id": server_id, "is_default": True}, {"_id": 0})
-    if default_role and perm in (default_role.get("permissions") or {}):
-        allowed = bool(default_role["permissions"][perm])
-    for rid in member.get("roles", []):
-        role = await db.roles.find_one({"id": rid}, {"_id": 0})
-        if role and role.get("permissions", {}).get(perm):
-            return True
-    return allowed
+    return await has_server_permission(db, user_id, server_id, perm)
 
 
 async def _history_cutoff(user_id, server_id):
-    member = await db.server_members.find_one({"user_id": user_id, "server_id": server_id}, {"_id": 0})
-    if not member or member.get("is_banned"):
-        return None
-    if await _has_perm(user_id, server_id, "read_message_history"):
-        return None
-    return member.get("joined_at")
+    return await _shared_history_cutoff(db, user_id, server_id)
 
 
 async def _private_channel_user_ids(channel_id):

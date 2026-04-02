@@ -11,10 +11,20 @@ import {
 import { Switch } from "@/components/ui/switch";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import { useRuntime } from "@/contexts/RuntimeContext";
+import { resolveAssetUrl } from "@/lib/assetUrls";
 
-export default function UserStatusPanel({ user, voiceEngineRef }) {
+export default function UserStatusPanel({ user, onUserUpdated, voiceEngineRef }) {
   const { t } = useTranslation();
+  const { config } = useRuntime();
   const [status, setStatus] = useState(user?.status || "online");
+
+  useEffect(() => {
+    if (user?.status) {
+      setStatus(user.status);
+    }
+  }, [user?.status]);
+
   const [pttEnabled, setPttEnabled] = useState(false);
   const [pttKey, setPttKey] = useState("Space");
   const [audioDevices, setAudioDevices] = useState([]);
@@ -34,17 +44,17 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
 
   // PTT keyboard handler
   useEffect(() => {
-    if (!pttEnabled || !voiceEngineRef?.current) return;
-    voiceEngineRef.current.setPTT(true);
+    const engine = voiceEngineRef?.current;
+    if (engine) engine.setPTT(true);
 
     const keyDown = (e) => {
       if (e.code === pttKey && !e.repeat) {
-        voiceEngineRef.current?.setPTTActive(true);
+        engine?.setPTTActive(true);
       }
     };
     const keyUp = (e) => {
       if (e.code === pttKey) {
-        voiceEngineRef.current?.setPTTActive(false);
+        engine?.setPTTActive(false);
       }
     };
     window.addEventListener("keydown", keyDown);
@@ -52,7 +62,7 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
     return () => {
       window.removeEventListener("keydown", keyDown);
       window.removeEventListener("keyup", keyUp);
-      voiceEngineRef.current?.setPTT(false);
+      if (engine) engine.setPTT(false);
     };
   }, [pttEnabled, pttKey, voiceEngineRef]);
 
@@ -67,7 +77,7 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [listeningForKey]);
+  }, [listeningForKey, t]);
 
   const loadDevices = async () => {
     try {
@@ -77,10 +87,16 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
   };
 
   const changeStatus = async (newStatus) => {
+    const oldStatus = status;
     setStatus(newStatus);
     try {
       await api.put("/users/me", { status: newStatus });
-    } catch {}
+      if (onUserUpdated) onUserUpdated({ ...user, status: newStatus });
+      toast.success(t("statusMenu.statusUpdated"));
+    } catch {
+      setStatus(oldStatus);
+      toast.error(t("statusMenu.statusUpdateFailed"));
+    }
   };
 
   const changeDevice = async (deviceId) => {
@@ -102,18 +118,23 @@ export default function UserStatusPanel({ user, voiceEngineRef }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="flex items-center gap-2 w-full px-3 py-2 rounded-md hover:bg-[#27272A]/50 transition-colors text-left" data-testid="user-status-trigger">
-          <div className="relative">
-            <div className="w-8 h-8 rounded-full bg-[#6366F1] flex items-center justify-center text-white text-sm font-bold">
-              {user?.display_name?.[0]?.toUpperCase() || '?'}
+        <button className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 rounded-md hover:bg-[#27272A]/50 transition-colors text-left" data-testid="user-status-trigger">
+          <div className="relative shrink-0">
+            <div className="w-8 h-8 rounded-full bg-[#6366F1] flex items-center justify-center text-white text-sm font-bold overflow-hidden">
+              {user?.avatar_url ? (
+                <img src={resolveAssetUrl(user.avatar_url, config?.assetBase)} alt={user?.display_name || user?.username || "avatar"} className="h-full w-full object-cover" />
+              ) : (
+                user?.display_name?.[0]?.toUpperCase() || '?'
+              )}
             </div>
             <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-[#0A0A0A]"
               style={{ backgroundColor: currentStatus.color }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{user?.display_name}</p>
+            <p className="text-sm font-medium text-white truncate leading-tight">{user?.display_name}</p>
             <p className="text-[10px] text-[#71717A] truncate">@{user?.username}</p>
           </div>
+          <CaretDown size={12} className="text-[#71717A] shrink-0" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="bg-[#18181B] border-[#27272A] text-white w-56" side="top" align="start">

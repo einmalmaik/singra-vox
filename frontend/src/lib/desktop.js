@@ -204,9 +204,37 @@ export async function stopDesktopCapture() {
 export async function getDesktopCaptureFrame(lastFrameId = null) {
   const invoke = await getInvoke();
   if (!invoke) return null;
-  return invoke("get_desktop_capture_frame", {
+  const response = await invoke("get_desktop_capture_frame", {
     lastFrameId,
   });
+  if (!response) {
+    return null;
+  }
+
+  const bytes = response instanceof Uint8Array
+    ? response
+    : response instanceof ArrayBuffer
+      ? new Uint8Array(response)
+      : Array.isArray(response)
+        ? Uint8Array.from(response)
+        : null;
+
+  if (!bytes || bytes.byteLength < 16) {
+    return null;
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const frameId = Number(view.getBigUint64(0, true));
+  const width = view.getUint32(8, true);
+  const height = view.getUint32(12, true);
+
+  return {
+    frameId,
+    width,
+    height,
+    pixelFormat: "rgba8",
+    data: bytes.subarray(16),
+  };
 }
 
 export async function getDesktopCaptureSession() {

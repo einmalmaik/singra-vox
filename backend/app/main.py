@@ -37,6 +37,11 @@ from pymongo.errors import DuplicateKeyError
 from typing import Any, Dict, List, Optional
 from app.emailing import render_password_reset_email, render_verification_email, send_email
 from app.blob_storage import ensure_bucket, get_blob, put_blob
+from app.permissions import (
+    DEFAULT_PERMISSIONS,
+    get_message_history_cutoff as get_permission_history_cutoff,
+    has_server_permission,
+)
 from app.ws import ws_mgr
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -223,41 +228,12 @@ async def require_instance_owner(user: dict) -> dict:
         raise HTTPException(403, "Instance owner required")
     return user
 
-DEFAULT_PERMISSIONS = {
-    "manage_server": False, "manage_channels": False, "manage_roles": False,
-    "manage_members": False, "kick_members": False, "ban_members": False,
-    "send_messages": True, "read_messages": True, "read_message_history": True, "manage_messages": False,
-    "attach_files": True, "mention_everyone": False,
-    "join_voice": True, "speak": True, "mute_members": False,
-    "deafen_members": False, "priority_speaker": False, "create_invites": True,
-    "pin_messages": False, "manage_emojis": False, "manage_webhooks": False
-}
-
 async def check_permission(user_id: str, server_id: str, permission: str) -> bool:
-    member = await db.server_members.find_one({"user_id": user_id, "server_id": server_id}, {"_id": 0})
-    if not member or member.get("is_banned"):
-        return False
-    server = await db.servers.find_one({"id": server_id}, {"_id": 0})
-    if server and server.get("owner_id") == user_id:
-        return True
-    allowed = DEFAULT_PERMISSIONS.get(permission, False)
-    default_role = await db.roles.find_one({"server_id": server_id, "is_default": True}, {"_id": 0})
-    if default_role and permission in (default_role.get("permissions") or {}):
-        allowed = bool(default_role["permissions"][permission])
-    for role_id in member.get("roles", []):
-        role = await db.roles.find_one({"id": role_id}, {"_id": 0})
-        if role and role.get("permissions", {}).get(permission):
-            return True
-    return allowed
+    return await has_server_permission(db, user_id, server_id, permission)
 
 
 async def get_message_history_cutoff(user_id: str, server_id: str) -> Optional[str]:
-    member = await db.server_members.find_one({"user_id": user_id, "server_id": server_id}, {"_id": 0})
-    if not member or member.get("is_banned"):
-        return None
-    if await check_permission(user_id, server_id, "read_message_history"):
-        return None
-    return member.get("joined_at")
+    return await get_permission_history_cutoff(db, user_id, server_id)
 
 async def log_audit(server_id, actor_id, action, target_type, target_id, details):
     await db.audit_log.insert_one({
@@ -2572,19 +2548,27 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     msg.pop("_id", None)
     msg["author"] = user
     await hydrate_message_mentions(msg)
-    await ws_mgr.broadcast_server(ch["server_id"], {"type": "new_message", "message": msg, "channel_id": channel_id})
+    
+    try:
+        await ws_mgr.broadcast_server(ch["server_id"], {"type": "new_message", "message": msg, "channel_id": channel_id})
+    except Exception as e:
+        logger.error(f"Failed to broadcast message: {e}")
+
     # Notifications are deduplicated across direct mentions, role mentions and
     # @everyone so a user only receives one notification per message.
     for mid in mention_data["notify_user_ids"]:
         if mid != user["id"]:
-            await create_notification(
-                mid,
-                "mention",
-                f"@{user['display_name']} mentioned you",
-                "[Encrypted message]" if is_e2ee_channel else inp.content[:100],
-                f"/channel/{channel_id}",
-                user["id"],
-            )
+            try:
+                await create_notification(
+                    mid,
+                    "mention",
+                    f"@{user['display_name']} mentioned you",
+                    "[Encrypted message]" if is_e2ee_channel else inp.content[:100],
+                    f"/channel/{channel_id}",
+                    user["id"],
+                )
+            except Exception as e:
+                logger.error(f"Failed to create notification for {mid}: {e}")
     return msg
 
 # ============================================================

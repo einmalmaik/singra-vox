@@ -16,6 +16,7 @@ import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { useE2EE } from "@/contexts/E2EEContext";
 import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
+import { resolveAssetUrl } from "@/lib/assetUrls";
 import {
   applyMentionSuggestion,
   buildMentionPayload,
@@ -106,6 +107,7 @@ export default function ChatArea({
   );
   const isE2EEChannel = Boolean(channel?.is_private);
   const canUseE2EEChannel = !isE2EEChannel || (isDesktopCapable && e2eeReady);
+  const resolveAvatarUrl = (url) => resolveAssetUrl(url, config?.assetBase);
 
   useEffect(() => {
     if (suppressAutoScroll.current) {
@@ -608,7 +610,7 @@ export default function ChatArea({
                 {!compact ? (
                   <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-zinc-800/80 text-sm font-bold shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
                     {msg.author?.avatar_url ? (
-                      <img src={msg.author.avatar_url} alt={msg.author?.display_name || msg.author?.username || "avatar"} className="h-full w-full object-cover" />
+                      <img src={resolveAvatarUrl(msg.author.avatar_url)} alt={msg.author?.display_name || msg.author?.username || "avatar"} className="h-full w-full object-cover" />
                     ) : (
                       msg.author?.display_name?.[0]?.toUpperCase() || '?'
                     )}

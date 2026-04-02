@@ -5,14 +5,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::State;
 
 #[cfg(target_os = "windows")]
-use base64::Engine;
-#[cfg(target_os = "windows")]
 use crabgrab::{
     feature::bitmap::{FrameBitmap, VideoFrameBitmap},
     prelude::{CapturableContent, CapturableContentFilter, CapturableDisplay, CapturableWindow, CaptureConfig, CapturePixelFormat, CaptureStream, StreamEvent},
 };
-#[cfg(target_os = "windows")]
-use image::codecs::jpeg::JpegEncoder;
 
 #[derive(Default)]
 pub struct DesktopCaptureStore {
@@ -52,8 +48,7 @@ struct LatestCaptureFrame {
     frame_id: u64,
     width: u32,
     height: u32,
-    mime_type: String,
-    data_base64: String,
+    rgba_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -80,16 +75,6 @@ pub struct DesktopCaptureSessionInfo {
     pub requested_height: u32,
     pub requested_frame_rate: u32,
     pub has_audio: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DesktopCaptureFramePayload {
-    pub frame_id: u64,
-    pub width: u32,
-    pub height: u32,
-    pub mime_type: String,
-    pub data_base64: String,
 }
 
 #[cfg(target_os = "windows")]
@@ -180,7 +165,7 @@ async fn enumerate_sources() -> Result<Vec<EnumeratedSource>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn encode_frame_to_jpeg(frame: crabgrab::prelude::VideoFrame) -> Result<LatestCaptureFrame, String> {
+fn encode_frame_to_rgba(frame: crabgrab::prelude::VideoFrame) -> Result<LatestCaptureFrame, String> {
     let frame_id = frame.frame_id();
     let bitmap = frame
         .get_bitmap()
@@ -190,29 +175,22 @@ fn encode_frame_to_jpeg(frame: crabgrab::prelude::VideoFrame) -> Result<LatestCa
         FrameBitmap::BgraUnorm8x4(bitmap) => {
             let width = bitmap.width as u32;
             let height = bitmap.height as u32;
-            let mut rgb = Vec::with_capacity((width * height * 3) as usize);
+            let mut rgba_bytes = Vec::with_capacity((width * height * 4) as usize);
             for pixel in bitmap.data.as_ref() {
-                // CrabGrab returns BGRA pixels. JPEG wants RGB.
-                rgb.push(pixel[2]);
-                rgb.push(pixel[1]);
-                rgb.push(pixel[0]);
+                // CrabGrab delivers BGRA pixels. The frontend paints RGBA
+                // frames directly into a canvas, so swap red/blue and keep
+                // alpha without any lossy intermediate encoding.
+                rgba_bytes.push(pixel[2]);
+                rgba_bytes.push(pixel[1]);
+                rgba_bytes.push(pixel[0]);
+                rgba_bytes.push(pixel[3]);
             }
-
-            let mut encoded = Vec::new();
-            // The native bridge still uses JPEG over IPC. A slightly higher
-            // quality reduces text smearing for UI and browser/game captures
-            // until we replace this path with a binary frame bridge.
-            let mut encoder = JpegEncoder::new_with_quality(&mut encoded, 86);
-            encoder
-                .encode(&rgb, width, height, image::ColorType::Rgb8.into())
-                .map_err(|error| format!("Native frame encoding failed: {error}"))?;
 
             Ok(LatestCaptureFrame {
                 frame_id,
                 width,
                 height,
-                mime_type: "image/jpeg".into(),
-                data_base64: base64::engine::general_purpose::STANDARD.encode(encoded),
+                rgba_bytes,
             })
         }
         _ => Err("The native capture backend returned an unsupported pixel format.".into()),
@@ -331,7 +309,7 @@ async fn start_capture_inner(
                 return;
             }
 
-            if let Ok(encoded_frame) = encode_frame_to_jpeg(frame) {
+            if let Ok(encoded_frame) = encode_frame_to_rgba(frame) {
                 if let Ok(mut frame_slot) = latest_frame_ref.lock() {
                     *frame_slot = Some(encoded_frame);
                 }
@@ -466,7 +444,7 @@ pub fn stop_desktop_capture(
 pub fn get_desktop_capture_frame(
     last_frame_id: Option<u64>,
     store: State<'_, DesktopCaptureStore>,
-) -> Result<Option<DesktopCaptureFramePayload>, String> {
+) -> Result<Vec<u8>, String> {
     #[cfg(target_os = "windows")]
     {
         let guard = store
@@ -475,7 +453,7 @@ pub fn get_desktop_capture_frame(
             .map_err(|_| "Native capture state is unavailable.".to_string())?;
 
         let Some(active_session) = guard.active_session.as_ref() else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
 
         let frame_guard = active_session
@@ -484,20 +462,19 @@ pub fn get_desktop_capture_frame(
             .map_err(|_| "The latest native frame is unavailable.".to_string())?;
 
         let Some(frame) = frame_guard.as_ref() else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
 
         if last_frame_id == Some(frame.frame_id) {
-            return Ok(None);
+            return Ok(Vec::new());
         }
 
-        return Ok(Some(DesktopCaptureFramePayload {
-            frame_id: frame.frame_id,
-            width: frame.width,
-            height: frame.height,
-            mime_type: frame.mime_type.clone(),
-            data_base64: frame.data_base64.clone(),
-        }));
+        let mut payload = Vec::with_capacity(16 + frame.rgba_bytes.len());
+        payload.extend_from_slice(&frame.frame_id.to_le_bytes());
+        payload.extend_from_slice(&frame.width.to_le_bytes());
+        payload.extend_from_slice(&frame.height.to_le_bytes());
+        payload.extend_from_slice(&frame.rgba_bytes);
+        return Ok(payload);
     }
 
     #[cfg(not(target_os = "windows"))]

@@ -1,3 +1,4 @@
+import UserStatusPanel from "@/components/chat/UserStatusPanel";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -1472,20 +1473,7 @@ export default function ChannelSidebar({
           )}
 
             <div className="flex items-center gap-3 px-3 py-3 border-t workspace-divider bg-zinc-950/55 shrink-0" data-testid="user-bar">
-            <div className="relative">
-              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-400 to-cyan-600 text-sm font-bold text-zinc-950 shadow-[0_10px_20px_rgba(34,211,238,0.25)]">
-                {user?.avatar_url ? (
-                  <img src={user.avatar_url} alt={user?.display_name || user?.username || "avatar"} className="h-full w-full object-cover" />
-                ) : (
-                  user?.display_name?.[0]?.toUpperCase() || "?"
-                )}
-              </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-zinc-950 bg-[#22C55E]" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{user?.display_name}</p>
-              <p className="text-[10px] text-[#71717A] truncate">@{user?.username}</p>
-            </div>
+            <UserStatusPanel user={user} onUserUpdated={onUserUpdated} />
             <button
               className={`workspace-icon-button ${isMuted ? "border-red-500/30 bg-red-500/15 text-red-400" : ""}`}
               onClick={toggleMute}
