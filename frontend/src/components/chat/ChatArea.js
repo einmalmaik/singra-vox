@@ -499,7 +499,7 @@ export default function ChatArea({
 
   if (!channel) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]" data-testid="no-channel-selected">
+      <div className="flex-1 flex items-center justify-center bg-transparent text-[#71717A]" data-testid="no-channel-selected">
         <p>{t("chat.selectChannel")}</p>
       </div>
     );
@@ -507,29 +507,29 @@ export default function ChatArea({
 
   return (
     <div className="flex-1 flex min-w-0 min-h-0" data-testid="chat-area">
-      <div className="flex-1 flex flex-col bg-[#18181B] min-w-0">
+      <div className="flex-1 flex flex-col bg-transparent min-w-0 min-h-0">
         {/* Header */}
-        <div className="h-12 flex items-center justify-between px-4 border-b border-[#27272A] shrink-0" data-testid="chat-header">
+        <div className="h-14 flex items-center justify-between px-5 border-b workspace-divider shrink-0 bg-zinc-900/25" data-testid="chat-header">
           <div className="flex items-center min-w-0 flex-1">
-            <Hash size={20} weight="bold" className="text-[#71717A] mr-2 shrink-0" />
-            <h3 className="text-sm font-bold text-white shrink-0" style={{ fontFamily: 'Manrope' }}>{channel.name}</h3>
+            <Hash size={20} weight="bold" className="text-cyan-400 mr-2 shrink-0" />
+            <h3 className="text-base font-bold text-white shrink-0" style={{ fontFamily: 'Manrope' }}>{channel.name}</h3>
             {editingTopic ? (
               <div className="flex items-center gap-1 ml-3 border-l border-[#27272A] pl-3 flex-1 min-w-0">
                 <input value={topicDraft} onChange={e => setTopicDraft(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') saveTopic(); if (e.key === 'Escape') setEditingTopic(false); }}
-                  className="flex-1 bg-[#27272A] rounded px-2 py-0.5 text-xs text-white outline-none" autoFocus data-testid="topic-edit-input" />
-                <button onClick={saveTopic} className="text-[#6366F1] text-xs font-medium">{t("common.save")}</button>
+                  className="flex-1 rounded-lg border border-white/10 bg-zinc-950/60 px-2 py-1 text-xs text-white outline-none" autoFocus data-testid="topic-edit-input" />
+                <button onClick={saveTopic} className="text-cyan-400 text-xs font-medium">{t("common.save")}</button>
                 <button onClick={() => setEditingTopic(false)} className="text-[#71717A] text-xs">{t("common.cancel")}</button>
               </div>
             ) : channel.topic ? (
               <button onClick={() => { setTopicDraft(channel.topic); setEditingTopic(true); }}
-                className="ml-3 text-xs text-[#71717A] truncate border-l border-[#27272A] pl-3 hidden md:inline hover:text-[#A1A1AA] transition-colors"
+                className="ml-3 text-xs text-[#71717A] truncate border-l workspace-divider pl-3 hidden md:inline hover:text-[#A1A1AA] transition-colors"
                 data-testid="topic-display">
                 {channel.topic}
               </button>
             ) : (
               <button onClick={() => { setTopicDraft(""); setEditingTopic(true); }}
-                className="ml-3 text-xs text-[#52525B] border-l border-[#27272A] pl-3 hidden md:inline hover:text-[#71717A] transition-colors">
+                className="ml-3 text-xs text-[#52525B] border-l workspace-divider pl-3 hidden md:inline hover:text-[#71717A] transition-colors">
                 {t("chat.setTopic")}
               </button>
             )}
@@ -539,7 +539,7 @@ export default function ChatArea({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button onClick={() => setShowPins(!showPins)} data-testid="pins-button"
-                    className={`p-1.5 rounded hover:bg-[#27272A] transition-colors ${showPins ? 'text-[#F59E0B]' : 'text-[#71717A] hover:text-white'}`}>
+                    className={`workspace-icon-button ${showPins ? 'text-[#F59E0B] border-amber-500/20 bg-amber-500/10' : ''}`}>
                     <PushPin size={16} weight={showPins ? "fill" : "bold"} />
                   </button>
                 </TooltipTrigger>
@@ -552,17 +552,17 @@ export default function ChatArea({
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-2" data-testid="messages-list">
+        <div className="flex-1 overflow-y-auto px-5 py-4" data-testid="messages-list">
           {isE2EEChannel && !canUseE2EEChannel && (
-            <div className="mx-auto mt-8 max-w-xl rounded-xl border border-[#27272A] bg-[#121212] p-6 text-sm text-[#A1A1AA]">
+            <div className="workspace-card mx-auto mt-8 max-w-xl p-6 text-sm text-[#A1A1AA]">
               {isDesktopCapable
                 ? "This private channel is end-to-end encrypted. Verify or restore this desktop device in Settings > Privacy to read the messages."
                 : "This private channel is end-to-end encrypted and is only available in the desktop app."}
             </div>
           )}
           {canUseE2EEChannel && messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-[#71717A]">
-              <Hash size={48} weight="bold" className="mb-4 opacity-30" />
+              <div className="flex flex-col items-center justify-center h-full text-[#71717A]">
+                <Hash size={48} weight="bold" className="mb-4 opacity-30 text-cyan-400" />
               <p className="text-lg font-bold" style={{ fontFamily: 'Manrope' }}>{t("chat.welcomeToChannel", { name: channel.name })}</p>
               <p className="text-sm">{t("chat.startOfChannel")}</p>
             </div>
@@ -596,18 +596,22 @@ export default function ChatArea({
                     delete messageRefs.current[msg.id];
                   }
                 }}
-                className={`message-item group relative flex gap-3 rounded-md px-2 py-1 transition-[background-color,box-shadow,border-color] ${
+                className={`message-item group relative flex gap-3 rounded-2xl px-3 py-2 transition-[background-color,box-shadow,border-color] ${
                   compact ? 'mt-0' : 'mt-3'
                 } ${
                   isHighlighted
                     ? 'bg-[#221A10] shadow-[0_0_0_1px_rgba(245,158,11,0.35),0_0_32px_rgba(245,158,11,0.12)]'
-                    : ''
+                    : 'hover:bg-white/[0.03]'
                 }`}
                 data-testid={`message-${msg.id}`}
               >
                 {!compact ? (
-                  <div className="w-10 h-10 rounded-full bg-[#27272A] flex items-center justify-center text-sm font-bold shrink-0 mt-0.5">
-                    {msg.author?.display_name?.[0]?.toUpperCase() || '?'}
+                  <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-zinc-800/80 text-sm font-bold shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                    {msg.author?.avatar_url ? (
+                      <img src={msg.author.avatar_url} alt={msg.author?.display_name || msg.author?.username || "avatar"} className="h-full w-full object-cover" />
+                    ) : (
+                      msg.author?.display_name?.[0]?.toUpperCase() || '?'
+                    )}
                   </div>
                 ) : (
                   <div className="w-10 shrink-0" />
@@ -665,12 +669,12 @@ export default function ChatArea({
                         <div key={j}>
                           {!msg.is_e2ee && att.type?.startsWith('image/') ? (
                             <img src={att.url ? `${config?.assetBase || ""}${att.url}` : att.data} alt={att.name}
-                              className="max-w-md max-h-80 rounded-md border border-[#27272A]" />
+                              className="max-w-md max-h-80 rounded-2xl border border-white/10 shadow-[0_16px_40px_rgba(0,0,0,0.22)]" />
                           ) : (
                             <button
                               type="button"
                               onClick={() => (msg.is_e2ee ? handleEncryptedAttachmentDownload(att) : window.open(att.url ? `${config?.assetBase || ""}${att.url}` : "#", "_blank", "noopener,noreferrer"))}
-                              className="flex items-center gap-2 bg-[#27272A] rounded px-3 py-2 text-xs text-[#A1A1AA] hover:text-white transition-colors inline-block"
+                              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/65 px-3 py-2 text-xs text-[#A1A1AA] transition-colors hover:bg-white/5 hover:text-white"
                             >
                               <Paperclip size={14} /> {att.name}
                             </button>
@@ -688,8 +692,8 @@ export default function ChatArea({
                           key={emoji} onClick={() => handleReaction(msg.id, emoji)}
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors ${
                             users.includes(user?.id)
-                              ? 'bg-[#6366F1]/20 border-[#6366F1]/40 text-[#6366F1]'
-                              : 'bg-[#27272A] border-[#27272A] text-[#A1A1AA] hover:border-[#6366F1]/40'
+                              ? 'bg-cyan-500/14 border-cyan-400/40 text-cyan-300'
+                              : 'bg-zinc-900/65 border-white/10 text-[#A1A1AA] hover:border-cyan-400/30'
                           }`}
                         >
                           <span>{emoji}</span><span>{users.length}</span>
@@ -701,7 +705,7 @@ export default function ChatArea({
                   {/* Thread indicator */}
                   {(msg.thread_count > 0) && (
                     <button onClick={() => setThreadMsgId(msg.id)} data-testid={`thread-btn-${msg.id}`}
-                      className="flex items-center gap-1.5 mt-1.5 text-[#6366F1] text-xs font-medium hover:text-[#4F46E5] transition-colors">
+                      className="mt-1.5 flex items-center gap-1.5 text-cyan-300 text-xs font-medium hover:text-cyan-200 transition-colors">
                       <ChatText size={14} weight="bold" />
                       {t("thread.replyCount", { count: msg.thread_count })}
                     </button>
@@ -711,7 +715,7 @@ export default function ChatArea({
                 </div>
 
                 {/* Hover actions */}
-                <div className="absolute right-2 -top-3 hidden group-hover:flex bg-[#121212] border border-[#27272A] rounded-md overflow-hidden shadow-lg z-10">
+                <div className="absolute right-2 -top-3 hidden group-hover:flex bg-zinc-950/90 border border-white/10 rounded-xl overflow-hidden shadow-xl z-10 backdrop-blur-xl">
                   <TooltipProvider delayDuration={100}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -753,7 +757,7 @@ export default function ChatArea({
 
                 {/* Emoji picker popover */}
                 {showReactions === msg.id && (
-                  <div className="absolute right-2 top-6 bg-[#121212] border border-[#27272A] rounded-lg p-2 flex gap-1 flex-wrap w-48 z-20 shadow-xl">
+                  <div className="absolute right-2 top-6 bg-zinc-950/90 border border-white/10 rounded-xl p-2 flex gap-1 flex-wrap w-48 z-20 shadow-xl backdrop-blur-xl">
                     {REACTIONS.map(r => (
                       <button key={r} onClick={() => handleReaction(msg.id, r)}
                         className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#27272A] text-base transition-colors">
@@ -798,11 +802,11 @@ export default function ChatArea({
               ))}
             </div>
           )}
-          <div className="flex items-center gap-2 bg-[#27272A] rounded-lg border border-[#27272A]/50 px-3 py-2.5">
+          <div className="workspace-input-shell flex items-center gap-2 px-4 py-3">
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,.pdf,.txt,.zip,.doc,.docx" />
             <button type="button" onClick={() => fileInputRef.current?.click()} data-testid="file-upload-button"
               disabled={!canUseE2EEChannel}
-              className="text-[#71717A] hover:text-white transition-colors shrink-0 disabled:text-[#3F3F46]">
+              className="workspace-icon-button h-10 w-10 shrink-0 disabled:text-[#3F3F46]">
               <Paperclip size={18} />
             </button>
             <input
@@ -852,12 +856,12 @@ export default function ChatArea({
               className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none disabled:text-[#52525B]"
             />
             <button type="submit" disabled={!canUseE2EEChannel || (!content.trim() && pendingAttachments.length === 0) || sending} data-testid="send-message-button"
-              className="text-[#6366F1] hover:text-[#4F46E5] disabled:text-[#52525B] transition-colors shrink-0">
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-500 text-zinc-950 transition-colors hover:bg-cyan-400 disabled:bg-zinc-800 disabled:text-[#52525B]">
               <PaperPlaneRight size={20} weight="fill" />
             </button>
           </div>
           {activeMention && mentionSuggestions.length > 0 && (
-            <div className="mt-2 overflow-hidden rounded-lg border border-[#27272A] bg-[#121212] shadow-xl">
+            <div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-zinc-950/90 shadow-xl backdrop-blur-xl">
               {mentionSuggestions.map((suggestion, index) => (
                 <button
                   key={suggestion.key}
@@ -865,7 +869,7 @@ export default function ChatArea({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => insertMention(suggestion)}
                   className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
-                    index === activeMentionIndex ? "bg-[#1C1D22]" : "hover:bg-[#18191D]"
+                    index === activeMentionIndex ? "bg-cyan-500/12" : "hover:bg-white/5"
                   }`}
                 >
                   <div className="min-w-0">

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import AuthShell from "@/components/auth/AuthShell";
 import { formatError } from "@/lib/api";
 
 export default function ResetPasswordPage() {
@@ -70,95 +71,94 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] px-6" data-testid="reset-password-page">
-      <div className="w-full max-w-md rounded-2xl border border-[#27272A] bg-[#121212] p-8 shadow-2xl">
-        <div className="flex items-center gap-2 mb-6">
-          <ShieldCheck size={32} weight="fill" className="text-[#6366F1]" />
-          <h1 className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{t("auth.resetPassword")}</h1>
-        </div>
-
-        <p className="mb-6 text-sm text-[#A1A1AA]">{t("auth.resetPasswordSubtitle")}</p>
-
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {error ? (
-            <div className="rounded-md border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-              {error}
-            </div>
-          ) : null}
-
-          <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.email")}</Label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder={t("auth.emailPlaceholder")}
-              className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.resetCode")}</Label>
-            <InputOTP
-              maxLength={6}
-              value={code}
-              onChange={setCode}
-              containerClassName="justify-between"
-            >
-              <InputOTPGroup className="w-full justify-between gap-2">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <InputOTPSlot
-                    key={index}
-                    index={index}
-                    className="h-12 w-12 rounded-lg border border-[#27272A] bg-[#18181B] text-white first:border first:rounded-lg last:border last:rounded-lg"
-                  />
-                ))}
-              </InputOTPGroup>
-            </InputOTP>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.newPassword")}</Label>
-            <Input
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              placeholder={t("auth.passwordMinLength")}
-              className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.confirmPassword")}</Label>
-            <Input
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              placeholder={t("auth.confirmPassword")}
-              className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
-            />
-          </div>
-
-          <Button type="submit" disabled={loading || !canSubmit} className="w-full bg-[#6366F1] hover:bg-[#4F46E5]">
-            {loading ? t("auth.resettingPassword") : t("auth.resetPasswordAction")}
-          </Button>
-        </form>
-
-        <div className="mt-6 flex items-center justify-between gap-3">
+    <AuthShell
+      eyebrow={t("auth.resetPassword")}
+      title={t("auth.resetPassword")}
+      subtitle={t("auth.resetPasswordSubtitle")}
+      icon={ShieldCheck}
+      sideTitle="Singra Vox"
+      sideCopy={t("auth.heroSubtitle")}
+      footer={(
+        <div className="flex items-center justify-between gap-3">
           <Button
             type="button"
             variant="outline"
             onClick={handleResend}
             disabled={resending || !email}
-            className="border-[#27272A] bg-transparent text-white hover:bg-[#1A1A1A]"
+            className="rounded-2xl border-white/10 bg-white/5 text-white hover:bg-white/10"
           >
             {resending ? t("auth.sendingResetCode") : t("auth.resendCode")}
           </Button>
-          <Link to="/login" className="text-sm text-[#6366F1] hover:text-[#4F46E5]">
+          <Link to="/login" className="text-sm font-medium text-cyan-300 transition-colors hover:text-cyan-200">
             {t("auth.backToSignIn")}
           </Link>
         </div>
-      </div>
-    </div>
+      )}
+    >
+      <form onSubmit={handleSubmit} className="space-y-5" data-testid="reset-password-page">
+        {error ? (
+          <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="space-y-2">
+          <Label className="workspace-section-label">{t("auth.email")}</Label>
+          <Input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder={t("auth.emailPlaceholder")}
+            className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label className="workspace-section-label">{t("auth.resetCode")}</Label>
+          <InputOTP
+            maxLength={6}
+            value={code}
+            onChange={setCode}
+            containerClassName="justify-between"
+          >
+            <InputOTPGroup className="w-full justify-between gap-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <InputOTPSlot
+                  key={index}
+                  index={index}
+                  className="h-12 w-12 rounded-2xl border border-white/10 bg-zinc-950/70 text-white first:rounded-2xl last:rounded-2xl"
+                />
+              ))}
+            </InputOTPGroup>
+          </InputOTP>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="workspace-section-label">{t("auth.newPassword")}</Label>
+          <Input
+            type="password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            placeholder={t("auth.passwordMinLength")}
+            className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label className="workspace-section-label">{t("auth.confirmPassword")}</Label>
+          <Input
+            type="password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            placeholder={t("auth.confirmPassword")}
+            className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
+          />
+        </div>
+
+        <Button type="submit" disabled={loading || !canSubmit} className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300">
+          {loading ? t("auth.resettingPassword") : t("auth.resetPasswordAction")}
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

@@ -20,6 +20,7 @@ export default function InviteGeneratorPanel({ serverId }) {
   const [invite, setInvite] = useState(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+
   const expiryOptions = useMemo(() => ([
     { value: "0", label: t("inviteGenerator.expiryNever") },
     { value: "1", label: t("inviteGenerator.expiryHour", { count: 1 }) },
@@ -112,7 +113,7 @@ export default function InviteGeneratorPanel({ serverId }) {
     <div className="space-y-5">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">
+          <Label className="workspace-section-label">
             {t("inviteGenerator.maxUses")}
           </Label>
           <Input
@@ -121,50 +122,50 @@ export default function InviteGeneratorPanel({ serverId }) {
             step="1"
             value={maxUses}
             onChange={(event) => setMaxUses(event.target.value)}
-            className="bg-[#0A0A0A] border-[#27272A] text-white"
+            className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white"
           />
-          <p className="text-xs text-[#71717A]">{t("inviteGenerator.maxUsesHelp")}</p>
+          <p className="text-xs text-zinc-500">{t("inviteGenerator.maxUsesHelp")}</p>
         </div>
 
         <div className="space-y-2">
-          <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">
+          <Label className="workspace-section-label">
             {t("inviteGenerator.expiry")}
           </Label>
           <select
             value={expiresHours}
             onChange={(event) => setExpiresHours(event.target.value)}
-            className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white outline-none focus:border-[#6366F1]"
+            className="h-12 w-full rounded-2xl border border-white/10 bg-zinc-950/75 px-4 text-sm text-white outline-none focus:border-cyan-400/40"
           >
             {expiryOptions.map((option) => (
-              <option key={option.value} value={option.value} className="bg-[#18181B] text-white">
+              <option key={option.value} value={option.value} className="bg-zinc-950 text-white">
                 {option.label}
               </option>
             ))}
           </select>
-          <p className="text-xs text-[#71717A]">{t("inviteGenerator.expiryHelp")}</p>
+          <p className="text-xs text-zinc-500">{t("inviteGenerator.expiryHelp")}</p>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={generateInvite} disabled={loading} className="bg-[#6366F1] hover:bg-[#4F46E5]">
+        <Button onClick={generateInvite} disabled={loading} className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
           <Sparkle size={14} className="mr-2" />
           {loading ? t("inviteGenerator.generating") : invite ? t("inviteGenerator.regenerate") : t("inviteGenerator.generate")}
         </Button>
-        <p className="text-sm text-[#71717A]">
+        <p className="text-sm text-zinc-500">
           {t("inviteGenerator.linkModeHelp")}
         </p>
       </div>
 
       {invite ? (
-        <div className="space-y-3 rounded-xl border border-[#27272A] bg-[#0A0A0A] p-4">
+        <div className="workspace-card space-y-3 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-white">{t("inviteGenerator.shareLink")}</p>
-              <p className="mt-1 text-xs text-[#71717A]">
+              <p className="mt-1 text-xs text-zinc-500">
                 {`${usageSummary} · ${expirySummary}`}
               </p>
             </div>
-            <div className="rounded-md border border-[#27272A] bg-[#121212] px-2 py-1 text-[11px] uppercase tracking-[0.2em] text-[#71717A]">
+            <div className="rounded-2xl border border-white/10 bg-zinc-950/70 px-2.5 py-1 text-[11px] uppercase tracking-[0.2em] text-zinc-500">
               {invite.code}
             </div>
           </div>
@@ -173,19 +174,19 @@ export default function InviteGeneratorPanel({ serverId }) {
             <Input
               value={inviteLink}
               readOnly
-              className="bg-[#121212] border-[#27272A] text-white text-xs"
+              className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-xs text-white"
             />
-            <Button onClick={copyInvite} size="sm" className="bg-[#27272A] hover:bg-[#3F3F46] shrink-0">
+            <Button onClick={copyInvite} size="sm" className="shrink-0 rounded-2xl bg-white/8 text-white hover:bg-white/12">
               {copied ? <Check size={16} /> : <Copy size={16} />}
             </Button>
           </div>
 
-          <div className="rounded-lg border border-[#27272A] bg-[#121212] px-3 py-3">
+          <div className="rounded-3xl border border-white/10 bg-zinc-950/60 px-3 py-3">
             <div className="flex items-center gap-2 text-sm font-medium text-white">
-              <LinkSimple size={14} className="text-[#A5B4FC]" />
+              <LinkSimple size={14} className="text-cyan-300" />
               {t("inviteGenerator.desktopHandoff")}
             </div>
-            <p className="mt-2 break-all text-xs text-[#71717A]">
+            <p className="mt-2 break-all text-xs text-zinc-500">
               {t("inviteGenerator.desktopHandoffHelp", { link: desktopInviteLink })}
             </p>
           </div>

@@ -10,6 +10,8 @@ const DEFAULT_VOICE_PREFERENCES = {
   outputVolume: 100,
   perUserVolumes: {},
   locallyMutedParticipants: {},
+  selfMuteEnabled: false,
+  selfDeafenEnabled: false,
   pttEnabled: false,
   pttKey: "Space",
   pttLabel: "Space",

@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import AuthShell from "@/components/auth/AuthShell";
 import { formatError } from "@/lib/api";
 
 export default function ForgotPasswordPage() {
@@ -33,47 +34,46 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] px-6" data-testid="forgot-password-page">
-      <div className="w-full max-w-md rounded-2xl border border-[#27272A] bg-[#121212] p-8 shadow-2xl">
-        <div className="flex items-center gap-2 mb-6">
-          <ShieldCheck size={32} weight="fill" className="text-[#6366F1]" />
-          <h1 className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{t("auth.forgotPassword")}</h1>
-        </div>
-
-        <p className="mb-6 text-sm text-[#A1A1AA]">{t("auth.forgotPasswordSubtitle")}</p>
-
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {error ? (
-            <div className="rounded-md border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-              {error}
-            </div>
-          ) : null}
-
-          <div className="space-y-2">
-            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.email")}</Label>
-            <Input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder={t("auth.emailPlaceholder")}
-              className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
-            />
-          </div>
-
-          <Button type="submit" disabled={loading || !email} className="w-full bg-[#6366F1] hover:bg-[#4F46E5]">
-            {loading ? t("auth.sendingResetCode") : t("auth.sendResetCode")}
-          </Button>
-        </form>
-
-        <div className="mt-6 flex items-center justify-between gap-3">
-          <Link to="/login" className="text-sm text-[#6366F1] hover:text-[#4F46E5]">
+    <AuthShell
+      eyebrow={t("auth.forgotPassword")}
+      title={t("auth.forgotPassword")}
+      subtitle={t("auth.forgotPasswordSubtitle")}
+      icon={ShieldCheck}
+      sideTitle="Singra Vox"
+      sideCopy={t("auth.heroSubtitle")}
+      footer={(
+        <div className="flex items-center justify-between gap-3 text-sm">
+          <Link to="/login" className="font-medium text-cyan-300 transition-colors hover:text-cyan-200">
             {t("auth.backToSignIn")}
           </Link>
-          <Link to="/reset-password" className="text-sm text-[#A1A1AA] hover:text-white">
+          <Link to="/reset-password" className="text-zinc-400 transition-colors hover:text-white">
             {t("auth.alreadyHaveResetCode")}
           </Link>
         </div>
-      </div>
-    </div>
+      )}
+    >
+      <form onSubmit={handleSubmit} className="space-y-5" data-testid="forgot-password-page">
+        {error ? (
+          <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="space-y-2">
+          <Label className="workspace-section-label">{t("auth.email")}</Label>
+          <Input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder={t("auth.emailPlaceholder")}
+            className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
+          />
+        </div>
+
+        <Button type="submit" disabled={loading || !email} className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300">
+          {loading ? t("auth.sendingResetCode") : t("auth.sendResetCode")}
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

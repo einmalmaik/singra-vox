@@ -72,14 +72,18 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
-            className="w-full flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-[#27272A]/50 transition-colors text-left group"
+            className="w-full flex items-center gap-3 px-2.5 py-2 rounded-xl hover:bg-white/5 transition-colors text-left group"
             data-testid={`member-${member.user?.username}`}
           >
             <div className="relative">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                isOnline ? 'bg-[#27272A]' : 'bg-[#27272A]/50'
+              <div className={`flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-xs font-bold ${
+                isOnline ? 'bg-zinc-800/85' : 'bg-zinc-800/45'
               }`} style={{ color: getRoleColor(member) }}>
-                {member.user?.display_name?.[0]?.toUpperCase() || '?'}
+                {member.user?.avatar_url ? (
+                  <img src={member.user.avatar_url} alt={member.user?.display_name || member.user?.username || "avatar"} className="h-full w-full object-cover" />
+                ) : (
+                  member.user?.display_name?.[0]?.toUpperCase() || '?'
+                )}
               </div>
               <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#121212] ${
                 isOnline ? 'status-online' : 'status-offline'
@@ -96,7 +100,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
             </div>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="bg-[#18181B] border-[#27272A] text-white w-48">
+        <DropdownMenuContent className="workspace-panel-solid text-white w-48">
           <div className="px-3 py-2 border-b border-[#27272A]">
             <p className="text-sm font-semibold" style={{ color: getRoleColor(member) }}>
               {member.user?.display_name}
@@ -136,16 +140,16 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
   };
 
   return (
-    <div className="w-[240px] h-full min-h-0 bg-[#18181B] border-l border-[#27272A]/40 flex flex-col shrink-0" data-testid="member-sidebar">
-      <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0">
+    <div className="workspace-panel w-[240px] h-full min-h-0 flex flex-col shrink-0 overflow-hidden" data-testid="member-sidebar">
+      <div className="h-14 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0">
         <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>
           {t("server.members")}
         </h3>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto py-4 px-2">
+      <div className="flex-1 min-h-0 overflow-y-auto py-4 px-3">
         {onlineMembers.length > 0 && (
           <>
-            <p className="text-[#71717A] text-xs font-bold uppercase tracking-[0.2em] px-2 mb-2">
+            <p className="workspace-section-label px-2 mb-2">
               {t("memberList.online")} &mdash; {onlineMembers.length}
             </p>
             {onlineMembers.map(m => <MemberItem key={m.user_id} member={m} />)}
@@ -153,7 +157,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
         )}
         {offlineMembers.length > 0 && (
           <>
-            <p className="text-[#71717A] text-xs font-bold uppercase tracking-[0.2em] px-2 mb-2 mt-4">
+            <p className="workspace-section-label px-2 mb-2 mt-5">
               {t("memberList.offline")} &mdash; {offlineMembers.length}
             </p>
             {offlineMembers.map(m => <MemberItem key={m.user_id} member={m} />)}

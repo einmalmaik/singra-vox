@@ -7,6 +7,7 @@ import api, { formatError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import AuthShell from "@/components/auth/AuthShell";
 import { ShieldCheck } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
@@ -60,90 +61,76 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex" data-testid="login-page">
-      <div
-        className="hidden lg:flex lg:w-1/2 items-center justify-center relative"
-        style={{
-          backgroundImage: 'url(https://static.prod-images.emergentagent.com/jobs/ab5120aa-52b2-45d0-8c31-465387b65c60/images/5a2b1ab20571b43fc0763efbcb163ee57e49b0baef6e022d78582e64bd6b10fc.png)',
-          backgroundSize: 'cover', backgroundPosition: 'center'
-        }}
-      >
-        <div className="absolute inset-0 bg-black/60" />
-        <div className="relative z-10 text-center px-12">
-          <div className="flex items-center justify-center gap-3 mb-6">
-            <ShieldCheck size={48} weight="fill" className="text-[#6366F1]" />
-            <h1 className="text-5xl font-extrabold tracking-tight" style={{ fontFamily: 'Manrope' }}>
-              Singra Vox
-            </h1>
+    <AuthShell
+      eyebrow={t("auth.signIn")}
+      title={t("auth.welcomeBack")}
+      subtitle={t("auth.signInSubtitle", { instance: setupStatus?.instance_name || t("setup.selfHostedInstance") })}
+      icon={ShieldCheck}
+      sideTitle={setupStatus?.instance_name || "Singra Vox"}
+      sideCopy={t("auth.heroSubtitle")}
+      footer={setupStatus?.allow_open_signup ? (
+        <p className="text-center text-sm text-zinc-400">
+          {t("auth.noAccount")}{" "}
+          <Link to="/register" className="font-semibold text-cyan-300 transition-colors hover:text-cyan-200" data-testid="register-link">
+            {t("auth.createOne")}
+          </Link>
+        </p>
+      ) : null}
+    >
+      <div data-testid="login-page">
+        {pendingInvite?.code ? (
+          <div className="workspace-card mb-6 px-4 py-3 text-sm text-zinc-200">
+            {t("auth.pendingInviteLogin")}
           </div>
-          <p className="text-[#A1A1AA] text-lg max-w-md">
-            {t("auth.heroSubtitle")}
-          </p>
-        </div>
-      </div>
+        ) : null}
 
-      <div className="flex-1 flex items-center justify-center bg-[#0A0A0A] px-6">
-        <div className="w-full max-w-sm">
-          <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <ShieldCheck size={32} weight="fill" className="text-[#6366F1]" />
-            <h1 className="text-2xl font-bold" style={{ fontFamily: 'Manrope' }}>Singra Vox</h1>
-          </div>
-
-          <h2 className="text-2xl font-bold mb-2" style={{ fontFamily: 'Manrope' }}>{t("auth.welcomeBack")}</h2>
-          <p className="text-[#71717A] text-sm mb-8">
-            {t("auth.signInSubtitle", { instance: setupStatus?.instance_name || t("setup.selfHostedInstance") })}
-          </p>
-          {pendingInvite?.code ? (
-            <div className="mb-6 rounded-md border border-[#27272A] bg-[#121212] px-4 py-3 text-sm text-[#D4D4D8]">
-              {t("auth.pendingInviteLogin")}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {error && (
+            <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300" data-testid="login-error">
+              {error}
             </div>
-          ) : null}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-md text-sm" data-testid="login-error">
-                {error}
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.email")}</Label>
-              <Input
-                id="email" type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder={t("auth.emailPlaceholder")} required data-testid="login-email-input"
-                className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] text-white placeholder:text-[#52525B]"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.password")}</Label>
-              <Input
-                id="password" type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder={t("auth.passwordPlaceholder")} required data-testid="login-password-input"
-                className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] focus:ring-1 focus:ring-[#6366F1] text-white placeholder:text-[#52525B]"
-              />
-            </div>
-            <div className="flex justify-end">
-              <Link to="/forgot-password" className="text-sm text-[#6366F1] hover:text-[#4F46E5]">
-                {t("auth.forgotPassword")}
-              </Link>
-            </div>
-            <Button
-              type="submit" disabled={loading} data-testid="login-submit-button"
-              className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
-            >
-              {loading ? t("auth.signingIn") : t("auth.signIn")}
-            </Button>
-          </form>
-
-          {setupStatus?.allow_open_signup && (
-            <p className="text-center text-[#71717A] text-sm mt-6">
-              {t("auth.noAccount")}{" "}
-              <Link to="/register" className="text-[#6366F1] hover:text-[#4F46E5] font-medium" data-testid="register-link">
-                {t("auth.createOne")}
-              </Link>
-            </p>
           )}
-        </div>
+          <div className="space-y-2">
+            <Label htmlFor="email" className="workspace-section-label">{t("auth.email")}</Label>
+            <Input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={t("auth.emailPlaceholder")}
+              required
+              data-testid="login-email-input"
+              className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password" className="workspace-section-label">{t("auth.password")}</Label>
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("auth.passwordPlaceholder")}
+              required
+              data-testid="login-password-input"
+              className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
+            />
+          </div>
+          <div className="flex justify-end">
+            <Link to="/forgot-password" className="text-sm font-medium text-cyan-300 transition-colors hover:text-cyan-200">
+              {t("auth.forgotPassword")}
+            </Link>
+          </div>
+          <Button
+            type="submit"
+            disabled={loading}
+            data-testid="login-submit-button"
+            className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300"
+          >
+            {loading ? t("auth.signingIn") : t("auth.signIn")}
+          </Button>
+        </form>
       </div>
-    </div>
+    </AuthShell>
   );
 }

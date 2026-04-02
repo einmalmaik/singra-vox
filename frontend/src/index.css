@@ -9,7 +9,10 @@ body {
   font-family: 'IBM Plex Sans', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #0A0A0A;
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(113, 113, 122, 0.2), transparent 32%),
+    linear-gradient(180deg, #05070b 0%, #09090b 45%, #060608 100%);
   color: #FFFFFF;
   overflow: hidden;
 }
@@ -30,7 +33,7 @@ code {
     --card-foreground: 0 0% 100%;
     --popover: 0 0% 9%;
     --popover-foreground: 0 0% 100%;
-    --primary: 239 84% 67%;
+    --primary: 189 94% 43%;
     --primary-foreground: 0 0% 100%;
     --secondary: 0 0% 15%;
     --secondary-foreground: 0 0% 100%;
@@ -42,7 +45,7 @@ code {
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 15%;
     --input: 0 0% 15%;
-    --ring: 239 84% 67%;
+    --ring: 189 94% 43%;
     --radius: 0.375rem;
   }
 }
@@ -71,7 +74,47 @@ code {
 }
 
 ::selection {
-  background-color: rgba(99, 102, 241, 0.3);
+  background-color: rgba(34, 211, 238, 0.28);
+}
+
+@layer components {
+  /* Shared workspace panel styling keeps the desktop shell visually coherent
+     while individual components still own their internal layout details. */
+  .workspace-panel {
+    @apply rounded-[1.35rem] border border-white/10 bg-zinc-900/40 backdrop-blur-2xl shadow-[0_18px_60px_rgba(0,0,0,0.35)];
+  }
+
+  .workspace-panel-solid {
+    @apply rounded-[1.35rem] border border-white/10 bg-zinc-950/65 backdrop-blur-2xl shadow-[0_18px_60px_rgba(0,0,0,0.35)];
+  }
+
+  .workspace-card {
+    @apply rounded-2xl border border-white/10 bg-zinc-950/55 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.22)];
+  }
+
+  .workspace-divider {
+    @apply border-white/5;
+  }
+
+  .workspace-toolbar-button {
+    @apply rounded-xl border border-transparent bg-transparent text-zinc-400 transition-all duration-200 hover:border-white/10 hover:bg-white/5 hover:text-white;
+  }
+
+  .workspace-icon-button {
+    @apply flex h-9 w-9 items-center justify-center rounded-xl border border-transparent bg-transparent text-zinc-400 transition-all duration-200 hover:border-white/10 hover:bg-white/5 hover:text-white;
+  }
+
+  .workspace-input-shell {
+    @apply rounded-2xl border border-white/10 bg-zinc-900/70 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.18)];
+  }
+
+  .workspace-section-label {
+    @apply text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-500;
+  }
+
+  .workspace-cyan-glow {
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.22), 0 0 28px rgba(34, 211, 238, 0.12);
+  }
 }
 
 @layer base {

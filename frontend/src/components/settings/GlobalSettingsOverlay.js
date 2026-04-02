@@ -6,6 +6,7 @@ import {
   Keyboard,
   Microphone,
   ShieldCheck,
+  SignOut,
   SlidersHorizontal,
   SpeakerHigh,
   Trash,
@@ -18,8 +19,21 @@ import { useRuntime } from "@/contexts/RuntimeContext";
 import { useE2EE } from "@/contexts/E2EEContext";
 import SettingsOverlayShell from "@/components/settings/SettingsOverlayShell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { loadVoicePreferences, saveVoicePreferences } from "@/lib/voicePreferences";
@@ -31,9 +45,74 @@ const SECTION_CONFIG = [
   { id: "account", icon: <UserCircle size={16} /> },
   { id: "privacy", icon: <ShieldCheck size={16} /> },
 ];
+const AVATAR_OUTPUT_SIZE = 512;
+const SETTINGS_INPUT_CLASSNAME =
+  "h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white focus-visible:border-cyan-400/40 focus-visible:ring-cyan-400/20";
+const SETTINGS_NATIVE_SELECT_CLASSNAME =
+  "h-12 w-full rounded-2xl border border-white/10 bg-zinc-950/75 px-4 text-sm text-white outline-none transition focus:border-cyan-400/40 focus:bg-zinc-950/85 disabled:opacity-50";
+const SETTINGS_DANGER_INPUT_CLASSNAME =
+  "mt-4 h-12 rounded-2xl border-red-500/20 bg-zinc-950/80 text-white placeholder:text-zinc-500 focus-visible:border-red-400/45 focus-visible:ring-red-400/20";
 
 function supportOutputDeviceSelection() {
   return typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("avatar-read-failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("avatar-image-load-failed"));
+    image.src = source;
+  });
+}
+
+async function renderAvatarBlob({
+  source,
+  zoom = 1,
+  offsetX = 0,
+  offsetY = 0,
+}) {
+  const image = await loadImage(source);
+  const canvas = document.createElement("canvas");
+  canvas.width = AVATAR_OUTPUT_SIZE;
+  canvas.height = AVATAR_OUTPUT_SIZE;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("avatar-canvas-unavailable");
+  }
+
+  const baseScale = Math.max(
+    AVATAR_OUTPUT_SIZE / image.width,
+    AVATAR_OUTPUT_SIZE / image.height,
+  );
+  const drawWidth = image.width * baseScale * zoom;
+  const drawHeight = image.height * baseScale * zoom;
+  const translatedX = (offsetX / 100) * AVATAR_OUTPUT_SIZE * 0.35;
+  const translatedY = (offsetY / 100) * AVATAR_OUTPUT_SIZE * 0.35;
+  const drawX = (AVATAR_OUTPUT_SIZE - drawWidth) / 2 + translatedX;
+  const drawY = (AVATAR_OUTPUT_SIZE - drawHeight) / 2 + translatedY;
+
+  context.clearRect(0, 0, AVATAR_OUTPUT_SIZE, AVATAR_OUTPUT_SIZE);
+  context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("avatar-blob-failed"));
+        return;
+      }
+      resolve(blob);
+    }, "image/png", 0.92);
+  });
 }
 
 export default function GlobalSettingsOverlay({
@@ -64,6 +143,7 @@ export default function GlobalSettingsOverlay({
   const isDesktop = Boolean(config?.isDesktop);
   const previewEngineRef = useRef(null);
   const micTestEngineRef = useRef(null);
+  const avatarInputRef = useRef(null);
   const [activeSection, setActiveSection] = useState("voice");
   const [voicePreferences, setVoicePreferences] = useState(
     loadVoicePreferences(user?.id, { isDesktop }),
@@ -71,8 +151,20 @@ export default function GlobalSettingsOverlay({
   const [audioInputs, setAudioInputs] = useState([]);
   const [audioOutputs, setAudioOutputs] = useState([]);
   const [videoInputs, setVideoInputs] = useState([]);
+  const [username, setUsername] = useState(user?.username || "");
   const [displayName, setDisplayName] = useState(user?.display_name || "");
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url || "");
+  const [avatarPreview, setAvatarPreview] = useState(user?.avatar_url || "");
+  const [avatarFileName, setAvatarFileName] = useState("");
+  const [avatarZoom, setAvatarZoom] = useState(1);
+  const [avatarOffsetX, setAvatarOffsetX] = useState(0);
+  const [avatarOffsetY, setAvatarOffsetY] = useState(0);
+  const [avatarPendingUpload, setAvatarPendingUpload] = useState(false);
+  const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
+  const [avatarEditorSource, setAvatarEditorSource] = useState("");
+  const [avatarEditorFileName, setAvatarEditorFileName] = useState("");
+  const [avatarEditorZoom, setAvatarEditorZoom] = useState(1);
+  const [avatarEditorOffsetX, setAvatarEditorOffsetX] = useState(0);
+  const [avatarEditorOffsetY, setAvatarEditorOffsetY] = useState(0);
   const [status, setStatus] = useState(user?.status || "online");
   const [pttListening, setPttListening] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState("");
@@ -105,8 +197,20 @@ export default function GlobalSettingsOverlay({
 
   useEffect(() => {
     setVoicePreferences(loadVoicePreferences(user?.id, { isDesktop }));
+    setUsername(user?.username || "");
     setDisplayName(user?.display_name || "");
-    setAvatarUrl(user?.avatar_url || "");
+    setAvatarPreview(user?.avatar_url || "");
+    setAvatarFileName("");
+    setAvatarZoom(1);
+    setAvatarOffsetX(0);
+    setAvatarOffsetY(0);
+    setAvatarPendingUpload(false);
+    setAvatarEditorOpen(false);
+    setAvatarEditorSource("");
+    setAvatarEditorFileName("");
+    setAvatarEditorZoom(1);
+    setAvatarEditorOffsetX(0);
+    setAvatarEditorOffsetY(0);
     setStatus(user?.status || "online");
   }, [isDesktop, user]);
 
@@ -203,6 +307,10 @@ export default function GlobalSettingsOverlay({
     { value: "offline", label: t("settings.statusInvisible") },
   ]), [t]);
 
+  const accountDisplayName = displayName.trim() || username || user?.display_name || user?.username || t("common.unknown");
+  const avatarInitial = (accountDisplayName?.[0] || "?").toUpperCase();
+  const hasAvatarPreview = Boolean(avatarPreview);
+
   const remoteParticipants = useMemo(
     () => (activeVoiceChannel?.voice_states || []).filter((state) => state.user_id !== user?.id),
     [activeVoiceChannel, user?.id],
@@ -264,18 +372,99 @@ export default function GlobalSettingsOverlay({
     }
   }, []);
 
+  const handleAvatarSelected = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast.error(t("settings.avatarOnlyImages"));
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      const preview = await readFileAsDataUrl(file);
+      setAvatarEditorSource(preview);
+      setAvatarEditorFileName(file.name);
+      setAvatarEditorZoom(1);
+      setAvatarEditorOffsetX(0);
+      setAvatarEditorOffsetY(0);
+      setAvatarEditorOpen(true);
+    } catch {
+      toast.error(t("settings.avatarReadFailed"));
+    } finally {
+      event.target.value = "";
+    }
+  };
+
+  const applyAvatarEditor = () => {
+    if (!avatarEditorSource) {
+      setAvatarEditorOpen(false);
+      return;
+    }
+
+    setAvatarPreview(avatarEditorSource);
+    setAvatarFileName(avatarEditorFileName);
+    setAvatarZoom(avatarEditorZoom);
+    setAvatarOffsetX(avatarEditorOffsetX);
+    setAvatarOffsetY(avatarEditorOffsetY);
+    setAvatarPendingUpload(true);
+    setAvatarEditorOpen(false);
+  };
+
+  const openAvatarPicker = () => {
+    avatarInputRef.current?.click();
+  };
+
   const saveAccount = async () => {
+    const normalizedUsername = username.toLowerCase().trim().replace(/[^a-z0-9_]/g, "");
+    if (normalizedUsername.length < 3) {
+      toast.error(t("settings.usernameInvalid"));
+      return;
+    }
+
     setSavingAccount(true);
     try {
+      let nextAvatarUrl = avatarPreview || "";
+      if (avatarPendingUpload && avatarPreview) {
+        const avatarBlob = await renderAvatarBlob({
+          source: avatarPreview,
+          zoom: avatarZoom,
+          offsetX: avatarOffsetX,
+          offsetY: avatarOffsetY,
+        });
+        const dataUrl = await readFileAsDataUrl(avatarBlob);
+        const uploadResponse = await api.post("/upload", {
+          data: dataUrl.split(",")[1],
+          name: avatarFileName || `avatar-${user?.id || "profile"}.png`,
+          type: avatarBlob.type || "image/png",
+        });
+        nextAvatarUrl = uploadResponse.data.url;
+      }
+
       const res = await api.put("/users/me", {
+        username: normalizedUsername,
         display_name: displayName,
-        avatar_url: avatarUrl,
+        avatar_url: nextAvatarUrl,
         status,
       });
       onUserUpdated?.(res.data);
+      setUsername(res.data.username || normalizedUsername);
+      setDisplayName(res.data.display_name || displayName);
+      setAvatarPreview(res.data.avatar_url || "");
+      setAvatarFileName("");
+      setAvatarZoom(1);
+      setAvatarOffsetX(0);
+      setAvatarOffsetY(0);
+      setAvatarPendingUpload(false);
       toast.success(t("settings.accountUpdated"));
     } catch (err) {
-      toast.error(formatError(err?.response?.data?.detail));
+      if (String(err?.message || "").startsWith("avatar-")) {
+        toast.error(t("settings.avatarProcessFailed"));
+      } else {
+        toast.error(formatError(err?.response?.data?.detail));
+      }
     } finally {
       setSavingAccount(false);
     }
@@ -414,17 +603,31 @@ export default function GlobalSettingsOverlay({
   };
 
   return (
-    <SettingsOverlayShell
-      open={open}
-      title={t("settings.userSettingsTitle")}
-      sections={sectionConfig}
-      activeSection={activeSection}
-      onSectionChange={setActiveSection}
-      onClose={onClose}
-    >
+    <>
+      <SettingsOverlayShell
+        open={open}
+        title={t("settings.userSettingsTitle")}
+        sections={sectionConfig}
+        activeSection={activeSection}
+        onSectionChange={setActiveSection}
+        onClose={onClose}
+        footerActions={[
+          {
+            id: "logout",
+            label: t("settings.logoutAction"),
+            icon: <SignOut size={16} />,
+            tone: "danger",
+            onClick: () => {
+              onClose?.();
+              onLogout?.();
+            },
+            testId: "settings-logout-button",
+          },
+        ]}
+      >
       {activeSection === "voice" && (
         <div className="space-y-8" data-testid="voice-settings-panel">
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+          <section className="workspace-card p-5">
             <div className="mb-4">
               <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.voiceVideo")}</h3>
               <p className="mt-1 text-sm text-[#71717A]">{t("settings.voiceVideoDescription")}</p>
@@ -436,7 +639,7 @@ export default function GlobalSettingsOverlay({
                 <select
                   value={voicePreferences.inputDeviceId || ""}
                   onChange={(event) => updateVoicePreferences({ inputDeviceId: event.target.value })}
-                  className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
+                  className={SETTINGS_NATIVE_SELECT_CLASSNAME}
                 >
                   <option value="">{t("settings.defaultMicrophone")}</option>
                   {audioInputs.map((device) => (
@@ -453,7 +656,7 @@ export default function GlobalSettingsOverlay({
                   value={voicePreferences.outputDeviceId || ""}
                   onChange={(event) => updateVoicePreferences({ outputDeviceId: event.target.value })}
                   disabled={!supportOutputDeviceSelection()}
-                  className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white disabled:opacity-50"
+                  className={SETTINGS_NATIVE_SELECT_CLASSNAME}
                 >
                   <option value="">{t("settings.defaultOutput")}</option>
                   {audioOutputs.map((device) => (
@@ -476,7 +679,7 @@ export default function GlobalSettingsOverlay({
               <select
                 value={voicePreferences.cameraDeviceId || ""}
                 onChange={(event) => updateVoicePreferences({ cameraDeviceId: event.target.value })}
-                className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
+                className={SETTINGS_NATIVE_SELECT_CLASSNAME}
               >
                 <option value="">{t("settings.defaultCamera")}</option>
                 {videoInputs.map((device) => (
@@ -518,13 +721,13 @@ export default function GlobalSettingsOverlay({
             </div>
           </section>
 
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+          <section className="workspace-card p-5">
             <div className="mb-4">
               <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.pushToTalkAndAudioProcessing")}</h3>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
+              <div className="rounded-3xl border border-white/10 bg-zinc-950/60 p-4">
                 <div className="flex items-center justify-between">
                   <div>
                       <p className="text-sm font-medium text-white">{t("settings.pushToTalk")}</p>
@@ -542,7 +745,7 @@ export default function GlobalSettingsOverlay({
                 </div>
                 <Button
                   variant="outline"
-                  className="mt-4 w-full border-[#27272A] bg-[#121212] text-white hover:bg-[#1A1A1A] disabled:opacity-50"
+                  className="mt-4 w-full rounded-2xl border-white/10 bg-zinc-950/60 text-white hover:bg-white/8 disabled:opacity-50"
                   onClick={() => isDesktop && setPttListening(true)}
                   disabled={!isDesktop}
                 >
@@ -554,7 +757,7 @@ export default function GlobalSettingsOverlay({
                     })}
                 </Button>
                 {isDesktop && (
-                  <div className="mt-3 space-y-1 rounded-md border border-[#27272A] bg-[#080808] px-3 py-2 text-xs text-[#A1A1AA]">
+                  <div className="mt-3 space-y-1 rounded-2xl border border-white/10 bg-zinc-950/70 px-3 py-2 text-xs text-[#A1A1AA]">
                     <p>{t("settings.pttStatus", { status: pttDebug?.registered ? t("settings.pttRegistered") : t("settings.pttWaiting") })}</p>
                     <p>{t("settings.pttLastEvent", { event: pttDebug?.lastEventState || "—" })}</p>
                     <p>{t("settings.pttLastShortcut", { key: pttDebug?.lastShortcut || voicePreferences.pttKey || "—" })}</p>
@@ -571,7 +774,7 @@ export default function GlobalSettingsOverlay({
                 )}
               </div>
 
-              <div className="space-y-3 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
+              <div className="space-y-3 rounded-3xl border border-white/10 bg-zinc-950/60 p-4">
                 {[
                   ["noiseSuppression", t("settings.noiseSuppression")],
                   ["echoCancellation", t("settings.echoCancellation")],
@@ -589,13 +792,13 @@ export default function GlobalSettingsOverlay({
             </div>
           </section>
 
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+          <section className="workspace-card p-5">
             <div className="mb-4 flex items-center gap-2">
-              <Microphone size={18} className="text-[#6366F1]" />
+              <Microphone size={18} className="text-cyan-300" />
               <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.micTestAndSensitivity")}</h3>
             </div>
             <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-              <div className="space-y-5 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
+              <div className="space-y-5 rounded-3xl border border-white/10 bg-zinc-950/60 p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-sm font-medium text-white">{t("settings.micTest")}</p>
@@ -613,7 +816,7 @@ export default function GlobalSettingsOverlay({
                   </div>
                   <div className="relative h-3 overflow-hidden rounded-full bg-[#18181B]">
                     <div
-                      className={`h-full rounded-full transition-all ${inputAboveThreshold ? "bg-[#22C55E]" : "bg-[#6366F1]"}`}
+                      className={`h-full rounded-full transition-all ${inputAboveThreshold ? "bg-[#22C55E]" : "bg-cyan-400"}`}
                       style={{ width: `${Math.round(inputLevel * 100)}%` }}
                     />
                     <div
@@ -633,7 +836,7 @@ export default function GlobalSettingsOverlay({
                 </div>
               </div>
 
-              <div className="space-y-4 rounded-lg border border-[#27272A] bg-[#0A0A0A] p-4">
+              <div className="space-y-4 rounded-3xl border border-white/10 bg-zinc-950/60 p-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium text-white">{t("settings.autoSensitivity")}</p>
@@ -670,94 +873,175 @@ export default function GlobalSettingsOverlay({
 
       {activeSection === "account" && (
         <div className="space-y-6" data-testid="account-settings-panel">
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.profile")}</h3>
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.displayName")}</Label>
-                <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+          <section className="workspace-card overflow-hidden p-0">
+            <div className="h-28 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.35),transparent_40%),linear-gradient(120deg,rgba(15,23,42,0.95),rgba(9,9,11,0.75))]" />
+            <div className="grid gap-6 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:p-6">
+              <div className="space-y-4">
+                <div className="relative mx-auto w-full max-w-[220px]">
+                  <button
+                    type="button"
+                    onClick={openAvatarPicker}
+                    className="group relative block aspect-square w-full overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 text-left shadow-[0_18px_40px_rgba(2,8,23,0.32)] transition hover:border-cyan-400/35 hover:shadow-[0_20px_45px_rgba(34,211,238,0.18)]"
+                  >
+                    {hasAvatarPreview ? (
+                      <img
+                        src={avatarPreview}
+                        alt={accountDisplayName}
+                        className="absolute left-1/2 top-1/2 h-full w-full max-w-none object-cover"
+                        style={{
+                          transform: `translate(calc(-50% + ${avatarOffsetX * 0.45}px), calc(-50% + ${avatarOffsetY * 0.45}px)) scale(${avatarZoom})`,
+                          transformOrigin: "center center",
+                        }}
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400 to-cyan-600 text-6xl font-bold text-zinc-950">
+                        {avatarInitial}
+                      </div>
+                    )}
+                    <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-center text-xs text-zinc-200 opacity-100 backdrop-blur-md transition group-hover:border-cyan-400/35 group-hover:bg-zinc-950/70">
+                      {avatarPendingUpload ? t("settings.avatarReady") : t("settings.avatarChooseImage")}
+                    </div>
+                  </button>
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarSelected}
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-white/8 bg-zinc-950/55 p-4">
+                  <div className="flex items-center gap-2">
+                    <UserCircle size={16} className="text-cyan-300" />
+                    <p className="workspace-section-label">{t("settings.avatarUpload")}</p>
+                  </div>
+                  {avatarFileName ? (
+                    <p className="mt-3 text-xs text-zinc-500">{avatarFileName}</p>
+                  ) : null}
+                  <div className="mt-3 rounded-2xl border border-white/8 bg-zinc-950/55 px-4 py-3 text-xs text-zinc-400">
+                    {avatarPendingUpload ? t("settings.avatarReady") : t("settings.profilePreview")}
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.avatarUrl")}</Label>
-                <Input value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.status")}</Label>
-                <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white">
-                  {statusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
+
+              <div className="space-y-6">
+                <div>
+                  <p className="workspace-section-label">{t("settings.profile")}</p>
+                  <h3 className="mt-2 text-2xl font-bold text-white" style={{ fontFamily: "Manrope" }}>
+                    {accountDisplayName}
+                  </h3>
+                  <p className="mt-2 text-sm text-zinc-400">{user?.email}</p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label className="workspace-section-label">{t("auth.username")}</Label>
+                    <Input
+                      value={username}
+                      onChange={(event) => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                      className={SETTINGS_INPUT_CLASSNAME}
+                    />
+                    <p className="text-xs text-zinc-500">{t("settings.usernameHelp")}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="workspace-section-label">{t("auth.displayName")}</Label>
+                    <Input
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                      className={SETTINGS_INPUT_CLASSNAME}
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label className="workspace-section-label">{t("settings.status")}</Label>
+                    <Select value={status} onValueChange={setStatus}>
+                      <SelectTrigger className={SETTINGS_INPUT_CLASSNAME}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                      {statusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <Button onClick={saveAccount} disabled={savingAccount} className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
+                    <GearSix size={14} className="mr-2" />
+                    {savingAccount ? t("settings.saving") : t("settings.saveProfile")}
+                  </Button>
+                </div>
               </div>
             </div>
-            <Button onClick={saveAccount} disabled={savingAccount} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">
-              <GearSix size={14} className="mr-2" />
-              {savingAccount ? t("settings.saving") : t("settings.saveProfile")}
-            </Button>
           </section>
 
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+          <section className="workspace-card p-5">
             <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.password")}</h3>
-            <p className="mt-1 text-sm text-[#71717A]">
+            <p className="mt-1 text-sm leading-6 text-[#71717A]">
               {t("settings.passwordHelp")}
             </p>
             <div className="mt-5 grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.currentPassword")}</Label>
+                <Label className="workspace-section-label">{t("auth.currentPassword")}</Label>
                 <Input
                   type="password"
                   value={currentPassword}
                   onChange={(event) => setCurrentPassword(event.target.value)}
-                  className="bg-[#0A0A0A] border-[#27272A] text-white"
+                  className={SETTINGS_INPUT_CLASSNAME}
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.newPassword")}</Label>
+                <Label className="workspace-section-label">{t("auth.newPassword")}</Label>
                 <Input
                   type="password"
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
-                  className="bg-[#0A0A0A] border-[#27272A] text-white"
+                  className={SETTINGS_INPUT_CLASSNAME}
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("auth.confirmPassword")}</Label>
+                <Label className="workspace-section-label">{t("auth.confirmPassword")}</Label>
                 <Input
                   type="password"
                   value={confirmPassword}
                   onChange={(event) => setConfirmPassword(event.target.value)}
-                  className="bg-[#0A0A0A] border-[#27272A] text-white"
+                  className={SETTINGS_INPUT_CLASSNAME}
                 />
               </div>
             </div>
-            <Button onClick={changePassword} disabled={changingPassword} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">
+            <Button onClick={changePassword} disabled={changingPassword} className="mt-5 rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
               {changingPassword ? t("settings.changingPassword") : t("settings.changePassword")}
             </Button>
           </section>
 
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.language")}</h3>
-            <div className="mt-5 space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.language")}</Label>
-              <select
-                value={i18n.language}
-                onChange={(event) => { void i18n.changeLanguage(event.target.value); }}
-                className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
-              >
-                {SUPPORTED_LANGUAGES.map((language) => (
-                  <option key={language.value} value={language.value}>
-                    {t(language.labelKey)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </section>
+          <div className="grid gap-6">
+            <section className="workspace-card p-5">
+              <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.language")}</h3>
+              <div className="mt-5 space-y-2">
+                <Label className="workspace-section-label">{t("settings.language")}</Label>
+                <Select value={i18n.language} onValueChange={(value) => { void i18n.changeLanguage(value); }}>
+                  <SelectTrigger className={SETTINGS_INPUT_CLASSNAME}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                  {SUPPORTED_LANGUAGES.map((language) => (
+                    <SelectItem key={language.value} value={language.value}>
+                      {t(language.labelKey)}
+                    </SelectItem>
+                  ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </section>
+          </div>
         </div>
       )}
 
       {activeSection === "privacy" && (
         <div className="space-y-6" data-testid="privacy-settings-panel">
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+          <section className="workspace-card p-5">
             <div className="flex items-start gap-3">
               <ShieldCheck size={20} className="mt-0.5 text-[#22C55E]" />
               <div className="flex-1">
@@ -769,7 +1053,7 @@ export default function GlobalSettingsOverlay({
                 </p>
 
                 {!isDesktopCapable && (
-                  <div className="mt-4 rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3 text-sm text-[#A1A1AA]">
+                  <div className="mt-4 rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-3 text-sm text-[#A1A1AA]">
                     Install or open the desktop app to bootstrap recovery, verify devices and decrypt protected conversations.
                   </div>
                 )}
@@ -778,21 +1062,21 @@ export default function GlobalSettingsOverlay({
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Device name</Label>
-                      <Input value={e2eeDeviceName} onChange={(event) => setE2eeDeviceName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                      <Input value={e2eeDeviceName} onChange={(event) => setE2eeDeviceName(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Recovery passphrase</Label>
-                      <Input type="password" value={recoveryPassphrase} onChange={(event) => setRecoveryPassphrase(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                      <Input type="password" value={recoveryPassphrase} onChange={(event) => setRecoveryPassphrase(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
                     </div>
                     <div className="space-y-2 md:col-span-2">
                       <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Confirm recovery passphrase</Label>
-                      <Input type="password" value={confirmRecoveryPassphrase} onChange={(event) => setConfirmRecoveryPassphrase(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                      <Input type="password" value={confirmRecoveryPassphrase} onChange={(event) => setConfirmRecoveryPassphrase(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
                     </div>
                     <div className="md:col-span-2 flex flex-wrap gap-3">
-                      <Button onClick={handleInitializeE2EE} disabled={e2eeSubmitting} className="bg-[#22C55E] hover:bg-[#16A34A]">
+                      <Button onClick={handleInitializeE2EE} disabled={e2eeSubmitting} className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
                         {e2eeSubmitting ? "Configuring..." : "Enable E2EE on this desktop"}
                       </Button>
-                      <Button type="button" variant="outline" onClick={handleRestoreE2EE} disabled={e2eeSubmitting} className="border-[#27272A] bg-[#0A0A0A] text-white hover:bg-[#18181B]">
+                      <Button type="button" variant="outline" onClick={handleRestoreE2EE} disabled={e2eeSubmitting} className="rounded-2xl border-white/10 bg-zinc-950/60 text-white hover:bg-white/8">
                         Restore with recovery passphrase
                       </Button>
                     </div>
@@ -801,7 +1085,7 @@ export default function GlobalSettingsOverlay({
 
                 {isDesktopCapable && e2eeEnabled && (
                   <div className="mt-5 space-y-4">
-                    <div className="rounded-xl border border-[#27272A] bg-[#0A0A0A] px-4 py-4">
+                    <div className="rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-4">
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="text-sm font-semibold text-white">{currentDevice?.device_name || e2eeDeviceName}</p>
@@ -814,20 +1098,20 @@ export default function GlobalSettingsOverlay({
                         </span>
                       </div>
                       {currentDeviceFingerprint && (
-                        <p className="mt-3 rounded-lg border border-[#27272A] bg-[#121212] px-3 py-2 text-xs tracking-[0.18em] text-[#A1A1AA]">
+                        <p className="mt-3 rounded-2xl border border-white/10 bg-zinc-950/75 px-3 py-2 text-xs tracking-[0.18em] text-[#A1A1AA]">
                           {currentDeviceFingerprint}
                         </p>
                       )}
                     </div>
 
-                    <div className="rounded-xl border border-[#27272A] bg-[#0A0A0A] px-4 py-4">
+                    <div className="rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-4">
                       <h4 className="text-sm font-semibold text-white">Trusted devices</h4>
                       <div className="mt-3 space-y-3">
                         {e2eeLoading && (
                           <p className="text-sm text-[#71717A]">Loading encrypted device state...</p>
                         )}
                         {!e2eeLoading && e2eeDevices.map((device) => (
-                          <div key={device.device_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#27272A] bg-[#121212] px-3 py-3">
+                          <div key={device.device_id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-zinc-950/75 px-3 py-3">
                             <div>
                               <p className="text-sm font-medium text-white">{device.device_name}</p>
                               <p className="mt-1 text-xs text-[#71717A]">
@@ -836,7 +1120,7 @@ export default function GlobalSettingsOverlay({
                             </div>
                             <div className="flex flex-wrap gap-2">
                               {!device.verified_at && (
-                                <Button type="button" size="sm" onClick={() => approveDevice(device.device_id)} className="bg-[#6366F1] hover:bg-[#4F46E5]">
+                                <Button type="button" size="sm" onClick={() => approveDevice(device.device_id)} className="rounded-2xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300">
                                   Approve
                                 </Button>
                               )}
@@ -856,35 +1140,35 @@ export default function GlobalSettingsOverlay({
             </div>
           </section>
 
-          <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
+          <section className="workspace-card p-5">
             <div className="flex items-start gap-3">
-              <Export size={20} className="mt-0.5 text-[#6366F1]" />
+              <Export size={20} className="mt-0.5 text-cyan-300" />
               <div>
                 <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.exportData")}</h3>
                 <p className="mt-1 text-sm text-[#71717A]">{t("settings.exportDescription")}</p>
-                <Button onClick={handleExport} disabled={exporting} className="mt-4 bg-[#6366F1] hover:bg-[#4F46E5]">
+                <Button onClick={handleExport} disabled={exporting} className="mt-4 rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
                   {exporting ? t("settings.exporting") : t("settings.downloadExport")}
                 </Button>
               </div>
             </div>
           </section>
 
-          <section className="rounded-xl border border-[#EF4444]/20 bg-[#121212] p-5">
+          <section className="workspace-card border-red-500/15 bg-[linear-gradient(180deg,rgba(127,29,29,0.12),rgba(9,9,11,0.72))] p-5">
             <div className="flex items-start gap-3">
-              <Trash size={20} className="mt-0.5 text-[#EF4444]" />
+              <Trash size={20} className="mt-0.5 text-red-400" />
               <div className="flex-1">
-                <h3 className="text-lg font-bold text-[#EF4444]" style={{ fontFamily: "Manrope" }}>{t("settings.deleteAccount")}</h3>
-                <p className="mt-1 text-sm text-[#71717A]">{t("settings.deleteDescription")}</p>
+                <h3 className="text-lg font-bold text-red-300" style={{ fontFamily: "Manrope" }}>{t("settings.deleteAccount")}</h3>
+                <p className="mt-1 text-sm text-zinc-400">{t("settings.deleteDescription")}</p>
                 <Input
                   value={confirmDelete}
                   onChange={(event) => setConfirmDelete(event.target.value)}
                   placeholder={user?.username || t("auth.usernamePlaceholder")}
-                  className="mt-4 bg-[#0A0A0A] border-[#27272A] text-white"
+                  className={SETTINGS_DANGER_INPUT_CLASSNAME}
                 />
                 <Button
                   onClick={handleDelete}
                   disabled={deleting || confirmDelete !== user?.username}
-                  className="mt-4 bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40"
+                  className="mt-4 rounded-2xl bg-red-500 text-white hover:bg-red-400 disabled:opacity-40"
                 >
                   {deleting ? t("settings.deleting") : t("settings.deletePermanently")}
                 </Button>
@@ -893,6 +1177,96 @@ export default function GlobalSettingsOverlay({
           </section>
         </div>
       )}
-    </SettingsOverlayShell>
+      </SettingsOverlayShell>
+
+      <Dialog open={avatarEditorOpen} onOpenChange={setAvatarEditorOpen}>
+        <DialogContent className="workspace-panel-solid max-w-md text-white">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "Manrope" }}>{t("settings.avatarEditorTitle")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5">
+            <p className="text-sm text-zinc-400">{t("settings.avatarEditorHelp")}</p>
+
+            <div className="mx-auto w-full max-w-[280px]">
+              <div className="relative aspect-square overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 shadow-[0_24px_50px_rgba(2,8,23,0.32)]">
+                {avatarEditorSource ? (
+                  <img
+                    src={avatarEditorSource}
+                    alt={t("settings.avatarUpload")}
+                    className="absolute left-1/2 top-1/2 h-full w-full max-w-none object-cover"
+                    style={{
+                      transform: `translate(calc(-50% + ${avatarEditorOffsetX * 0.45}px), calc(-50% + ${avatarEditorOffsetY * 0.45}px)) scale(${avatarEditorZoom})`,
+                      transformOrigin: "center center",
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400 to-cyan-600 text-6xl font-bold text-zinc-950">
+                    {avatarInitial}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {avatarEditorFileName ? (
+              <p className="truncate text-center text-xs text-zinc-500">{avatarEditorFileName}</p>
+            ) : null}
+
+            <div className="space-y-4 rounded-3xl border border-white/10 bg-zinc-950/55 p-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="workspace-section-label">{t("settings.avatarZoom")}</Label>
+                  <span className="text-xs text-zinc-500">{Math.round(avatarEditorZoom * 100)}%</span>
+                </div>
+                <Slider
+                  value={[Math.round(avatarEditorZoom * 100)]}
+                  min={80}
+                  max={180}
+                  step={1}
+                  onValueChange={([value]) => setAvatarEditorZoom(value / 100)}
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="workspace-section-label">{t("settings.avatarOffsetX")}</Label>
+                    <span className="text-xs text-zinc-500">{avatarEditorOffsetX}</span>
+                  </div>
+                  <Slider
+                    value={[avatarEditorOffsetX]}
+                    min={-100}
+                    max={100}
+                    step={1}
+                    onValueChange={([value]) => setAvatarEditorOffsetX(value)}
+                  />
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="workspace-section-label">{t("settings.avatarOffsetY")}</Label>
+                    <span className="text-xs text-zinc-500">{avatarEditorOffsetY}</span>
+                  </div>
+                  <Slider
+                    value={[avatarEditorOffsetY]}
+                    min={-100}
+                    max={100}
+                    step={1}
+                    onValueChange={([value]) => setAvatarEditorOffsetY(value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-3">
+              <Button type="button" variant="outline" className="rounded-2xl border-white/10 bg-transparent text-zinc-200 hover:bg-white/8" onClick={() => setAvatarEditorOpen(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button type="button" className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300" onClick={applyAvatarEditor}>
+                {t("settings.avatarApply")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

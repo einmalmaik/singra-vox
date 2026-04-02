@@ -22,7 +22,6 @@ import {
   MonitorPlay,
   Plus,
   Prohibit,
-  SignOut,
   SpeakerHigh,
   SpeakerSlash,
   UserMinus,
@@ -102,6 +101,7 @@ export default function ChannelSidebar({
   onLogout,
   onUserUpdated,
   onRefreshServers,
+  serverSettingsRequest,
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
@@ -119,6 +119,10 @@ export default function ChannelSidebar({
   const [screenShareQuality, setScreenShareQuality] = useState("1080p60");
   const [screenShareAudio, setScreenShareAudio] = useState(true);
   const [screenShareSurface, setScreenShareSurface] = useState("monitor");
+  const [screenShareMeta, setScreenShareMeta] = useState({
+    hasAudio: false,
+    actualCaptureSettings: null,
+  });
   const [voiceChannel, setVoiceChannel] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
@@ -140,6 +144,8 @@ export default function ChannelSidebar({
   const [localVoicePreferences, setLocalVoicePreferences] = useState(
     loadVoicePreferences(user?.id, { isDesktop }),
   );
+  const preferredMuted = Boolean(localVoicePreferences.selfMuteEnabled);
+  const preferredDeafened = Boolean(localVoicePreferences.selfDeafenEnabled);
   const capabilities = buildWorkspaceCapabilities({ user, server, members, roles });
   const channelOrganization = useMemo(
     () => buildChannelOrganization(channels),
@@ -192,7 +198,7 @@ export default function ChannelSidebar({
         participantName: user.display_name || t("common.unknown"),
         source: "screen_share",
         badge: t("channel.liveStreamBadge"),
-        hasAudio: Boolean(screenShareAudio),
+        hasAudio: Boolean(screenShareMeta.hasAudio),
       });
     }
 
@@ -224,8 +230,8 @@ export default function ChannelSidebar({
     cameraEnabled,
     mediaParticipants,
     memberDisplayNames,
-    screenShareAudio,
     screenShareEnabled,
+    screenShareMeta.hasAudio,
     t,
     user?.display_name,
     user?.id,
@@ -255,12 +261,26 @@ export default function ChannelSidebar({
     });
   }, [user?.id]);
 
+  useEffect(() => {
+    if (voiceChannel) {
+      return;
+    }
+    setIsMuted(preferredMuted);
+    setIsDeafened(preferredDeafened);
+  }, [preferredDeafened, preferredMuted, voiceChannel]);
+
   const bindVoiceEngine = useCallback((engine) => {
     const handleEvent = (event) => {
       if (event.type === "mute_change") setIsMuted(Boolean(event.isMuted));
       if (event.type === "deafen_change") setIsDeafened(Boolean(event.isDeafened));
       if (event.type === "camera_change") setCameraEnabled(Boolean(event.enabled));
-      if (event.type === "screen_share_change") setScreenShareEnabled(Boolean(event.enabled));
+      if (event.type === "screen_share_change") {
+        setScreenShareEnabled(Boolean(event.enabled));
+        setScreenShareMeta({
+          hasAudio: Boolean(event.hasAudio),
+          actualCaptureSettings: event.actualCaptureSettings || null,
+        });
+      }
       if (event.type === "media_tracks_update") {
         setMediaParticipants(event.participants || []);
       }
@@ -275,6 +295,7 @@ export default function ChannelSidebar({
         setVoiceActivity({ localSpeaking: false, activeSpeakerIds: [], audioLevel: 0 });
         setCameraEnabled(false);
         setScreenShareEnabled(false);
+        setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
         setMediaParticipants([]);
       }
     };
@@ -309,10 +330,11 @@ export default function ChannelSidebar({
     const selfState = nextChannel?.voice_states?.find((state) => state.user_id === user.id);
     if (!nextChannel || !selfState) {
       setVoiceChannel(null);
-      setIsMuted(false);
-      setIsDeafened(false);
+      setIsMuted(preferredMuted);
+      setIsDeafened(preferredDeafened);
       setCameraEnabled(false);
       setScreenShareEnabled(false);
+      setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
       setVoiceActivity({ localSpeaking: false, activeSpeakerIds: [], audioLevel: 0 });
       return;
     }
@@ -325,7 +347,13 @@ export default function ChannelSidebar({
     }
     setIsMuted(Boolean(selfState.is_muted));
     setIsDeafened(Boolean(selfState.is_deafened));
-  }, [channels, user?.id, voiceChannel, voiceEngineRef]);
+  }, [channels, preferredDeafened, preferredMuted, user?.id, voiceChannel, voiceEngineRef]);
+
+  useEffect(() => {
+    if (serverSettingsRequest?.serverId && serverSettingsRequest.serverId === server?.id) {
+      setServerSettingsOpen(true);
+    }
+  }, [server?.id, serverSettingsRequest]);
 
   useEffect(() => {
     if (!voiceChannel?.is_private || !voiceEngineRef?.current || currentVoiceParticipantIds.length === 0) {
@@ -511,20 +539,30 @@ export default function ChannelSidebar({
         voiceEngineRef.current = engine;
       }
 
+      const desiredMuted = Boolean(localVoicePreferences.selfMuteEnabled);
+      const desiredDeafened = Boolean(localVoicePreferences.selfDeafenEnabled);
+      engine.setMuted(desiredMuted);
+      engine.setDeafened(desiredDeafened);
+
       await api.post(`/servers/${server.id}/voice/${channel.id}/join`);
       await engine.joinChannel();
+      const stateResponse = await api.put(`/servers/${server.id}/voice/${channel.id}/state`, {
+        is_muted: desiredMuted,
+        is_deafened: desiredDeafened,
+      });
       setVoiceChannel(channel);
-      setIsMuted(false);
-      setIsDeafened(false);
+      setIsMuted(Boolean(stateResponse?.data?.is_muted ?? desiredMuted));
+      setIsDeafened(Boolean(stateResponse?.data?.is_deafened ?? desiredDeafened));
       setCameraEnabled(false);
       setScreenShareEnabled(false);
+      setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
       onRefreshChannels?.();
       toast.success(t("channel.voiceConnected"));
     } catch (error) {
       console.error("Voice join error:", error);
       toast.error(formatError(error?.response?.data?.detail || t("channel.joinVoiceFailed")));
     }
-  }, [bindVoiceEngine, config, e2eeReady, isDesktop, isDesktopCapable, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
+  }, [bindVoiceEngine, config, e2eeReady, isDesktop, isDesktopCapable, localVoicePreferences.selfDeafenEnabled, localVoicePreferences.selfMuteEnabled, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
 
   const leaveVoice = useCallback(async () => {
     if (!voiceChannel) return;
@@ -535,50 +573,65 @@ export default function ChannelSidebar({
       }
       await api.post(`/servers/${server.id}/voice/${voiceChannel.id}/leave`);
       setVoiceChannel(null);
-      setIsMuted(false);
-      setIsDeafened(false);
+      setIsMuted(preferredMuted);
+      setIsDeafened(preferredDeafened);
       setCameraEnabled(false);
       setScreenShareEnabled(false);
+      setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
       setMediaParticipants([]);
       setStageState({ open: false, participantId: null, participantName: "", source: null });
       onRefreshChannels?.();
     } catch (error) {
       toast.error(formatError(error.response?.data?.detail || t("channel.leaveVoiceFailed")));
     }
-  }, [onRefreshChannels, server?.id, t, voiceChannel, voiceEngineRef]);
+  }, [onRefreshChannels, preferredDeafened, preferredMuted, server?.id, t, voiceChannel, voiceEngineRef]);
 
   const toggleMute = async () => {
-    if (!voiceChannel) return;
     const engine = voiceEngineRef?.current;
-    const nextMuted = engine ? engine.setMuted(!isMuted) : !isMuted;
+    const previousMuted = Boolean(localVoicePreferences.selfMuteEnabled);
+    const nextMuted = !isMuted;
+    engine?.setMuted(nextMuted);
     setIsMuted(nextMuted);
+    await updateLocalPreferences({ selfMuteEnabled: nextMuted });
+    if (!voiceChannel) {
+      return;
+    }
     try {
       const response = await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_muted: nextMuted });
       const persistedMuted = Boolean(response?.data?.is_muted ?? nextMuted);
       engine?.setMuted(persistedMuted);
       setIsMuted(persistedMuted);
+      await updateLocalPreferences({ selfMuteEnabled: persistedMuted });
       onRefreshChannels?.();
     } catch (error) {
-      engine?.setMuted(!nextMuted);
-      setIsMuted(!nextMuted);
+      engine?.setMuted(previousMuted);
+      setIsMuted(previousMuted);
+      await updateLocalPreferences({ selfMuteEnabled: previousMuted });
       toast.error(formatError(error.response?.data?.detail || t("channel.muteUpdateFailed")));
     }
   };
 
   const toggleDeafen = async () => {
-    if (!voiceChannel) return;
     const engine = voiceEngineRef?.current;
-    const nextDeafened = engine ? engine.setDeafened(!isDeafened) : !isDeafened;
+    const previousDeafened = Boolean(localVoicePreferences.selfDeafenEnabled);
+    const nextDeafened = !isDeafened;
+    engine?.setDeafened(nextDeafened);
     setIsDeafened(nextDeafened);
+    await updateLocalPreferences({ selfDeafenEnabled: nextDeafened });
+    if (!voiceChannel) {
+      return;
+    }
     try {
       const response = await api.put(`/servers/${server.id}/voice/${voiceChannel.id}/state`, { is_deafened: nextDeafened });
       const persistedDeafened = Boolean(response?.data?.is_deafened ?? nextDeafened);
       engine?.setDeafened(persistedDeafened);
       setIsDeafened(persistedDeafened);
+      await updateLocalPreferences({ selfDeafenEnabled: persistedDeafened });
       onRefreshChannels?.();
     } catch (error) {
-      engine?.setDeafened(!nextDeafened);
-      setIsDeafened(!nextDeafened);
+      engine?.setDeafened(previousDeafened);
+      setIsDeafened(previousDeafened);
+      await updateLocalPreferences({ selfDeafenEnabled: previousDeafened });
       toast.error(formatError(error.response?.data?.detail || t("channel.deafenUpdateFailed")));
     }
   };
@@ -739,15 +792,15 @@ export default function ChannelSidebar({
                     }));
                   }
                 }}
-                className={`channel-item w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm touch-none ${
+                className={`channel-item w-full flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm touch-none transition-all ${
                   currentChannel?.id === channel.id
-                    ? "active text-white"
+                    ? "active text-white bg-cyan-500/12 workspace-cyan-glow"
                     : hasMentionUnread
                       ? "bg-[#2A1616] text-white font-semibold"
                       : hasUnread
-                        ? "text-white font-semibold"
-                        : "text-[#A1A1AA]"
-                } ${isOver ? "ring-1 ring-[#6366F1] bg-[#18181B]" : ""} ${isDragging ? "opacity-60" : ""}`}
+                        ? "text-white font-semibold hover:bg-white/5"
+                        : "text-[#A1A1AA] hover:bg-white/5 hover:text-white"
+                } ${isOver ? "ring-1 ring-cyan-400/70 bg-white/5" : ""} ${isDragging ? "opacity-60" : ""}`}
                 data-testid={`channel-${channel.name}`}
               >
                 {hasUnread && (
@@ -817,7 +870,7 @@ export default function ChannelSidebar({
     const childIds = channelOrganization.childIdsByCategory[category.id] || [];
 
     return (
-      <div key={category.id} className="rounded-lg border border-[#202027] bg-[#101114]/70 px-1 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+      <div key={category.id} className="workspace-card px-1.5 py-1.5">
         {renderChannelRow(category)}
         {!collapsed && (
           <div className="space-y-1 border-t border-[#202027] pt-1">
@@ -867,14 +920,15 @@ export default function ChannelSidebar({
     if (!channel.voice_states?.length) return null;
 
     return (
-      <div className="pl-8 space-y-0.5">
+      <div className="pl-8 space-y-1">
         {channel.voice_states.map((voiceState) => {
           const participantId = voiceState.user_id;
           const locallyMuted = Boolean(localVoicePreferences.locallyMutedParticipants?.[participantId]);
           const participantVolume = localVoicePreferences.perUserVolumes?.[participantId] ?? 100;
+          const remoteSpeakingVisible = !isDeafened && !locallyMuted;
           const speaking = participantId === user?.id
             ? voiceActivity.localSpeaking
-            : voiceActivity.activeSpeakerIds.includes(participantId);
+            : (remoteSpeakingVisible && voiceActivity.activeSpeakerIds.includes(participantId));
           const isServerOwner = server?.owner_id === participantId;
           const participantMedia = participantId === user?.id
             ? {
@@ -889,7 +943,7 @@ export default function ChannelSidebar({
           return (
             <DropdownMenu key={participantId}>
               <DropdownMenuTrigger asChild>
-                <button className="w-full flex items-center gap-2 py-1 text-xs text-[#A1A1AA] hover:text-white text-left">
+                <button className="w-full flex items-center gap-2 rounded-xl px-2 py-1.5 text-xs text-[#A1A1AA] hover:bg-white/5 hover:text-white text-left transition-colors">
                   <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold ${
                     speaking ? "bg-[#6366F1] voice-active" : "bg-[#27272A]"
                   }`}>
@@ -1026,11 +1080,11 @@ export default function ChannelSidebar({
 
   return (
     <>
-      <div className="w-[300px] h-full min-h-0 bg-[#121212] border-r border-[#27272A]/40 flex flex-col shrink-0" data-testid="channel-sidebar">
-        <div className="h-12 flex items-center justify-between px-4 border-b border-[#27272A] shrink-0">
+      <div className="workspace-panel w-[300px] h-full min-h-0 flex flex-col shrink-0 overflow-hidden" data-testid="channel-sidebar">
+        <div className="h-14 flex items-center justify-between px-4 border-b workspace-divider shrink-0 bg-zinc-900/25">
           <ContextMenu>
             <ContextMenuTrigger asChild>
-              <h3 className="text-sm font-bold text-white truncate" style={{ fontFamily: "Manrope" }} data-testid="server-name-header">
+              <h3 className="text-base font-bold text-white truncate" style={{ fontFamily: "Manrope" }} data-testid="server-name-header">
                 {server?.name}
               </h3>
             </ContextMenuTrigger>
@@ -1044,7 +1098,7 @@ export default function ChannelSidebar({
           </ContextMenu>
           {capabilities.canOpenServerSettings && (
             <button
-              className="rounded p-1 text-[#71717A] transition-colors hover:bg-[#27272A] hover:text-white"
+              className="workspace-icon-button"
               onClick={() => setServerSettingsOpen(true)}
               data-testid="server-settings-button"
             >
@@ -1066,8 +1120,8 @@ export default function ChannelSidebar({
           >
             <ContextMenu>
               <ContextMenuTrigger asChild>
-                <div className="flex-1 min-h-0 overflow-y-auto py-2 px-2">
-                  <div className="space-y-2">
+                <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
+                  <div className="space-y-3">
                     <SortableContext items={channelOrganization.rootIds} strategy={verticalListSortingStrategy}>
                       {channelOrganization.rootIds.map((channelId) => {
                         const channel = channelOrganization.byId[channelId];
@@ -1093,10 +1147,10 @@ export default function ChannelSidebar({
                         {({ setNodeRef, isOver }) => (
                           <div
                             ref={setNodeRef}
-                            className={`rounded-md border border-dashed px-3 py-2 text-[11px] transition-colors ${
+                            className={`rounded-xl border border-dashed px-3 py-2 text-[11px] transition-colors ${
                               isOver
-                                ? "border-[#6366F1] bg-[#18181B] text-[#A5B4FC]"
-                                : "border-[#27272A] bg-[#111113] text-[#71717A]"
+                                ? "border-cyan-400 bg-cyan-500/10 text-cyan-200"
+                                : "border-white/10 bg-zinc-950/55 text-[#71717A]"
                             }`}
                           >
                             {t("serverSettings.dropToTopLevel")}
@@ -1111,13 +1165,13 @@ export default function ChannelSidebar({
                       <DialogTrigger asChild>
                         <button
                           data-testid="create-channel-button"
-                          className="flex items-center gap-2 px-2 py-1.5 mt-2 text-[#71717A] hover:text-[#A1A1AA] text-sm w-full rounded-md hover:bg-[#27272A]/30 transition-colors"
+                          className="mt-1 flex w-full items-center gap-2 rounded-xl border border-dashed border-white/10 bg-zinc-950/35 px-3 py-2 text-sm text-[#A1A1AA] transition-all hover:border-cyan-400/40 hover:bg-cyan-500/8 hover:text-white"
                         >
                           <Plus size={14} weight="bold" />
                           <span>{chType === "category" ? t("channel.addCategory") : t("channel.addChannel")}</span>
                         </button>
                       </DialogTrigger>
-                      <DialogContent className="bg-[#18181B] border-[#27272A] text-white max-w-sm">
+                        <DialogContent className="workspace-panel-solid max-w-sm text-white">
                         <DialogHeader>
                           <DialogTitle style={{ fontFamily: "Manrope" }}>
                             {chType === "category" ? t("serverSettings.createCategory") : t("channel.addChannel")}
@@ -1204,7 +1258,7 @@ export default function ChannelSidebar({
           </DndContext>
 
           {voiceChannel && (
-            <div className="border-t border-[#27272A] p-3 bg-[#0A0A0A]" data-testid="voice-controls">
+            <div className="border-t workspace-divider bg-zinc-950/45 p-3" data-testid="voice-controls">
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full bg-[#22C55E] ${voiceActivity.localSpeaking ? "voice-active" : ""}`} />
                 <span className="text-xs text-[#22C55E] font-medium">
@@ -1223,7 +1277,7 @@ export default function ChannelSidebar({
                         key={`${entry.userId}:${entry.source}`}
                         type="button"
                         onClick={() => openMediaStage(entry.userId, entry.participantName, entry.source)}
-                        className="w-full rounded-lg border border-[#27272A] bg-[#121212] px-3 py-2 text-left transition-colors hover:border-[#3F3F46] hover:bg-[#18181B]"
+                        className="workspace-card w-full px-3 py-2 text-left transition-colors hover:border-cyan-400/30 hover:bg-white/5"
                       >
                         <div className="flex items-center gap-2">
                           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1F2937] text-[#A5B4FC]">
@@ -1246,32 +1300,12 @@ export default function ChannelSidebar({
                   </div>
                 </div>
               )}
-              <div className="flex gap-2">
-                <button
-                  onClick={toggleMute}
-                  data-testid="voice-mute-toggle"
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    isMuted ? "bg-[#EF4444]/20 text-[#EF4444]" : "bg-[#27272A] text-[#A1A1AA] hover:text-white"
-                  }`}
-                >
-                  {isMuted ? <MicrophoneSlash size={14} /> : <Microphone size={14} />}
-                  {isMuted ? t("channel.muted") : t("channel.mute")}
-                </button>
-                <button
-                  onClick={toggleDeafen}
-                  data-testid="voice-deafen-toggle"
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    isDeafened ? "bg-[#EF4444]/20 text-[#EF4444]" : "bg-[#27272A] text-[#A1A1AA] hover:text-white"
-                  }`}
-                >
-                  {isDeafened ? <SpeakerSlash size={14} /> : <SpeakerHigh size={14} />}
-                  {isDeafened ? t("channel.deafened") : t("channel.deafen")}
-                </button>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <button
                   onClick={toggleCamera}
                   data-testid="voice-camera-toggle"
                   className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    cameraEnabled ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#27272A] text-[#A1A1AA] hover:text-white"
+                    cameraEnabled ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-white/5 text-[#A1A1AA] hover:text-white"
                   }`}
                 >
                   <VideoCamera size={14} />
@@ -1281,7 +1315,7 @@ export default function ChannelSidebar({
                   onClick={toggleScreenShare}
                   data-testid="voice-screen-share-toggle"
                   className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    screenShareEnabled ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-[#27272A] text-[#A1A1AA] hover:text-white"
+                    screenShareEnabled ? "bg-[#22C55E]/20 text-[#22C55E]" : "bg-white/5 text-[#A1A1AA] hover:text-white"
                   }`}
                 >
                   <MonitorPlay size={14} />
@@ -1298,30 +1332,43 @@ export default function ChannelSidebar({
             </div>
           )}
 
-          <div className="flex items-center gap-3 px-3 py-2 border-t border-[#27272A] bg-[#0A0A0A] shrink-0" data-testid="user-bar">
+            <div className="flex items-center gap-3 px-3 py-3 border-t workspace-divider bg-zinc-950/55 shrink-0" data-testid="user-bar">
             <div className="relative">
-              <div className="w-9 h-9 rounded-full bg-[#6366F1] flex items-center justify-center text-white text-sm font-bold">
-                {user?.display_name?.[0]?.toUpperCase() || "?"}
+              <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-400 to-cyan-600 text-sm font-bold text-zinc-950 shadow-[0_10px_20px_rgba(34,211,238,0.25)]">
+                {user?.avatar_url ? (
+                  <img src={user.avatar_url} alt={user?.display_name || user?.username || "avatar"} className="h-full w-full object-cover" />
+                ) : (
+                  user?.display_name?.[0]?.toUpperCase() || "?"
+                )}
               </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0A0A0A] bg-[#22C55E]" />
+              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-zinc-950 bg-[#22C55E]" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-white truncate">{user?.display_name}</p>
               <p className="text-[10px] text-[#71717A] truncate">@{user?.username}</p>
             </div>
             <button
-              className="rounded p-2 text-[#71717A] transition-colors hover:bg-[#27272A] hover:text-white"
+              className={`workspace-icon-button ${isMuted ? "border-red-500/30 bg-red-500/15 text-red-400" : ""}`}
+              onClick={toggleMute}
+              data-testid="user-bar-mute-toggle"
+              title={isMuted ? t("channel.muted") : t("channel.mute")}
+            >
+              {isMuted ? <MicrophoneSlash size={16} weight="bold" /> : <Microphone size={16} weight="bold" />}
+            </button>
+            <button
+              className={`workspace-icon-button ${isDeafened ? "border-red-500/30 bg-red-500/15 text-red-400" : ""}`}
+              onClick={toggleDeafen}
+              data-testid="user-bar-deafen-toggle"
+              title={isDeafened ? t("channel.deafened") : t("channel.deafen")}
+            >
+              {isDeafened ? <SpeakerSlash size={16} weight="bold" /> : <SpeakerHigh size={16} weight="bold" />}
+            </button>
+            <button
+              className="workspace-icon-button"
               onClick={() => setUserSettingsOpen(true)}
               data-testid="user-settings-button"
             >
               <GearSix size={16} weight="bold" />
-            </button>
-            <button
-              className="rounded p-2 text-[#71717A] transition-colors hover:bg-[#27272A] hover:text-[#EF4444]"
-              onClick={onLogout}
-              data-testid="channel-sidebar-logout"
-            >
-              <SignOut size={16} weight="bold" />
             </button>
           </div>
         </div>
@@ -1348,18 +1395,18 @@ export default function ChannelSidebar({
         pttDebug={pttDebug}
       />
       <Dialog open={screenShareDialogOpen} onOpenChange={setScreenShareDialogOpen}>
-        <DialogContent className="max-w-lg border-[#27272A] bg-[#18181B] text-white">
+        <DialogContent className="workspace-panel-solid max-w-lg text-white">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "Manrope" }}>{t("channel.shareScreen")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-5">
             <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("channel.shareQuality")}</Label>
+              <Label className="workspace-section-label">{t("channel.shareQuality")}</Label>
               <Select value={screenShareQuality} onValueChange={setScreenShareQuality}>
-                <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
+                <SelectTrigger className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
+                <SelectContent className="workspace-panel-solid border-white/10 text-white">
                   <SelectItem value="480p30">480p / 30 FPS</SelectItem>
                   <SelectItem value="720p30">720p / 30 FPS</SelectItem>
                   <SelectItem value="1080p60">1080p / 60 FPS</SelectItem>
@@ -1368,12 +1415,12 @@ export default function ChannelSidebar({
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("channel.shareSurface")}</Label>
+              <Label className="workspace-section-label">{t("channel.shareSurface")}</Label>
               <Select value={screenShareSurface} onValueChange={setScreenShareSurface}>
-                <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
+                <SelectTrigger className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
+                <SelectContent className="workspace-panel-solid border-white/10 text-white">
                   <SelectItem value="monitor">{t("channel.shareEntireScreen")}</SelectItem>
                   <SelectItem value="window">{t("channel.shareWindow")}</SelectItem>
                   <SelectItem value="browser">{t("channel.shareTab")}</SelectItem>
@@ -1381,7 +1428,7 @@ export default function ChannelSidebar({
               </Select>
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border border-[#27272A] bg-[#121212] px-4 py-3">
+            <div className="workspace-card flex items-center justify-between px-4 py-3">
               <div>
                 <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
                 <p className="text-xs text-[#71717A]">{t("channel.shareSystemAudioHelp")}</p>
@@ -1389,23 +1436,29 @@ export default function ChannelSidebar({
               <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
             </div>
 
-            <div className="rounded-lg border border-[#27272A] bg-[#121212] px-4 py-3 text-xs text-[#71717A]">
+            <div className="workspace-card px-4 py-3 text-xs text-[#71717A]">
               {t("channel.shareScreenPickerHint")}
             </div>
+
+            {screenShareEnabled && screenShareMeta.actualCaptureSettings && (
+              <div className="workspace-card px-4 py-3 text-xs text-zinc-400">
+                {`${Math.round(screenShareMeta.actualCaptureSettings.width || 0)} × ${Math.round(screenShareMeta.actualCaptureSettings.height || 0)} @ ${Math.round(screenShareMeta.actualCaptureSettings.frameRate || 0)} FPS`}
+              </div>
+            )}
 
             <div className="flex justify-end gap-3">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setScreenShareDialogOpen(false)}
-                className="border-[#27272A] bg-transparent text-white hover:bg-[#121212]"
+                className="rounded-2xl border-white/10 bg-transparent text-white hover:bg-white/8"
               >
                 {t("common.cancel")}
               </Button>
               <Button
                 type="button"
                 onClick={() => void startScreenShare()}
-                className="bg-[#6366F1] hover:bg-[#4F46E5]"
+                className="rounded-2xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300"
               >
                 {t("channel.startSharing")}
               </Button>

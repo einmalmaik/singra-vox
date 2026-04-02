@@ -7,6 +7,7 @@ import { formatError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import AuthShell from "@/components/auth/AuthShell";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { canCreateCommunity } from "@/lib/workspacePermissions";
@@ -55,79 +56,80 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] px-6" data-testid="onboarding-page">
-      <div className="w-full max-w-md">
-        <div className="flex items-center gap-3 mb-8">
-          <RocketLaunch size={36} weight="fill" className="text-[#6366F1]" />
-          <div>
-            <h2 className="text-2xl font-bold" style={{ fontFamily: "Manrope" }}>{t("onboarding.getStarted")}</h2>
-            <p className="text-[#71717A] text-sm">{t("onboarding.subtitle")}</p>
-          </div>
-        </div>
-
+    <AuthShell
+      eyebrow={t("onboarding.getStarted")}
+      title={t("onboarding.getStarted")}
+      subtitle={t("onboarding.subtitle")}
+      icon={RocketLaunch}
+      sideTitle="Singra Vox"
+      sideCopy={t("auth.heroSubtitle")}
+      cardClassName="max-w-2xl"
+      contentClassName="max-w-none"
+    >
+      <div className="space-y-6" data-testid="onboarding-page">
         {canCreateInstanceCommunity && (
-          <div className="bg-[#121212] border border-[#27272A] rounded-lg p-6 mb-6">
-            <h3 className="text-lg font-bold mb-4" style={{ fontFamily: "Manrope" }}>{t("onboarding.createCommunity")}</h3>
-            <form onSubmit={handleCreate} className="space-y-4">
+          <section className="workspace-card p-6">
+            <h3 className="text-xl font-bold text-white" style={{ fontFamily: "Manrope" }}>{t("onboarding.createCommunity")}</h3>
+            <form onSubmit={handleCreate} className="mt-5 space-y-4">
               <div className="space-y-2">
-                <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("onboarding.communityName")}</Label>
+                <Label className="workspace-section-label">{t("onboarding.communityName")}</Label>
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t("onboarding.communityNamePlaceholder")}
                   required
                   data-testid="server-name-input"
-                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
+                  className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("onboarding.description")}</Label>
+                <Label className="workspace-section-label">{t("onboarding.description")}</Label>
                 <Input
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder={t("onboarding.descriptionPlaceholder")}
                   data-testid="server-desc-input"
-                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
+                  className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
                 />
               </div>
               <Button
                 type="submit"
                 disabled={loading}
                 data-testid="create-server-button"
-                className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
+                className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300"
               >
                 {loading ? t("onboarding.creating") : t("onboarding.createCommunityAction")}
               </Button>
             </form>
-          </div>
+          </section>
         )}
 
-        <div className="bg-[#121212] border border-[#27272A] rounded-lg p-6">
-          <h3 className="text-lg font-bold mb-4" style={{ fontFamily: "Manrope" }}>{t("onboarding.joinWithInvite")}</h3>
-          <div className="flex gap-2">
+        <section className="workspace-card p-6">
+          <h3 className="text-xl font-bold text-white" style={{ fontFamily: "Manrope" }}>{t("onboarding.joinWithInvite")}</h3>
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row">
             <Input
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
               placeholder={t("onboarding.invitePlaceholder")}
               data-testid="invite-code-input"
-              className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white placeholder:text-[#52525B]"
+              className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
             />
             <Button
               onClick={handleJoinInvite}
               disabled={loading || !inviteCode.trim()}
               data-testid="join-invite-button"
-              className="bg-[#27272A] hover:bg-[#3f3f46] text-white shrink-0"
+              className="h-12 shrink-0 rounded-2xl bg-white/8 px-6 text-white hover:bg-white/12"
             >
               {t("onboarding.join")}
             </Button>
           </div>
           {!canCreateInstanceCommunity && (
-            <p className="text-xs text-[#71717A] mt-4">
+            <p className="mt-4 text-sm text-zinc-400">
               {t("onboarding.inviteOnlyHelp")}
             </p>
           )}
-        </div>
+        </section>
       </div>
-    </div>
+    </AuthShell>
   );
 }

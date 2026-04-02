@@ -117,6 +117,7 @@ export default function MainLayout() {
   const [messages, setMessages] = useState([]);
   const [members, setMembers] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [serverSettingsRequest, setServerSettingsRequest] = useState(null);
   const [showChannels, setShowChannels] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   const [view, setView] = useState("server");
@@ -364,6 +365,13 @@ export default function MainLayout() {
         }
         break;
 
+      case "server_deleted":
+        setServers((previous) => previous.filter((server) => server.id !== data.server_id));
+        if (currentServerRef.current?.id === data.server_id) {
+          await handleRemovedFromServer(data.server_id, t("server.deleted"));
+        }
+        break;
+
       case "channel_create":
         setChannels((previous) => previous.some((channel) => channel.id === data.channel.id) ? previous : [...previous, data.channel]);
         break;
@@ -422,6 +430,19 @@ export default function MainLayout() {
             ? { ...conversation, user: { ...(conversation.user || {}), ...(data.user || {}) } }
             : conversation
         )));
+        setMessages((previous) => previous.map((message) => (
+          message.author_id === data.user_id
+            ? { ...message, author: { ...(message.author || {}), ...(data.user || {}) } }
+            : message
+        )));
+        setDmMessages((previous) => previous.map((message) => (
+          message.sender_id === data.user_id
+            ? { ...message, sender: { ...(message.sender || {}), ...(data.user || {}) } }
+            : message
+        )));
+        if (currentDmUserRef.current?.id === data.user_id) {
+          setCurrentDmUser((previous) => ({ ...(previous || {}), ...(data.user || {}) }));
+        }
         break;
 
       case "member_kicked":
@@ -600,8 +621,41 @@ export default function MainLayout() {
     }
   }, []);
 
+  const openServerSettingsFromRail = useCallback(async (server) => {
+    if (!server) return;
+    await selectServer(server);
+    setServerSettingsRequest({
+      serverId: server.id,
+      nonce: Date.now(),
+    });
+  }, [selectServer]);
+
+  const deleteServerFromRail = useCallback(async (server) => {
+    if (!server) return;
+    const confirmed = window.confirm(t("server.confirmDelete", { name: server.name }));
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await api.delete(`/servers/${server.id}`);
+      toast.success(t("server.deleted"));
+      if (currentServerRef.current?.id === server.id) {
+        await loadServers();
+      } else {
+        setServers((previous) => previous.filter((entry) => entry.id !== server.id));
+      }
+    } catch (error) {
+      toast.error(t("server.deleteFailed", { error: error?.response?.data?.detail || error?.message || "Unknown error" }));
+    }
+  }, [loadServers, t]);
+
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0A0A0A]" data-testid="main-layout">
+    <div className="relative flex h-screen overflow-hidden bg-transparent p-2 gap-2" data-testid="main-layout">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-24 -top-24 h-[30rem] w-[30rem] rounded-full bg-cyan-500/10 blur-[120px]" />
+        <div className="absolute -right-24 bottom-[-8rem] h-[26rem] w-[26rem] rounded-full bg-zinc-500/12 blur-[120px]" />
+      </div>
       <ServerSidebar
         servers={servers}
         currentServer={currentServer}
@@ -616,14 +670,16 @@ export default function MainLayout() {
         onLogout={logout}
         dmUnread={dmUnread}
         serverUnreadMap={serverUnreadMap}
+        onManageServer={openServerSettingsFromRail}
+        onDeleteServer={deleteServerFromRail}
       />
 
       {view === "server" && currentServer ? (
         <>
-          {showChannels && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setShowChannels(false)} />}
-          {showMembers && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={() => setShowMembers(false)} />}
+          {showChannels && <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 md:hidden" onClick={() => setShowChannels(false)} />}
+          {showMembers && <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 md:hidden" onClick={() => setShowMembers(false)} />}
 
-          <div className={`${showChannels ? "fixed left-[72px] top-0 bottom-0 z-50 h-full" : "hidden"} md:relative md:block md:h-full`}>
+          <div className={`${showChannels ? "fixed left-[80px] top-2 bottom-2 z-50 h-[calc(100vh-1rem)]" : "hidden"} md:relative md:block md:h-full`}>
             <ChannelSidebar
               server={currentServer}
               channels={channels}
@@ -641,18 +697,19 @@ export default function MainLayout() {
               onLogout={logout}
               onUserUpdated={setUser}
               onRefreshServers={loadServers}
+              serverSettingsRequest={serverSettingsRequest}
             />
           </div>
 
-          <div className="flex-1 flex flex-col min-w-0 min-h-0">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-[#27272A] md:hidden shrink-0" data-testid="mobile-toolbar">
-              <button onClick={() => setShowChannels(true)} data-testid="toggle-channels-mobile" className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]">
+          <div className="workspace-panel flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b workspace-divider bg-zinc-900/25 md:hidden shrink-0" data-testid="mobile-toolbar">
+              <button onClick={() => setShowChannels(true)} data-testid="toggle-channels-mobile" className="workspace-icon-button">
                 <List size={18} />
               </button>
               <span className="text-sm font-bold text-white flex-1 truncate" style={{ fontFamily: "Manrope" }}>
                 {currentChannel ? `# ${currentChannel.name}` : currentServer?.name}
               </span>
-              <button onClick={() => setShowMembers(true)} data-testid="toggle-members-mobile" className="p-1.5 rounded-md bg-[#27272A] text-[#A1A1AA]">
+              <button onClick={() => setShowMembers(true)} data-testid="toggle-members-mobile" className="workspace-icon-button">
                 <UsersThree size={18} />
               </button>
             </div>
@@ -671,7 +728,7 @@ export default function MainLayout() {
             />
           </div>
 
-          <div className={`${showMembers ? "fixed right-0 top-0 bottom-0 z-50 h-full" : "hidden"} md:relative md:block md:h-full`}>
+          <div className={`${showMembers ? "fixed right-2 top-2 bottom-2 z-50 h-[calc(100vh-1rem)]" : "hidden"} md:relative md:block md:h-full`}>
             <MemberSidebar
               members={members}
               roles={roles}
@@ -689,31 +746,35 @@ export default function MainLayout() {
         </>
       ) : view === "dm" ? (
         <>
-          <div className="w-[280px] bg-[#121212] border-r border-[#27272A] flex flex-col" data-testid="dm-sidebar">
-            <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0">
+          <div className="workspace-panel w-[280px] flex flex-col overflow-hidden" data-testid="dm-sidebar">
+            <div className="h-12 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0">
               <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>{t("server.directMessages")}</h3>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
               {dmConversations.map((conversation) => (
                 <button
                   key={conversation.user.id}
                   onClick={() => void selectDmUser(conversation.user)}
                   data-testid={`dm-conv-${conversation.user.username}`}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors ${
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-colors ${
                     currentDmUser?.id === conversation.user.id
-                      ? "bg-[#27272A] text-white"
-                      : "text-[#A1A1AA] hover:bg-[#27272A]/50 hover:text-white"
+                      ? "bg-cyan-500/12 text-white workspace-cyan-glow"
+                      : "text-[#A1A1AA] hover:bg-white/5 hover:text-white"
                   }`}
                 >
-                  <div className="w-8 h-8 rounded-full bg-[#27272A] flex items-center justify-center text-sm font-bold shrink-0">
-                    {conversation.user.display_name?.[0]?.toUpperCase() || "?"}
+                  <div className="w-9 h-9 rounded-xl bg-zinc-800/80 flex items-center justify-center text-sm font-bold shrink-0">
+                    {conversation.user.avatar_url ? (
+                      <img src={conversation.user.avatar_url} alt={conversation.user.display_name || conversation.user.username || "avatar"} className="h-full w-full rounded-xl object-cover" />
+                    ) : (
+                      conversation.user.display_name?.[0]?.toUpperCase() || "?"
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{conversation.user.display_name}</p>
                     <p className="text-xs text-[#71717A] truncate">{conversation.last_message?.content}</p>
                   </div>
                   {conversation.unread_count > 0 && (
-                    <span className="bg-[#6366F1] text-white text-xs rounded-full w-5 h-5 flex items-center justify-center shrink-0">
+                    <span className="bg-cyan-500 text-zinc-950 text-xs rounded-full w-5 h-5 flex items-center justify-center shrink-0 font-bold">
                       {conversation.unread_count}
                     </span>
                   )}
@@ -723,23 +784,31 @@ export default function MainLayout() {
           </div>
 
           {currentDmUser ? (
-            <div className="flex-1 flex flex-col bg-[#18181B]" data-testid="dm-chat-area">
-              <div className="h-12 flex items-center px-4 border-b border-[#27272A] shrink-0">
-                <div className="w-7 h-7 rounded-full bg-[#27272A] flex items-center justify-center text-xs font-bold mr-3">
-                  {currentDmUser.display_name?.[0]?.toUpperCase()}
+            <div className="workspace-panel flex-1 flex flex-col overflow-hidden" data-testid="dm-chat-area">
+              <div className="h-12 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0">
+                <div className="w-8 h-8 rounded-xl bg-zinc-800/80 flex items-center justify-center text-xs font-bold mr-3">
+                  {currentDmUser.avatar_url ? (
+                    <img src={currentDmUser.avatar_url} alt={currentDmUser.display_name || currentDmUser.username || "avatar"} className="h-full w-full rounded-xl object-cover" />
+                  ) : (
+                    currentDmUser.display_name?.[0]?.toUpperCase()
+                  )}
                 </div>
                 <span className="font-semibold text-sm">{currentDmUser.display_name}</span>
                 <span className="ml-2 text-xs text-[#71717A]">@{currentDmUser.username}</span>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {!isDesktopCapable ? (
-                  <div className="rounded-xl border border-[#27272A] bg-[#121212] p-6 text-sm text-[#A1A1AA]">
+                  <div className="workspace-card p-6 text-sm text-[#A1A1AA]">
                     Strong end-to-end encrypted direct messages are only available in the desktop app.
                   </div>
                 ) : dmMessages.map((message) => (
                   <div key={message.id} className="flex gap-3 fade-in" data-testid={`dm-msg-${message.id}`}>
-                    <div className="w-8 h-8 rounded-full bg-[#27272A] flex items-center justify-center text-xs font-bold shrink-0">
-                      {message.sender?.display_name?.[0]?.toUpperCase() || "?"}
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#27272A] text-xs font-bold">
+                      {message.sender?.avatar_url ? (
+                        <img src={message.sender.avatar_url} alt={message.sender?.display_name || message.sender?.username || "avatar"} className="h-full w-full object-cover" />
+                      ) : (
+                        message.sender?.display_name?.[0]?.toUpperCase() || "?"
+                      )}
                     </div>
                     <div>
                       <div className="flex items-baseline gap-2">
@@ -767,13 +836,13 @@ export default function MainLayout() {
               ) : null}
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]">
+            <div className="workspace-panel flex-1 flex items-center justify-center text-[#71717A]">
               {t("dm.selectConversation")}
             </div>
           )}
         </>
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-[#18181B] text-[#71717A]">
+        <div className="workspace-panel flex-1 flex items-center justify-center text-[#71717A]">
           {t("app.loading")}
         </div>
       )}

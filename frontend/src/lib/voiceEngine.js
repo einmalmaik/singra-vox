@@ -47,6 +47,7 @@ export class VoiceEngine {
 
     this.localSpeaking = false;
     this.localAudioLevel = 0;
+    this.remoteSpeakerIds = [];
     this.activeSpeakerIds = [];
     this.autoSensitivityFloor = 0.015;
     this.currentInputThreshold = this._resolveInputThreshold();
@@ -139,6 +140,7 @@ export class VoiceEngine {
     this.currentInputThreshold = this._resolveInputThreshold();
     this._applyInputGain();
     this._applyRemoteAudioState();
+    this._emitSpeakingState();
 
     if (this.room && this._requiresTrackRestart(nextPreferences)) {
       await this.restartLocalTrack();
@@ -277,6 +279,7 @@ export class VoiceEngine {
   setDeafened(deafened) {
     this.isDeafened = Boolean(deafened);
     this._applyRemoteAudioState();
+    this._emitSpeakingState();
     this._emit("deafen_change", { isDeafened: this.isDeafened });
     return this.isDeafened;
   }
@@ -431,7 +434,7 @@ export class VoiceEngine {
       video: { displaySurface },
       resolution,
       systemAudio: audio ? "include" : "exclude",
-      surfaceSwitching: "include",
+      surfaceSwitching: "exclude",
       selfBrowserSurface: "exclude",
       suppressLocalAudioPlayback: true,
       contentHint: "detail",
@@ -447,8 +450,14 @@ export class VoiceEngine {
     await Promise.all(
       this.screenShareTracks.map((track) => this.room.localParticipant.publishTrack(track)),
     );
+    const screenShareVideoTrack = this.screenShareTracks.find((track) => track.kind === Track.Kind.Video);
+    const screenShareAudioTrack = this.screenShareTracks.find((track) => track.source === Track.Source.ScreenShareAudio);
     this._emitRemoteMediaUpdate();
-    this._emit("screen_share_change", { enabled: true });
+    this._emit("screen_share_change", {
+      enabled: true,
+      hasAudio: Boolean(screenShareAudioTrack),
+      actualCaptureSettings: screenShareVideoTrack?.mediaStreamTrack?.getSettings?.() || null,
+    });
     return true;
   }
 
@@ -460,7 +469,7 @@ export class VoiceEngine {
     this.screenShareTracks.forEach((track) => track.stop());
     this.screenShareTracks = [];
     this._emitRemoteMediaUpdate();
-    this._emit("screen_share_change", { enabled: false });
+    this._emit("screen_share_change", { enabled: false, hasAudio: false, actualCaptureSettings: null });
   }
 
   attachParticipantMediaElement(participantId, source, element) {
@@ -610,6 +619,11 @@ export class VoiceEngine {
     const participantIds = new Set(
       Array.from(this.audioElements.values()).map((state) => state.participantId),
     );
+    this.room?.remoteParticipants?.forEach((participant) => {
+      if (participant?.identity) {
+        participantIds.add(participant.identity);
+      }
+    });
     participantIds.forEach((participantId) => {
       this._applyParticipantAudio(participantId);
     });
@@ -624,24 +638,97 @@ export class VoiceEngine {
     ) / 100;
     const locallyMuted = Boolean(this.preferences.locallyMutedParticipants?.[userId]);
     const shouldReceiveAudio = !(this.isDeafened || locallyMuted);
+    const desiredVolume = shouldReceiveAudio ? Math.min(2, baseVolume * participantVolume) : 0;
+
+    // Control the LiveKit subscription at the publication layer, not only on
+    // the attached HTMLAudioElement. This keeps local deafen/mute authoritative
+    // even when remote PTT or track restarts cause a fresh media pipeline.
+    const remoteParticipant = this.room?.remoteParticipants?.get(userId);
+    remoteParticipant?.audioTrackPublications?.forEach((publication) => {
+      if (!publication) {
+        return;
+      }
+
+      if (typeof publication.setSubscribed === "function" && publication.isDesired !== shouldReceiveAudio) {
+        publication.setSubscribed(shouldReceiveAudio);
+      }
+
+      if (typeof remoteParticipant.setVolume === "function") {
+        const source = publication.source === Track.Source.ScreenShareAudio
+          ? Track.Source.ScreenShareAudio
+          : Track.Source.Microphone;
+        remoteParticipant.setVolume(desiredVolume, source);
+      }
+
+      if (typeof publication.track?.setVolume === "function") {
+        publication.track.setVolume(desiredVolume);
+      }
+    });
 
     this.audioElements.forEach((state) => {
       if (state.participantId !== userId) {
         return;
       }
       state.element.muted = !shouldReceiveAudio;
-      state.element.volume = shouldReceiveAudio ? Math.min(2, baseVolume * participantVolume) : 0;
+      state.element.volume = desiredVolume;
 
-      // Keep the transport subscription aligned with the local mute/deafen
-      // state. Relying on the HTMLAudioElement alone proved flaky across web and
-      // desktop, while publication.setEnabled(false) stops new data for this
-      // client without affecting other listeners.
-      const desiredEnabled = shouldReceiveAudio;
-      if (state.subscriptionEnabled !== desiredEnabled && typeof state.publication?.setEnabled === "function") {
-        state.subscriptionEnabled = desiredEnabled;
-        void state.publication.setEnabled(desiredEnabled).catch(() => {
-          state.subscriptionEnabled = !desiredEnabled;
-        });
+      if (typeof state.publication?.track?.setVolume === "function") {
+        state.publication.track.setVolume(desiredVolume);
+      }
+
+      if (!shouldReceiveAudio && state.track && state.attached) {
+        try {
+          state.track.detach(state.element);
+        } catch {
+          // Ignore detach races during rapid local mute/deafen toggles.
+        }
+        state.attached = false;
+        state.element.srcObject = null;
+      } else if (shouldReceiveAudio && state.track && !state.attached) {
+        state.track.attach(state.element);
+        state.attached = true;
+      }
+
+      // Pausing the attached element makes local deafen immediate even if the
+      // transport-level subscription change takes an extra roundtrip.
+      if (shouldReceiveAudio) {
+        if (state.playbackPaused) {
+          state.playbackPaused = false;
+          void state.element.play().catch(() => {
+            state.playbackPaused = true;
+          });
+        }
+      } else if (!state.playbackPaused) {
+        state.element.pause();
+        state.playbackPaused = true;
+      }
+
+      state.subscriptionEnabled = shouldReceiveAudio;
+    });
+  }
+
+  _syncAudioPublicationState(participantId, publication, status = null) {
+    if (!participantId) {
+      return;
+    }
+
+    const publicationSource = publication?.source || null;
+    this.audioElements.forEach((state) => {
+      if (state.participantId !== participantId) {
+        return;
+      }
+      if (publicationSource && state.source !== publicationSource) {
+        return;
+      }
+
+      state.publication = publication || state.publication;
+      if (publication?.track) {
+        state.track = publication.track;
+      }
+      if (status) {
+        state.subscriptionEnabled = status === "subscribed";
+      } else if (typeof publication?.isSubscribed === "boolean") {
+        state.subscriptionEnabled = publication.isSubscribed;
       }
     });
   }
@@ -818,10 +905,13 @@ export class VoiceEngine {
         document.body.appendChild(audioEl);
         this.audioElements.set(trackKey, {
           element: audioEl,
+          track,
           participantId: participant.identity,
           source,
           publication,
           subscriptionEnabled: true,
+          attached: true,
+          playbackPaused: false,
         });
         this._applyParticipantAudio(participant.identity);
 
@@ -859,11 +949,39 @@ export class VoiceEngine {
         this.remoteVideoTracks.delete(trackKey);
       }
 
-      this._setActiveSpeakerIds(
-        this.activeSpeakerIds.filter((speakerId) => speakerId !== participant.identity),
+      this._setRemoteSpeakerIds(
+        this.remoteSpeakerIds.filter((speakerId) => speakerId !== participant.identity),
       );
+      this._applyParticipantAudio(participant.identity);
       this._emitRemoteMediaUpdate();
       this._emit("peer_disconnected", { userId: participant.identity, source, kind: track.kind });
+    });
+
+    const reapplyRemoteAudioState = (publication, participant, status = null) => {
+      if (!participant?.identity || participant.identity === this.userId) {
+        return;
+      }
+      if (publication?.kind && publication.kind !== Track.Kind.Audio) {
+        return;
+      }
+
+      // Remote PTT toggles the upstream track mute state very frequently. Re-applying
+      // the local receive policy on every publication transition keeps deafen/local
+      // mute authoritative even when LiveKit re-enables a track internally.
+      this._syncAudioPublicationState(participant.identity, publication, status);
+      this._applyParticipantAudio(participant.identity);
+    };
+
+    this.room.on(RoomEvent.TrackMuted, (publication, participant) => {
+      reapplyRemoteAudioState(publication, participant);
+    });
+
+    this.room.on(RoomEvent.TrackUnmuted, (publication, participant) => {
+      reapplyRemoteAudioState(publication, participant);
+    });
+
+    this.room.on(RoomEvent.TrackSubscriptionStatusChanged, (publication, status, participant) => {
+      reapplyRemoteAudioState(publication, participant, status);
     });
 
     this.room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
@@ -882,12 +1000,8 @@ export class VoiceEngine {
 
       this.localSpeaking = localSpeaking;
       this.localAudioLevel = localAudioLevel;
-      this.activeSpeakerIds = remoteSpeakerIds;
-      this._emit("speaking_update", {
-        localSpeaking,
-        activeSpeakerIds: [...remoteSpeakerIds],
-        audioLevel: localAudioLevel,
-      });
+      this.remoteSpeakerIds = remoteSpeakerIds;
+      this._emitSpeakingState();
     });
 
     this.room.on(RoomEvent.Disconnected, () => {
@@ -900,8 +1014,23 @@ export class VoiceEngine {
     });
   }
 
-  _setActiveSpeakerIds(activeSpeakerIds) {
-    this.activeSpeakerIds = activeSpeakerIds;
+  _setRemoteSpeakerIds(activeSpeakerIds) {
+    this.remoteSpeakerIds = activeSpeakerIds;
+    this._emitSpeakingState();
+  }
+
+  _getVisibleActiveSpeakerIds() {
+    if (this.isDeafened) {
+      return [];
+    }
+
+    return this.remoteSpeakerIds.filter(
+      (speakerId) => !this.preferences.locallyMutedParticipants?.[speakerId],
+    );
+  }
+
+  _emitSpeakingState() {
+    this.activeSpeakerIds = this._getVisibleActiveSpeakerIds();
     this._emit("speaking_update", {
       localSpeaking: this.localSpeaking,
       activeSpeakerIds: [...this.activeSpeakerIds],
@@ -912,6 +1041,7 @@ export class VoiceEngine {
   _resetSpeakingState() {
     this.localSpeaking = false;
     this.localAudioLevel = 0;
+    this.remoteSpeakerIds = [];
     this.activeSpeakerIds = [];
     this._emit("speaking_update", {
       localSpeaking: false,

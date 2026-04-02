@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { UserPlus } from "@phosphor-icons/react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger
@@ -9,6 +10,7 @@ import {
 import InviteGeneratorPanel from "@/components/invites/InviteGeneratorPanel";
 
 export default function InviteModal({ serverId }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   return (
@@ -17,17 +19,17 @@ export default function InviteModal({ serverId }) {
         <Tooltip>
           <TooltipTrigger asChild>
             <DialogTrigger asChild>
-              <button className="p-1 rounded hover:bg-[#27272A] text-[#71717A] hover:text-white transition-colors" data-testid="invite-button">
+              <button className="workspace-icon-button" data-testid="invite-button">
                 <UserPlus size={16} weight="bold" />
               </button>
             </DialogTrigger>
           </TooltipTrigger>
-          <TooltipContent side="bottom"><p>Invite People</p></TooltipContent>
+          <TooltipContent side="bottom"><p>{t("server.invite")}</p></TooltipContent>
         </Tooltip>
       </TooltipProvider>
-      <DialogContent className="bg-[#18181B] border-[#27272A] text-white max-w-xl">
+      <DialogContent className="workspace-panel-solid max-w-xl text-white">
         <DialogHeader>
-          <DialogTitle style={{ fontFamily: 'Manrope' }}>Invite People</DialogTitle>
+          <DialogTitle style={{ fontFamily: 'Manrope' }}>{t("server.invite")}</DialogTitle>
         </DialogHeader>
         <div className="mt-2">
           <InviteGeneratorPanel serverId={serverId} />

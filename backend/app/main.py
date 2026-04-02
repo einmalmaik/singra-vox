@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 import logging
 import os
+import re
 import secrets
 import uuid
 
@@ -77,6 +78,7 @@ EMAIL_VERIFICATION_CODE_LENGTH = 6
 E2EE_PROTOCOL_VERSION = "sv-e2ee-v1"
 E2EE_DEVICE_HEADER = "X-Singra-Device-Id"
 MAX_E2EE_BLOB_BYTES = int(os.environ.get("MAX_E2EE_BLOB_BYTES", str(50 * 1024 * 1024)))
+USERNAME_PATTERN = re.compile(r"^[a-z0-9_]{3,32}$")
 
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
@@ -110,6 +112,16 @@ def hash_pw(password: str) -> str:
 
 def verify_pw(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+
+def normalize_username(value: str) -> str:
+    normalized = value.lower().strip()
+    if not USERNAME_PATTERN.fullmatch(normalized):
+        raise HTTPException(
+            400,
+            "Username must be 3-32 characters and only contain lowercase letters, numbers and underscores",
+        )
+    return normalized
 
 
 def hash_verification_code(*, email: str, purpose: str, code: str) -> str:
@@ -371,6 +383,34 @@ async def build_member_payload(server_id: str, user_id: str) -> Optional[dict]:
 
     member["user"] = sanitize_user(member_user)
     return member
+
+
+async def delete_server_cascade(server_id: str):
+    channels = await db.channels.find({"server_id": server_id}, {"_id": 0, "id": 1}).to_list(2000)
+    channel_ids = [channel["id"] for channel in channels]
+
+    if channel_ids:
+        messages = await db.messages.find({"channel_id": {"$in": channel_ids}}, {"_id": 0, "id": 1}).to_list(5000)
+        message_ids = [message["id"] for message in messages]
+        if message_ids:
+            await db.message_revisions.delete_many({"message_id": {"$in": message_ids}})
+        await db.messages.delete_many({"channel_id": {"$in": channel_ids}})
+        await db.channel_access.delete_many({"channel_id": {"$in": channel_ids}})
+        await db.channel_overrides.delete_many({"channel_id": {"$in": channel_ids}})
+        await db.voice_states.delete_many({"channel_id": {"$in": channel_ids}})
+        await db.read_states.delete_many({"channel_id": {"$in": channel_ids}})
+        await db.webhooks.delete_many({"channel_id": {"$in": channel_ids}})
+        await db.webhook_logs.delete_many({"channel_id": {"$in": channel_ids}})
+
+    await db.audit_log.delete_many({"server_id": server_id})
+    await db.notifications.delete_many({"server_id": server_id})
+    await db.server_emojis.delete_many({"server_id": server_id})
+    await db.bot_tokens.delete_many({"server_id": server_id})
+    await db.invites.delete_many({"server_id": server_id})
+    await db.roles.delete_many({"server_id": server_id})
+    await db.server_members.delete_many({"server_id": server_id})
+    await db.channels.delete_many({"server_id": server_id})
+    await db.servers.delete_one({"id": server_id})
 
 
 def request_device_id(request: Request) -> Optional[str]:
@@ -918,6 +958,7 @@ class OwnershipTransferInput(BaseModel):
     user_id: str
 
 class ProfileUpdateInput(BaseModel):
+    username: Optional[str] = None
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     status: Optional[str] = None
@@ -1068,7 +1109,7 @@ async def register(inp: RegisterInput, response: Response):
     if not settings.get("allow_open_signup", True):
         raise HTTPException(403, "Open signup is disabled")
     email = inp.email.lower().strip()
-    username = inp.username.lower().strip()
+    username = normalize_username(inp.username)
     await ensure_unique_identity(email, username)
     uid = new_id()
     user = {
@@ -1676,7 +1717,7 @@ async def bootstrap(inp: BootstrapInput, response: Response):
         raise HTTPException(409, "Instance is already initialized")
 
     email = inp.owner_email.lower().strip()
-    username = inp.owner_username.lower().strip()
+    username = normalize_username(inp.owner_username)
     await ensure_unique_identity(email, username)
 
     try:
@@ -1839,6 +1880,30 @@ async def update_server(server_id: str, request: Request):
     if server:
         await ws_mgr.broadcast_server(server_id, {"type": "server_updated", "server": server})
     return server
+
+
+@servers_r.delete("/{server_id}")
+async def delete_server(server_id: str, request: Request):
+    actor = await current_user(request)
+    server = await db.servers.find_one({"id": server_id}, {"_id": 0})
+    if not server:
+        raise HTTPException(404, "Server not found")
+    if server.get("owner_id") != actor["id"]:
+        raise HTTPException(403, "Only the current server owner can delete this server")
+
+    memberships = await db.server_members.find({"server_id": server_id}, {"_id": 0, "user_id": 1}).to_list(1000)
+    member_ids = sorted({membership["user_id"] for membership in memberships if membership.get("user_id")})
+
+    for member_id in member_ids:
+        await clear_voice_membership(member_id, server_id=server_id, force_reason="deleted")
+
+    await delete_server_cascade(server_id)
+
+    for member_id in member_ids:
+        ws_mgr.remove_server(member_id, server_id)
+        await ws_mgr.send(member_id, {"type": "server_deleted", "server_id": server_id})
+
+    return {"ok": True}
 
 
 @servers_r.post("/{server_id}/ownership/transfer")
@@ -2883,6 +2948,14 @@ async def get_user_profile(user_id: str, request: Request):
 async def update_profile(inp: ProfileUpdateInput, request: Request):
     user = await current_user(request)
     updates = {k: v for k, v in inp.model_dump().items() if v is not None}
+    next_username = updates.pop("username", None)
+    if next_username is not None:
+        normalized_username = normalize_username(next_username)
+        if normalized_username != user["username"]:
+            existing_user = await db.users.find_one({"username": normalized_username}, {"_id": 0, "id": 1})
+            if existing_user and existing_user.get("id") != user["id"]:
+                raise HTTPException(400, "Username taken")
+            updates["username"] = normalized_username
     if updates:
         await db.users.update_one({"id": user["id"]}, {"$set": updates})
         await broadcast_presence_update(user["id"])
