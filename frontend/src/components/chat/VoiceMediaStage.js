@@ -66,9 +66,7 @@ export default function VoiceMediaStage({
           <div className="overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80">
             {documentHidden ? (
               <div className="flex h-[70vh] w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_35%),linear-gradient(180deg,#05070b,#09090b)] px-6 text-center text-sm text-zinc-400">
-                {t("mediaStage.previewPaused", {
-                  defaultValue: "The local preview is paused while the app is in the background to avoid unnecessary rendering work.",
-                })}
+                {t("mediaStage.previewPaused")}
               </div>
             ) : (
               <video
@@ -82,9 +80,7 @@ export default function VoiceMediaStage({
           </div>
           <p className="text-xs text-zinc-500">
             {documentHidden
-              ? t("mediaStage.previewPausedHint", {
-                defaultValue: "The stream keeps running for other viewers. Only the local preview is paused in the background.",
-              })
+              ? t("mediaStage.previewPausedHint")
               : (config?.isDesktop
                 ? t("mediaStage.desktopHint")
                 : t("mediaStage.webHint"))}

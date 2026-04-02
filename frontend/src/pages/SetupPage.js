@@ -4,10 +4,11 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck, RocketLaunch } from "@phosphor-icons/react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
-import { formatError } from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { toast } from "sonner";
 
 export default function SetupPage() {
@@ -41,7 +42,7 @@ export default function SetupPage() {
       toast.success(t("setup.instanceInitialized"));
       navigate("/onboarding");
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || err.message);
+      setError(formatAppError(t, err, { fallbackKey: "setup.bootstrapFailed" }));
     } finally {
       setLoading(false);
     }
@@ -71,11 +72,7 @@ export default function SetupPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-md text-sm" data-testid="setup-error">
-                {error}
-              </div>
-            )}
+            <LocalizedErrorBanner message={error} className="rounded-md text-red-200" data-testid="setup-error" />
 
             <div className="space-y-2">
               <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("setup.instanceName")}</Label>

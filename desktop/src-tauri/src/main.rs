@@ -106,16 +106,6 @@ fn delete_secret(service: &str, key: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
-#[tauri::command]
-fn show_notification(_title: String, _body: String) -> Result<String, String> {
-    Ok("ok".into())
-}
-
-#[tauri::command]
 fn get_desktop_runtime_info() -> DesktopRuntimeInfo {
     DesktopRuntimeInfo {
         platform: std::env::consts::OS.to_string(),
@@ -557,7 +547,6 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
             #[cfg(target_os = "windows")]
             spawn_ptt_listener(app.handle().clone(), ptt_state.clone());
@@ -567,8 +556,6 @@ fn main() {
             store_secret,
             get_secret,
             delete_secret,
-            get_app_version,
-            show_notification,
             get_desktop_runtime_info,
             configure_ptt_listener,
             clear_ptt_listener,

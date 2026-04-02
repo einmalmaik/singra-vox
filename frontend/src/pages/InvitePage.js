@@ -3,16 +3,18 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowSquareOut, DesktopTower, ShieldCheck, SignIn, UserPlus } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { Button } from "@/components/ui/button";
+import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import {
   attemptDesktopInviteLaunch,
   buildDesktopInviteLink,
   clearPendingInvite,
-  describeInviteExpiry,
-  describeInviteUsage,
+  formatInviteExpiry,
+  formatInviteUsage,
   markDesktopOpenAttempt,
   rememberPreferredServer,
   savePendingInvite,
@@ -46,11 +48,11 @@ export default function InvitePage() {
       setInviteInfo(response.data);
     } catch (err) {
       setInviteInfo(null);
-      setError(formatError(err.response?.data?.detail));
+      setError(formatAppError(t, err, { fallbackKey: "invite.loadFailed" }));
     } finally {
       setLoading(false);
     }
-  }, [code]);
+  }, [code, t]);
 
   const acceptInvite = useCallback(async () => {
     if (!code) return;
@@ -61,11 +63,12 @@ export default function InvitePage() {
       const response = await api.post(`/invites/${code}/accept`);
       clearPendingInvite();
       rememberPreferredServer(response.data.server_id);
-      toast.success(t("invite.joinedCommunity"));
+      toast.success(t("invite.joinedServer"));
       navigate("/", { replace: true });
     } catch (err) {
-      setError(formatError(err.response?.data?.detail));
-      toast.error(formatError(err.response?.data?.detail));
+      const message = formatAppError(t, err, { fallbackKey: "invite.acceptFailed" });
+      setError(message);
+      toast.error(message);
     } finally {
       setAccepting(false);
     }
@@ -130,7 +133,7 @@ export default function InvitePage() {
               {t("invite.joinServer", { server: inviteInfo.server?.name })}
             </h2>
             <p className="mt-2 text-sm text-[#A1A1AA]">
-              {describeInviteUsage(inviteInfo.invite?.max_uses, inviteInfo.invite?.uses)} · {describeInviteExpiry(inviteInfo.invite?.expires_at)}
+              {formatInviteUsage(t, inviteInfo.invite?.max_uses, inviteInfo.invite?.uses)} · {formatInviteExpiry(t, inviteInfo.invite?.expires_at)}
             </p>
 
             {!isDesktopApp() && (
@@ -152,11 +155,7 @@ export default function InvitePage() {
               </div>
             )}
 
-            {error ? (
-              <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-left text-sm text-red-300">
-                {error}
-              </div>
-            ) : null}
+            <LocalizedErrorBanner message={error} className="mt-5 text-left text-red-200" />
 
             {user ? (
               <div className="mt-6 space-y-3">
@@ -165,7 +164,7 @@ export default function InvitePage() {
                   disabled={accepting}
                   className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white"
                 >
-                  {accepting ? t("invite.joining") : t("invite.joinCommunity")}
+                  {accepting ? t("invite.joining") : t("invite.joinServerAction")}
                 </Button>
                 <Button
                   onClick={() => navigate("/", { replace: true })}

@@ -13,9 +13,11 @@ import ThreadPanel from "@/components/chat/ThreadPanel";
 import PinnedMessagesPanel from "@/components/chat/PinnedMessagesPanel";
 import NotificationPanel from "@/components/chat/NotificationPanel";
 import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
+import E2EEStatus from "@/components/security/E2EEStatus";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { useE2EE } from "@/contexts/E2EEContext";
-import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
+import { formatAppError } from "@/lib/appErrors";
+import { buildServerCapabilities } from "@/lib/serverPermissions";
 import { resolveAssetUrl } from "@/lib/assetUrls";
 import {
   applyMentionSuggestion,
@@ -52,9 +54,13 @@ export default function ChatArea({
   serverId,
   members = [],
   roles = [],
+  viewerContext = null,
   onSendTyping,
   typingUsers,
   onChannelRead,
+  hasOlderMessages = false,
+  onLoadOlderMessages,
+  loadingOlderMessages = false,
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
@@ -64,6 +70,7 @@ export default function ChatArea({
     decryptMessage,
     encryptForRecipients,
     fetchChannelRecipients,
+    inspectRecipientTrust,
     uploadEncryptedAttachment,
     downloadAndDecryptAttachment,
   } = useE2EE();
@@ -83,6 +90,7 @@ export default function ChatArea({
   const [activeMention, setActiveMention] = useState(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [decryptedPayloads, setDecryptedPayloads] = useState({});
+  const [trustNoticeVisible, setTrustNoticeVisible] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const composerInputRef = useRef(null);
@@ -92,22 +100,58 @@ export default function ChatArea({
   const pendingJumpMessageId = useRef(null);
   const highlightTimeout = useRef(null);
   const suppressAutoScroll = useRef(false);
-  const workspacePermissions = useMemo(
-    () => buildWorkspaceCapabilities({ user, server, members, roles }).permissions,
-    [members, roles, server, user],
+  const serverPermissions = useMemo(
+    () => buildServerCapabilities({
+      user,
+      server,
+      viewerContext,
+      channelId: channel?.id,
+    }).permissions,
+    [channel?.id, server, user, viewerContext],
   );
   const mentionSuggestions = useMemo(
     () => buildMentionSuggestions({
       query: activeMention?.query || "",
       members,
       roles,
-      permissions: workspacePermissions,
+      permissions: serverPermissions,
     }),
-    [activeMention?.query, members, roles, workspacePermissions],
+    [activeMention?.query, members, roles, serverPermissions],
   );
   const isE2EEChannel = Boolean(channel?.is_private);
   const canUseE2EEChannel = !isE2EEChannel || (isDesktopCapable && e2eeReady);
   const resolveAvatarUrl = (url) => resolveAssetUrl(url, config?.assetBase);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!channel?.id || !isE2EEChannel || !canUseE2EEChannel) {
+      setTrustNoticeVisible(false);
+      return undefined;
+    }
+
+    (async () => {
+      try {
+        const recipients = await fetchChannelRecipients(channel.id);
+        const result = await inspectRecipientTrust({
+          scopeKind: "channel",
+          scopeId: channel.id,
+          recipientsResponse: recipients,
+        });
+        if (!cancelled) {
+          setTrustNoticeVisible(Boolean(result.changed));
+        }
+      } catch {
+        if (!cancelled) {
+          setTrustNoticeVisible(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canUseE2EEChannel, channel?.id, fetchChannelRecipients, inspectRecipientTrust, isE2EEChannel]);
 
   useEffect(() => {
     if (suppressAutoScroll.current) {
@@ -245,7 +289,9 @@ export default function ChatArea({
 
       if (isE2EEChannel) {
         if (!canUseE2EEChannel) {
-          throw new Error("Use a verified desktop device to send encrypted messages here.");
+          toast.error(t("e2ee.privateChannelVerifyDevice"));
+          setSending(false);
+          return;
         }
         const recipients = await fetchChannelRecipients(channel.id);
         const attachmentRefs = [];
@@ -291,8 +337,8 @@ export default function ChatArea({
       setSelectedMentions([]);
       setActiveMention(null);
       setActiveMentionIndex(0);
-    } catch {
-      toast.error(t("chat.sendFailed"));
+    } catch (error) {
+      toast.error(formatAppError(t, error, { fallbackKey: "chat.sendFailed" }));
     } finally {
       setSending(false);
     }
@@ -388,7 +434,7 @@ export default function ChatArea({
           { id: uploadRes.data.id, name: file.name, type: file.type, url: uploadRes.data.url },
         ]);
       } catch {
-        toast.error(t("chat.uploadFailed"));
+        toast.error(formatAppError(t, null, { fallbackKey: "chat.uploadFailed" }));
       }
     };
     reader.readAsDataURL(file);
@@ -421,7 +467,7 @@ export default function ChatArea({
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch {
-      toast.error("Encrypted attachment could not be opened.");
+      toast.error(t("errors.encryptedAttachmentOpenFailed"));
     }
   };
 
@@ -556,10 +602,31 @@ export default function ChatArea({
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-5 py-4" data-testid="messages-list">
           {isE2EEChannel && !canUseE2EEChannel && (
-            <div className="workspace-card mx-auto mt-8 max-w-xl p-6 text-sm text-[#A1A1AA]">
-              {isDesktopCapable
-                ? "This private channel is end-to-end encrypted. Verify or restore this desktop device in Settings > Privacy to read the messages."
-                : "This private channel is end-to-end encrypted and is only available in the desktop app."}
+            <E2EEStatus
+              variant="guard"
+              scope="private_channel"
+              ready={e2eeReady}
+              isDesktopCapable={isDesktopCapable}
+              className="workspace-card mx-auto mt-8 max-w-xl p-6"
+            />
+          )}
+          {isE2EEChannel && canUseE2EEChannel && trustNoticeVisible && (
+            <E2EEStatus
+              variant="notice"
+              messageKey="e2ee.deviceListChanged"
+              className="workspace-card mx-auto mt-4 max-w-xl"
+            />
+          )}
+          {canUseE2EEChannel && hasOlderMessages && (
+            <div className="mb-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void onLoadOlderMessages?.()}
+                disabled={loadingOlderMessages}
+                className="rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loadingOlderMessages ? t("common.loading") : t("chat.loadOlderMessages")}
+              </button>
             </div>
           )}
           {canUseE2EEChannel && messages.length === 0 && (

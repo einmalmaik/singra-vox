@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import AuthShell from "@/components/auth/AuthShell";
-import { formatError } from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
+import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 
 export default function ResetPasswordPage() {
   const { t } = useTranslation();
@@ -47,7 +48,7 @@ export default function ResetPasswordPage() {
       toast.success(t("auth.passwordResetSuccess"));
       navigate("/login", { replace: true });
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || err.message);
+      setError(formatAppError(t, err, { fallbackKey: "auth.passwordResetFailed" }));
     } finally {
       setLoading(false);
     }
@@ -64,7 +65,7 @@ export default function ResetPasswordPage() {
       await forgotPassword(email);
       toast.success(t("auth.passwordResetCodeSent"));
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || err.message);
+      setError(formatAppError(t, err, { fallbackKey: "auth.passwordResetRequestFailed" }));
     } finally {
       setResending(false);
     }
@@ -96,11 +97,7 @@ export default function ResetPasswordPage() {
       )}
     >
       <form onSubmit={handleSubmit} className="space-y-5" data-testid="reset-password-page">
-        {error ? (
-          <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {error}
-          </div>
-        ) : null}
+        <LocalizedErrorBanner message={error} className="text-red-200" />
 
         <div className="space-y-2">
           <Label className="workspace-section-label">{t("auth.email")}</Label>

@@ -3,18 +3,19 @@ import { useTranslation } from "react-i18next";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
 import { toast } from "sonner";
-import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
+import { formatAppError } from "@/lib/appErrors";
+import { buildServerCapabilities } from "@/lib/serverPermissions";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { resolveAssetUrl } from "@/lib/assetUrls";
 
-export default function MemberSidebar({ members, roles, serverId, server, user, onStartDM, onRefreshMembers }) {
+export default function MemberSidebar({ members, roles, serverId, server, user, viewerContext, onStartDM, onRefreshMembers }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
   const onlineMembers = members.filter(m => m.user?.status === "online");
   const offlineMembers = members.filter(m => m.user?.status !== "online");
-  const capabilities = buildWorkspaceCapabilities({ user, server, members, roles });
+  const capabilities = buildServerCapabilities({ user, server, viewerContext });
 
   const getRoleColor = (member) => {
     if (!member.roles?.length || !roles?.length) return "#A1A1AA";
@@ -38,7 +39,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
       toast.success(t("memberList.kicked"));
       onRefreshMembers();
     } catch (err) {
-      toast.error(formatError(err.response?.data?.detail));
+      toast.error(formatAppError(t, err, { fallbackKey: "serverSettings.memberActionGenericFailed" }));
     }
   };
 
@@ -51,7 +52,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
       toast.success(t("memberList.banned"));
       onRefreshMembers();
     } catch (err) {
-      toast.error(formatError(err.response?.data?.detail));
+      toast.error(formatAppError(t, err, { fallbackKey: "serverSettings.memberActionGenericFailed" }));
     }
   };
 
@@ -60,7 +61,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
       await api.post(`/servers/${serverId}/moderation/mute`, { user_id: userId, duration_minutes: 10 });
       toast.success(t("memberList.muted"));
     } catch (err) {
-      toast.error(formatError(err.response?.data?.detail));
+      toast.error(formatAppError(t, err, { fallbackKey: "serverSettings.memberActionGenericFailed" }));
     }
   };
 

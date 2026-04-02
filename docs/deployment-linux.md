@@ -31,7 +31,7 @@ After the containers start:
 1. open the printed `/setup` URL
 2. create the first owner account
 3. sign in
-4. create the first community from the onboarding screen
+4. create the first server from the onboarding screen
 
 There is no admin password in `.env` anymore.
 
@@ -73,4 +73,3 @@ git pull
 cd deploy
 docker compose up -d --build
 ```
-

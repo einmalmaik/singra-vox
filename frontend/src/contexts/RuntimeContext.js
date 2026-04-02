@@ -8,7 +8,7 @@ const EMPTY_SETUP_STATUS = {
   initialized: false,
   setup_required: true,
   allow_open_signup: false,
-  community_count: 0,
+  server_count: 0,
   instance_name: "",
 };
 
@@ -25,8 +25,12 @@ export function RuntimeProvider({ children }) {
 
     configureApi(targetConfig);
     const res = await api.get("/setup/status");
-    setSetupStatus(res.data);
-    return res.data;
+    const normalizedStatus = {
+      ...res.data,
+      server_count: res.data?.server_count ?? res.data?.community_count ?? 0,
+    };
+    setSetupStatus(normalizedStatus);
+    return normalizedStatus;
   }, []);
 
   useEffect(() => {
@@ -81,4 +85,3 @@ export function useRuntime() {
   if (!ctx) throw new Error("useRuntime must be used inside RuntimeProvider");
   return ctx;
 }
-

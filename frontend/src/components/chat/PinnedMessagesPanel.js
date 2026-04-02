@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Paperclip, PushPin, ShieldCheck, X } from "@phosphor-icons/react";
+import { Paperclip, PushPin, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 import { useE2EE } from "@/contexts/E2EEContext";
+import E2EEStatus from "@/components/security/E2EEStatus";
 
 export default function PinnedMessagesPanel({ channel, channelId, onClose, onJumpToMessage, refreshKey }) {
   const { t } = useTranslation();
@@ -94,7 +95,7 @@ export default function PinnedMessagesPanel({ channel, channelId, onClose, onJum
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch {
-      toast.error("Encrypted attachment could not be opened.");
+      toast.error(t("errors.encryptedAttachmentOpenFailed"));
     }
   };
 
@@ -118,11 +119,12 @@ export default function PinnedMessagesPanel({ channel, channelId, onClose, onJum
             <div className="w-5 h-5 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin" />
           </div>
         ) : !canReadE2EEPins ? (
-          <div className="rounded-lg border border-[#27272A] bg-[#111214] p-4 text-sm text-[#A1A1AA]">
-            {isDesktopCapable
-              ? "This private channel is end-to-end encrypted. Verify or restore this desktop device in Settings > Privacy to review pinned messages."
-              : "Pinned messages from end-to-end encrypted channels are only available in the desktop app."}
-          </div>
+          <E2EEStatus
+            variant="guard"
+            scope="pins"
+            ready={e2eeReady}
+            isDesktopCapable={isDesktopCapable}
+          />
         ) : pins.length === 0 ? (
             <div className="text-center py-8">
               <PushPin size={32} className="text-[#27272A] mx-auto mb-2" />
@@ -158,10 +160,7 @@ export default function PinnedMessagesPanel({ channel, channelId, onClose, onJum
               </div>
               <div className="space-y-2">
                 {pin.is_e2ee && (
-                  <div className="flex items-center gap-1 text-[10px] uppercase tracking-[0.18em] text-[#818CF8]">
-                    <ShieldCheck size={12} weight="fill" />
-                    <span>End-to-end encrypted</span>
-                  </div>
+                  <E2EEStatus variant="badge" />
                 )}
                 {displayContent ? (
                   <p className="text-sm text-[#E4E4E7] break-words whitespace-pre-wrap">

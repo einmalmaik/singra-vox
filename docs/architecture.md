@@ -1,161 +1,126 @@
-# Singra Vox – Architektur
+# Singra Vox Architektur
 
 ## Überblick
 
-Singra Vox ist als **Client-Server-Architektur** aufgebaut. Der Server ist vollständig unabhängig von den Clients. Jeder Client – Web-Browser oder Tauri-Desktop-App – kommuniziert über dieselbe REST-API und WebSocket-Verbindung.
+Singra Vox ist eine Discord-ähnliche Kommunikationsplattform mit einem gemeinsamen Web-/Desktop-Frontend, einem FastAPI-Backend, MongoDB für Persistenz, LiveKit als produktivem Voice-/Media-SFU-Pfad und einer Tauri-Desktop-Hülle für native Desktop-Funktionen.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        Clients                                │
-│                                                               │
-│  ┌─────────────────────┐      ┌────────────────────────────┐ │
-│  │    Web-Client        │      │    Desktop-Client          │ │
-│  │    React SPA         │      │    Tauri 2 + React         │ │
-│  │    Browser-basiert   │      │    Native Window           │ │
-│  └──────────┬──────────┘      └──────────────┬─────────────┘ │
-│             │                                 │               │
-│             │          REST + WebSocket        │               │
-│             └────────────────┬────────────────┘               │
-└──────────────────────────────┼────────────────────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │   Reverse Proxy     │
-                    │   nginx / Caddy     │
-                    │   Port 80/443       │
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │   Singra Vox API    │
-                    │   FastAPI + WS      │
-                    │   Port 8001         │
-                    └──────────┬──────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │   MongoDB           │
-                    │   Port 27017        │
-                    └─────────────────────┘
-```
+Die produktiven Kernpfade sind:
+- Web und Desktop teilen sich denselben React-Client unter `frontend/src`
+- das Backend unter `backend/app/main.py` und den Phase-Routen erzwingt Auth, Permissions, Realtime und E2EE-Delivery
+- Voice, Video und Screen Share laufen produktiv über LiveKit
+- Desktop-spezifische Funktionen liegen unter `desktop/src-tauri`
 
-## Shared vs. Platform-specific
+## Aktiver Produktpfad
 
-| Layer | Shared (Web + Desktop) | Web-only | Tauri-only |
-|-------|----------------------|----------|------------|
-| UI-Komponenten | `src/components/`, `src/pages/` | – | – |
-| State Management | `src/contexts/AuthContext.js` | – | – |
-| API-Client | `src/lib/api.js` | – | Tauri-HTTP-Client (optional) |
-| E2EE Crypto | `src/lib/crypto.js` (Web Crypto API) | – | OS Keychain für Key Storage |
-| Routing | React Router | Browser-History | In-Memory Router |
-| Globale Hotkeys | – | – | Tauri Global Shortcut API |
-| System Tray | – | – | Tauri Tray Plugin |
-| Benachrichtigungen | – | Notification API | Tauri Notification Plugin |
-| Audio Devices | – | WebRTC getUserMedia | Tauri + native Audio |
-| Key Storage | localStorage | – | OS Secure Storage / Keychain |
+### Frontend
+- `frontend/src/contexts/AuthContext.js`: zentrale Session- und Login-Verwaltung
+- `frontend/src/contexts/E2EEContext.js`: Desktop-E2EE, Geräte-/Recovery-Flow, Attachment-Krypto
+- `frontend/src/lib/api.js`: einziger aktiver API-/Refresh-/Token-Transportpfad
+- `frontend/src/lib/serverPermissions.js`: dünner UI-Adapter für den serverseitigen Viewer-Context
+- `frontend/src/components/settings/GlobalSettingsOverlay.js`
+- `frontend/src/components/settings/ServerSettingsOverlay.js`
 
-## Frontend-Struktur (Tauri-Ready)
+### Backend
+- `backend/app/main.py`: Auth, Sessions, Server, Channels, Nachrichten, Voice, E2EE, WebSocket
+- `backend/app/auth_service.py`: Argon2id, Refresh-Rotation, serverseitige Sessions, Revocation
+- `backend/app/permissions.py`: zentrale Server-/Kategorie-/Kanal-Permission-Engine
+- `backend/app/rate_limits.py`: gemeinsame Fixed-Window-Rate-Limits
+- `backend/routes_phase2.py`: Threads, Gruppen-DMs, Channel-Overrides, weitere E2EE- und Privatkanal-Flows
+- `backend/routes_phase3.py`: Notifications, Pins, Emoji, Webhooks, Bot-/Push-Funktionen
 
-```
-frontend/
-├── src/                          # ← SHARED: Web + Desktop
-│   ├── App.js                    # Router + Auth wrapper
-│   ├── contexts/AuthContext.js   # Auth state
-│   ├── lib/
-│   │   ├── api.js               # Axios HTTP-Client (konfigurierbar)
-│   │   └── crypto.js            # E2EE (Web Crypto API)
-│   ├── pages/                   # Alle Seiten
-│   ├── components/
-│   │   ├── chat/                # Chat-Komponenten
-│   │   ├── modals/              # Dialog-Komponenten
-│   │   └── ui/                  # Shadcn Basis
-│   └── index.css                # Design-System
-│
-├── desktop/                      # ← TAURI: Desktop-spezifisch
-│   ├── src-tauri/               # Rust-Backend für Tauri
-│   │   ├── Cargo.toml
-│   │   ├── src/main.rs          # Tauri entry, global shortcuts, tray
-│   │   └── tauri.conf.json      # Window-Konfiguration
-│   └── README.md                # Setup-Anleitung
-│
-├── public/                       # Web entry point
-├── package.json
-└── .env.example
-```
+### Desktop / Tauri
+- `desktop/src-tauri/src/main.rs`: Tauri-Einstieg, PTT, native Capture-Brücke
+- `desktop/src-tauri/src/native_capture.rs`: nativer Desktop-Capture-Pfad
 
-**Prinzip**: Der gesamte `frontend/src/`-Ordner ist plattformunabhängig. Web und Desktop nutzen denselben React-Client. Die Tauri-Hülle in `desktop/src-tauri/` ergänzt nur Runtime-Verbindung, Secret-Storage und native Desktop-Funktionen.
+## Sicherheitsmodell
 
-## API-Design-Prinzipien
+### Auth und Sessions
 
-1. **Runtime-Config statt Build-Time-URL**: Web nutzt same-origin `/api`, Desktop speichert die Instanz-URL lokal
-2. **Bootstrap über `/setup`**: Die erste Owner-Identität wird einmalig zur Laufzeit erstellt, nicht über Env-Dateien
-3. **Cookie- und Token-Auth**: Web bleibt same-origin mit Cookies, Desktop nutzt Bearer-/Refresh-Tokens
-4. **WebSocket**: Einzelne persistente Verbindung pro Client für Echtzeit-Events
-5. **REST für CRUD**: Alle Datenoperationen über REST-Endpoints
+- Access-Tokens sind kurzlebige JWTs
+- Refresh-Tokens sind zufällige opaque Tokens
+- im Backend werden nur gehashte Refresh-Tokens gespeichert
+- jede Refresh-Anfrage rotiert den Refresh-Token und widerruft die alte Session
+- Sessions liegen in `auth_sessions`
+
+### Rollen und Berechtigungen
+
+Singra Vox verwendet serverseitig erzwungene Berechtigungen. Die aktive Quelle der Wahrheit ist `backend/app/permissions.py`.
+
+Die Auswertung erfolgt in dieser Reihenfolge:
+1. Basisrechte aus Default-Rolle und Member-Rollen
+2. Kategorie-Overrides
+3. Kanal-Overrides
+4. private Kanal-ACLs (`channel_access`)
+
+### Voice und Streaming
+
+- produktiv nur LiveKit / SFU
+- keine produktive Browser-P2P-Signaling-Architektur
+- `join_voice` steuert Room-Join / Subscribe
+- `speak` steuert Mikrofon-Publishing
+- `stream` steuert Kamera und Screen Share
+
+## E2EE-Realität
+
+### Was in v1 geschützt ist
+
+E2EE in Singra Vox v1 gilt nur für:
+- Direktnachrichten
+- Gruppen-DMs
+- private Server-Kanäle
+- verschlüsselte private Voice-Räume mit LiveKit-E2EE
+
+Der starke Vertrauenspfad ist die Desktop-App. Die Web-App ist für diese Bereiche kein vollwertiger E2EE-Client.
+
+### Was ausdrücklich nicht behauptet wird
+
+Die aktuelle E2EE-Implementierung ist **nicht** Signal, Double Ratchet oder MLS. Sie bietet in der aktuellen Form keine belegte Forward Secrecy oder Post-Compromise Security auf Signal-/MLS-Niveau. Produkttexte und Doku müssen das genauso benennen.
+
+### Metadaten
+
+Auch in E2EE-Räumen bleiben Metadaten sichtbar, unter anderem:
+- beteiligte Nutzer
+- Channel-/Raum-Mitgliedschaft
+- Zeitstempel
+- ungefähre Größen
+- Routing-Ziele wie Erwähnungen
+
+## Aktive und deaktivierte Legacy-Pfade
+
+### Deaktiviert
+- altes WebSocket-P2P-Signaling für `voice_offer`, `voice_answer`, `voice_ice`
+- Legacy-WebCrypto-Datei `frontend/src/lib/crypto.js`
+- ältere Settings-Modals parallel zu den aktiven Overlays
+
+### Aktiv
+- `frontend/src/lib/e2ee/crypto.js`
+- `frontend/src/lib/e2ee/deviceStorage.js`
+- `frontend/src/lib/e2ee/media.js`
 
 ## Datenmodell
 
-### Collections
+Wichtige Collections:
+- `users`
+- `servers`
+- `channels`
+- `messages`
+- `direct_messages`
+- `group_conversations`
+- `group_messages`
+- `server_members`
+- `roles`
+- `channel_overrides`
+- `channel_access`
+- `voice_states`
+- `audit_log`
+- `read_states`
+- `notifications`
+- `auth_sessions`
+- `e2ee_accounts`
+- `e2ee_devices`
+- `e2ee_blob_uploads`
+- `e2ee_blob_objects`
 
-| Collection | Zweck |
-|-----------|-------|
-| `users` | Benutzerkonten, Profil, Status, Public Key |
-| `servers` | Server-Instanzen mit Settings |
-| `channels` | Text/Voice/Private Channels mit Hierarchie |
-| `messages` | Nachrichten mit Threads, Reactions, Mentions |
-| `direct_messages` | 1:1 DMs mit E2EE-Support |
-| `group_conversations` | Gruppen-DMs |
-| `group_messages` | Nachrichten in Gruppen-DMs |
-| `server_members` | Server-Mitgliedschaften + Rollen |
-| `roles` | Rollen mit 17 granularen Permissions |
-| `invites` | Einladungslinks mit Ablauf + Nutzungslimit |
-| `voice_states` | Voice-Channel-Status (Join/Mute/Deafen) |
-| `audit_log` | Datensparsames Audit-Log |
-| `read_states` | Ungelesen-Tracking pro User/Channel |
-| `message_revisions` | Edit-History |
-| `file_uploads` | Dateianhänge (Base64 im MVP, S3 in Produktion) |
-| `channel_overrides` | Channel-spezifische Permission-Overrides |
-| `channel_access` | ACL für private Channels |
-| `key_bundles` | E2EE Key-Bundles |
-| `login_attempts` | Brute-Force-Schutz |
+## Nächster geplanter Migrationspfad
 
-## E2EE-Architektur
-
-```
-Sender                              Server                         Empfänger
-  │                                    │                                │
-  │  1. GET /keys/{recipient}/bundle   │                                │
-  │ ──────────────────────────────────►│                                │
-  │  ◄──── identity_key, signed_pre_key│                                │
-  │                                    │                                │
-  │  2. ECDH Key Agreement             │                                │
-  │     shared = DH(my_priv, their_pub)│                                │
-  │                                    │                                │
-  │  3. AES-256-GCM encrypt(message)   │                                │
-  │     → ciphertext + nonce           │                                │
-  │                                    │                                │
-  │  4. POST /dm/{recipient}           │                                │
-  │     { encrypted_content, nonce }   │                                │
-  │ ──────────────────────────────────►│  5. Store (encrypted)          │
-  │                                    │ ──────────────────────────────►│
-  │                                    │     WebSocket push             │
-  │                                    │                                │
-  │                                    │  6. Recipient derives same key │
-  │                                    │     AES-GCM decrypt            │
-  │                                    │     → plaintext                │
-```
-
-**Server sieht nur Ciphertext**. Klartext verlässt nie den Client.
-
-## Migrationspfad zum Zielstack
-
-| Komponente | MVP (jetzt) | Ziel |
-|-----------|------------|------|
-| Backend | FastAPI (Python) | Rust (Axum + Tokio) |
-| Datenbank | MongoDB | PostgreSQL + SQLX |
-| Cache | – | Redis (optional) |
-| Voice/Media | LiveKit Token + Channel State | LiveKit SFU |
-| NAT Traversal | optionales TURN-Profil | coturn |
-| File Storage | MongoDB (Base64) | S3/MinIO |
-| Desktop | – | Tauri 2 |
-| Auth | JWT + bcrypt | JWT + Argon2id + WebAuthn |
-| E2EE | ECDH + AES-GCM | MLS (Message Layer Security) |
-
-Die API-Struktur bleibt identisch – nur die Implementierung wechselt. Clients müssen nicht angepasst werden.
+Der spätere Zielpfad für Gruppen-E2EE ist MLS. Dieser Pfad ist derzeit ein Designziel, nicht produktiver Code. Die aktuelle v1-Implementierung ist bewusst als `encrypted_v1` zu verstehen und muss transparent so kommuniziert werden.

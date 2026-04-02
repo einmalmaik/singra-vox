@@ -4,12 +4,14 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import AuthShell from "@/components/auth/AuthShell";
+import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 import {
   clearPendingVerification,
@@ -51,11 +53,11 @@ export default function VerifyEmailPage() {
       const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
       clearPendingInvite();
       rememberPreferredServer(inviteResponse.data.server_id);
-      toast.success(t("invite.joinedCommunity"));
+      toast.success(t("invite.joinedServer"));
       navigate("/", { replace: true });
     } catch (inviteError) {
       clearPendingInvite();
-      toast.error(formatError(inviteError.response?.data?.detail));
+      toast.error(formatAppError(t, inviteError, { fallbackKey: "invite.acceptFailed" }));
       navigate(`/invite/${pendingInvite.code}`, { replace: true, state: { skipAutoAccept: true } });
     }
   };
@@ -74,7 +76,7 @@ export default function VerifyEmailPage() {
       clearPendingVerification();
       await completePendingInvite();
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || err.message);
+      setError(formatAppError(t, err, { fallbackKey: "auth.verifyEmailFailed" }));
     } finally {
       setLoading(false);
     }
@@ -92,7 +94,7 @@ export default function VerifyEmailPage() {
       rememberPendingVerification(email);
       toast.success(t("auth.verificationSent"));
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || err.message);
+      setError(formatAppError(t, err, { fallbackKey: "auth.resendVerificationFailed" }));
     } finally {
       setResending(false);
     }
@@ -124,11 +126,7 @@ export default function VerifyEmailPage() {
       )}
     >
       <form onSubmit={handleSubmit} className="space-y-5" data-testid="verify-email-page">
-        {error ? (
-          <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {error}
-          </div>
-        ) : null}
+        <LocalizedErrorBanner message={error} className="text-red-200" />
 
         <div className="space-y-2">
           <Label className="workspace-section-label">{t("auth.email")}</Label>

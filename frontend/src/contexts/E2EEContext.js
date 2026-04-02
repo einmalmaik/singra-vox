@@ -23,6 +23,29 @@ import {
 } from "@/lib/e2ee/deviceStorage";
 
 const E2EEContext = createContext(null);
+const TRUST_SNAPSHOT_STORAGE_KEY = "singravox:e2ee:trust-snapshots";
+
+function readTrustSnapshots() {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    return JSON.parse(window.localStorage.getItem(TRUST_SNAPSHOT_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeTrustSnapshots(nextSnapshots) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(TRUST_SNAPSHOT_STORAGE_KEY, JSON.stringify(nextSnapshots));
+}
+
+function buildTrustSnapshotKey(userId, scopeKind, scopeId) {
+  return `${userId}:${scopeKind}:${scopeId}`;
+}
 
 function buildUserMessageKeyEnvelopes(recipients, messageKeyB64) {
   return Promise.all(
@@ -52,6 +75,19 @@ function scopeParticipantsForBlob(scopeKind, scopeId, recipients) {
     scopeId,
     participantUserIds: (recipients?.recipients || []).map((recipient) => recipient.user_id),
   };
+}
+
+async function buildRecipientFingerprintSnapshot(recipients, fingerprintFn) {
+  const entries = [];
+  for (const recipient of recipients || []) {
+    for (const device of recipient.devices || []) {
+      entries.push([
+        `${recipient.user_id}:${device.device_id}`,
+        await fingerprintFn(device.public_key),
+      ]);
+    }
+  }
+  return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
 }
 
 export function E2EEProvider({ children }) {
@@ -302,6 +338,35 @@ export function E2EEProvider({ children }) {
     };
   }, []);
 
+  const inspectRecipientTrust = useCallback(async ({ scopeKind, scopeId, recipientsResponse }) => {
+    if (!user?.id || !scopeKind || !scopeId) {
+      return { changed: false, initialized: false, fingerprintCount: 0 };
+    }
+
+    const snapshotKey = buildTrustSnapshotKey(user.id, scopeKind, scopeId);
+    const nextSnapshot = await buildRecipientFingerprintSnapshot(
+      recipientsResponse?.recipients || [],
+      fingerprintPublicKey,
+    );
+    const existingSnapshots = readTrustSnapshots();
+    const previousSnapshot = existingSnapshots[snapshotKey];
+    const changed = Boolean(
+      previousSnapshot
+      && JSON.stringify(previousSnapshot) !== JSON.stringify(nextSnapshot),
+    );
+
+    writeTrustSnapshots({
+      ...existingSnapshots,
+      [snapshotKey]: nextSnapshot,
+    });
+
+    return {
+      changed,
+      initialized: Boolean(previousSnapshot),
+      fingerprintCount: Object.keys(nextSnapshot).length,
+    };
+  }, [user?.id]);
+
   const value = useMemo(() => ({
     loading,
     enabled: state.enabled,
@@ -330,6 +395,7 @@ export function E2EEProvider({ children }) {
     fetchChannelRecipients,
     uploadEncryptedAttachment,
     downloadAndDecryptAttachment,
+    inspectRecipientTrust,
     fingerprintPublicKey,
   }), [
     approveDevice,
@@ -342,6 +408,7 @@ export function E2EEProvider({ children }) {
     fetchDmRecipients,
     fetchGroupRecipients,
     identity,
+    inspectRecipientTrust,
     initializeE2EE,
     loading,
     refreshState,

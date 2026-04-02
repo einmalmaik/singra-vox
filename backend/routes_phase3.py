@@ -14,9 +14,13 @@ import os
 import uuid
 import secrets
 import re
-import jwt as pyjwt
 import json
-from app.permissions import get_message_history_cutoff as _shared_history_cutoff, has_server_permission
+from app.auth_service import load_current_user
+from app.permissions import (
+    get_message_history_cutoff as _shared_history_cutoff,
+    has_channel_permission,
+    has_server_permission,
+)
 from app.ws import ws_mgr
 try:
     from pywebpush import webpush, WebPushException
@@ -33,7 +37,6 @@ load_dotenv(ROOT_DIR / '.env')
 
 _c = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = _c[os.environ['DB_NAME']]
-_jwt = os.environ.get('JWT_SECRET', '')
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -41,33 +44,18 @@ def _id():
     return str(uuid.uuid4())
 
 async def _user(request: Request):
-    token = request.cookies.get("access_token")
-    if not token:
-        ah = request.headers.get("Authorization", "")
-        if ah.startswith("Bearer "):
-            token = ah[7:]
-    if not token:
-        raise HTTPException(401, "Not authenticated")
-    try:
-        p = pyjwt.decode(token, _jwt, algorithms=["HS256"])
-        if p.get("type") != "access":
-            raise HTTPException(401, "Invalid token")
-        u = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
-        if not u:
-            raise HTTPException(401, "User not found")
-        u.pop("password_hash", None)
-        return u
-    except pyjwt.ExpiredSignatureError:
-        raise HTTPException(401, "Token expired")
-    except pyjwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid token")
+    u, _session = await load_current_user(db, request)
+    u.pop("password_hash", None)
+    return u
 
-async def _perm(uid, sid, perm):
+async def _perm(uid, sid, perm, channel=None):
+    if channel is not None:
+        return await has_channel_permission(db, uid, channel, perm)
     return await has_server_permission(db, uid, sid, perm)
 
 
-async def _history_cutoff(uid, sid):
-    return await _shared_history_cutoff(db, uid, sid)
+async def _history_cutoff(uid, sid, channel=None):
+    return await _shared_history_cutoff(db, uid, sid, channel=channel)
 
 
 async def _private_channel_user_ids(channel_id):
@@ -95,8 +83,8 @@ async def _private_channel_user_ids(channel_id):
 async def _assert_channel_access(user_id, channel):
     if not channel.get("is_private"):
         return
-    allowed_ids = await _private_channel_user_ids(channel["id"])
-    if user_id not in allowed_ids:
+    permission = "join_voice" if channel.get("type") == "voice" else "read_messages"
+    if not await has_channel_permission(db, user_id, channel, permission):
         raise HTTPException(403, "No access to this private channel")
 
 
@@ -180,8 +168,8 @@ async def pin_message(message_id: str, request: Request):
     if not ch:
         raise HTTPException(404)
     await _assert_channel_access(user["id"], ch)
-    if not await _perm(user["id"], ch["server_id"], "pin_messages"):
-        if not await _perm(user["id"], ch["server_id"], "manage_messages"):
+    if not await _perm(user["id"], ch["server_id"], "pin_messages", channel=ch):
+        if not await _perm(user["id"], ch["server_id"], "manage_messages", channel=ch):
             raise HTTPException(403, "No permission to pin")
     await db.messages.update_one({"id": message_id}, {"$set": {"is_pinned": True, "pinned_by": user["id"], "pinned_at": _now()}})
     return {"ok": True}
@@ -195,8 +183,8 @@ async def unpin_message(message_id: str, request: Request):
     ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
     if ch:
         await _assert_channel_access(user["id"], ch)
-    if ch and not await _perm(user["id"], ch["server_id"], "pin_messages"):
-        if not await _perm(user["id"], ch["server_id"], "manage_messages"):
+    if ch and not await _perm(user["id"], ch["server_id"], "pin_messages", channel=ch):
+        if not await _perm(user["id"], ch["server_id"], "manage_messages", channel=ch):
             raise HTTPException(403)
     await db.messages.update_one({"id": message_id}, {"$set": {"is_pinned": False, "pinned_by": None, "pinned_at": None}})
     return {"ok": True}
@@ -205,10 +193,10 @@ async def unpin_message(message_id: str, request: Request):
 async def get_pins(channel_id: str, request: Request):
     user = await _user(request)
     channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
-    if not channel or not await _perm(user["id"], channel["server_id"], "read_messages"):
+    if not channel or not await _perm(user["id"], channel["server_id"], "read_messages", channel=channel):
         raise HTTPException(403, "No permission")
     await _assert_channel_access(user["id"], channel)
-    history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
+    history_cutoff = await _history_cutoff(user["id"], channel["server_id"], channel=channel)
     pin_query = {"channel_id": channel_id, "is_pinned": True, "is_deleted": {"$ne": True}}
     if history_cutoff:
         pin_query["created_at"] = {"$gte": history_cutoff}

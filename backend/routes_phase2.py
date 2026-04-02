@@ -15,16 +15,20 @@ import os
 import uuid
 import base64
 import re
-import jwt as pyjwt
-from app.permissions import get_message_history_cutoff as _shared_history_cutoff, has_server_permission
+from app.auth_service import load_current_user
+from app.pagination import clamp_page_limit
+from app.permissions import (
+    get_channel_permissions,
+    get_message_history_cutoff as _shared_history_cutoff,
+    has_channel_permission,
+    has_server_permission,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 _client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = _client[os.environ['DB_NAME']]
-_jwt_secret = os.environ.get('JWT_SECRET', '')
-_JWT_ALG = "HS256"
 _E2EE_DEVICE_HEADER = "X-Singra-Device-Id"
 
 
@@ -37,34 +41,19 @@ def _id():
 
 
 async def _user(request: Request):
-    token = request.cookies.get("access_token")
-    if not token:
-        ah = request.headers.get("Authorization", "")
-        if ah.startswith("Bearer "):
-            token = ah[7:]
-    if not token:
-        raise HTTPException(401, "Not authenticated")
-    try:
-        p = pyjwt.decode(token, _jwt_secret, algorithms=[_JWT_ALG])
-        if p.get("type") != "access":
-            raise HTTPException(401, "Invalid token")
-        user = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
-        if not user:
-            raise HTTPException(401, "User not found")
-        user.pop("password_hash", None)
-        return user
-    except pyjwt.ExpiredSignatureError:
-        raise HTTPException(401, "Token expired")
-    except pyjwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid token")
+    user, _session = await load_current_user(db, request)
+    user.pop("password_hash", None)
+    return user
 
 
-async def _has_perm(user_id, server_id, perm):
+async def _has_perm(user_id, server_id, perm, channel=None):
+    if channel is not None:
+        return await has_channel_permission(db, user_id, channel, perm)
     return await has_server_permission(db, user_id, server_id, perm)
 
 
-async def _history_cutoff(user_id, server_id):
-    return await _shared_history_cutoff(db, user_id, server_id)
+async def _history_cutoff(user_id, server_id, channel=None):
+    return await _shared_history_cutoff(db, user_id, server_id, channel=channel)
 
 
 async def _private_channel_user_ids(channel_id):
@@ -92,8 +81,8 @@ async def _private_channel_user_ids(channel_id):
 async def _assert_channel_access(user_id, channel):
     if not channel.get("is_private"):
         return
-    allowed_ids = await _private_channel_user_ids(channel["id"])
-    if user_id not in allowed_ids:
+    permission = "join_voice" if channel.get("type") == "voice" else "read_messages"
+    if not await has_channel_permission(db, user_id, channel, permission):
         raise HTTPException(403, "No access to this private channel")
 
 
@@ -120,9 +109,6 @@ async def _accessible_text_channels(user_id, server_id, *, include_private=True)
     were not part of that channel. E2EE/private channels must be filtered at the
     channel list boundary, not only when the message body is fetched.
     """
-    if not await _has_perm(user_id, server_id, "read_messages"):
-        return []
-
     text_channels = await db.channels.find(
         {"server_id": server_id, "type": "text"},
         {"_id": 0},
@@ -130,11 +116,10 @@ async def _accessible_text_channels(user_id, server_id, *, include_private=True)
 
     accessible = []
     for channel in text_channels:
+        if not await _has_perm(user_id, server_id, "read_messages", channel=channel):
+            continue
         if channel.get("is_private"):
             if not include_private:
-                continue
-            allowed_ids = await _private_channel_user_ids(channel["id"])
-            if user_id not in allowed_ids:
                 continue
         accessible.append(channel)
     return accessible
@@ -182,10 +167,10 @@ async def get_thread(message_id: str, request: Request):
     if not parent:
         raise HTTPException(404, "Message not found")
     channel = await db.channels.find_one({"id": parent["channel_id"]}, {"_id": 0})
-    if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages"):
+    if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages", channel=channel):
         raise HTTPException(403, "No permission")
     await _assert_channel_access(user["id"], channel)
-    history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
+    history_cutoff = await _history_cutoff(user["id"], channel["server_id"], channel=channel)
     if history_cutoff and parent.get("created_at") and parent["created_at"] < history_cutoff:
         raise HTTPException(403, "No permission to read message history")
     author = await db.users.find_one({"id": parent["author_id"]}, {"_id": 0, "password_hash": 0})
@@ -265,6 +250,7 @@ async def search_messages(request: Request, q: str = "", server_id: str = None, 
     user = await _user(request)
     if len(q) < 2:
         return []
+    limit = clamp_page_limit(limit, default=25)
     query = {
         "content": {"$regex": q, "$options": "i"},
         "is_deleted": {"$ne": True},
@@ -272,13 +258,13 @@ async def search_messages(request: Request, q: str = "", server_id: str = None, 
     }
     if channel_id:
         channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
-        if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages"):
+        if not channel or not await _has_perm(user["id"], channel["server_id"], "read_messages", channel=channel):
             raise HTTPException(403, "No permission")
         await _assert_channel_access(user["id"], channel)
         if channel.get("is_private"):
             raise HTTPException(400, "Server-side search is unavailable in encrypted private channels")
         query["channel_id"] = channel_id
-        history_cutoff = await _history_cutoff(user["id"], channel["server_id"])
+        history_cutoff = await _history_cutoff(user["id"], channel["server_id"], channel=channel)
         if history_cutoff:
             query["created_at"] = {"$gte": history_cutoff}
     elif server_id:
@@ -525,6 +511,7 @@ async def group_msgs(gid: str, request: Request, before: str = None, limit: int 
     grp = await db.group_conversations.find_one({"id": gid, "members": user["id"]}, {"_id": 0})
     if not grp:
         raise HTTPException(404)
+    limit = clamp_page_limit(limit)
     q = {"group_id": gid}
     if before:
         q["created_at"] = {"$lt": before}
@@ -532,7 +519,8 @@ async def group_msgs(gid: str, request: Request, before: str = None, limit: int 
     msgs.reverse()
     for m in msgs:
         m["sender"] = await db.users.find_one({"id": m["sender_id"]}, {"_id": 0, "password_hash": 0})
-    return msgs
+    next_before = msgs[0]["created_at"] if msgs else None
+    return {"messages": msgs, "next_before": next_before, "has_more_before": len(msgs) == limit}
 
 
 @phase2.post("/groups/{gid}/messages")

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bell, Check, Trash, ChatCircle, At, ArrowBendUpLeft } from "@phosphor-icons/react";
 import {
@@ -6,47 +6,43 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import api from "@/lib/api";
+import {
+  getNotificationsState,
+  loadNotifications,
+  markAllNotificationsReadLocal,
+  markNotificationReadLocal,
+  removeNotificationLocal,
+  subscribeNotifications,
+} from "@/lib/notificationsStore";
 
 export default function NotificationPanel() {
   const { t } = useTranslation();
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationState, setNotificationState] = useState(getNotificationsState());
   const [open, setOpen] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await api.get("/notifications?limit=30");
-      setNotifications(res.data.notifications || []);
-      setUnreadCount(res.data.unread_count || 0);
-    } catch {}
-  }, []);
+  const { notifications, unreadCount } = notificationState;
 
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 20000);
-    const handleRefresh = () => load();
-    window.addEventListener("refresh-notifications", handleRefresh);
+    setNotificationState(getNotificationsState());
+    void loadNotifications();
+    const unsubscribe = subscribeNotifications(setNotificationState);
     return () => {
-      clearInterval(interval);
-      window.removeEventListener("refresh-notifications", handleRefresh);
+      unsubscribe();
     };
-  }, [load]);
+  }, []);
 
   const markRead = async (id) => {
     await api.post(`/notifications/${id}/read`);
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    setUnreadCount(prev => Math.max(0, prev - 1));
+    markNotificationReadLocal(id);
   };
 
   const markAllRead = async () => {
     await api.post("/notifications/read-all");
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    setUnreadCount(0);
+    markAllNotificationsReadLocal();
   };
 
   const deleteNotif = async (id) => {
     await api.delete(`/notifications/${id}`);
-    setNotifications(prev => prev.filter(n => n.id !== id));
+    removeNotificationLocal(id);
   };
 
   const getIcon = (type) => {
@@ -59,7 +55,12 @@ export default function NotificationPanel() {
   };
 
   return (
-    <DropdownMenu open={open} onOpenChange={(v) => { setOpen(v); if (v) load(); }}>
+    <DropdownMenu open={open} onOpenChange={(v) => {
+      setOpen(v);
+      if (v) {
+        void loadNotifications({ force: true });
+      }
+    }}>
       <DropdownMenuTrigger asChild>
         <button className="relative p-1.5 rounded hover:bg-[#27272A] text-[#71717A] hover:text-white transition-colors" data-testid="notification-bell">
           <Bell size={18} weight={unreadCount > 0 ? "fill" : "bold"} />

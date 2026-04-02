@@ -15,17 +15,25 @@ import {
   setCachedDmMessages,
   setPersistedWorkspaceState,
 } from "@/lib/chatPersistence";
+import { formatAppError } from "@/lib/appErrors";
 import { resolveAssetUrl } from "@/lib/assetUrls";
 import { consumePreferredServer } from "@/lib/inviteLinks";
+import {
+  fetchMessageHistoryPage,
+  fetchMessageHistoryWindow,
+  mergeTimelineMessages,
+} from "@/lib/messageHistory";
 import {
   getNotificationPreferences,
   requestNotificationPermission,
   subscribeToPush,
 } from "@/lib/pushNotifications";
+import { pushNotification } from "@/lib/notificationsStore";
 import ServerSidebar from "@/components/chat/ServerSidebar";
 import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import ChatArea from "@/components/chat/ChatArea";
 import MemberSidebar from "@/components/chat/MemberSidebar";
+import E2EEStatus from "@/components/security/E2EEStatus";
 
 function upsertById(list, item) {
   const existingIndex = list.findIndex((entry) => entry.id === item.id);
@@ -109,71 +117,21 @@ function mergeMessages(previousMessages, nextMessage) {
   ));
 }
 
-const MESSAGE_PAGE_SIZE = 200;
-const MAX_HISTORY_PAGES = 50;
-
-async function fetchAllChannelMessages(channelId) {
-  const allMessages = [];
-  let before = null;
-
-  for (let page = 0; page < MAX_HISTORY_PAGES; page += 1) {
-    // The chat UI does not paginate older messages on scroll yet, so the
-    // initial channel load must walk backwards until the server has no older
-    // page left. Without this, users only ever saw the newest 50 messages.
-    const suffix = before ? `?before=${encodeURIComponent(before)}&limit=${MESSAGE_PAGE_SIZE}` : `?limit=${MESSAGE_PAGE_SIZE}`;
-    const res = await api.get(`/channels/${channelId}/messages${suffix}`);
-    const batch = Array.isArray(res.data) ? res.data : [];
-    if (batch.length === 0) {
-      break;
-    }
-    allMessages.unshift(...batch);
-    if (batch.length < MESSAGE_PAGE_SIZE) {
-      break;
-    }
-    before = batch[0]?.created_at || null;
-    if (!before) {
-      break;
-    }
-  }
-
-  return allMessages;
-}
-
-async function fetchAllDmMessages(otherUserId) {
-  const allMessages = [];
-  let before = null;
-
-  for (let page = 0; page < MAX_HISTORY_PAGES; page += 1) {
-    // DMs mirror the same restore behavior as channels so reloads and device
-    // switches do not appear to "lose" older parts of the conversation.
-    const suffix = before ? `?before=${encodeURIComponent(before)}&limit=${MESSAGE_PAGE_SIZE}` : `?limit=${MESSAGE_PAGE_SIZE}`;
-    const res = await api.get(`/dm/${otherUserId}${suffix}`);
-    const batch = Array.isArray(res.data) ? res.data : [];
-    if (batch.length === 0) {
-      break;
-    }
-    allMessages.unshift(...batch);
-    if (batch.length < MESSAGE_PAGE_SIZE) {
-      break;
-    }
-    before = batch[0]?.created_at || null;
-    if (!before) {
-      break;
-    }
-  }
-
-  return allMessages;
-}
-
 export default function MainLayout() {
   const { t } = useTranslation();
-  const { user, token, logout, setUser } = useAuth();
+  const { user, token, logout, setUser, clearAuthState } = useAuth();
   const { config } = useRuntime();
-  const { isDesktopCapable, ready: e2eeReady } = useE2EE();
+  const {
+    fetchDmRecipients,
+    inspectRecipientTrust,
+    isDesktopCapable,
+    ready: e2eeReady,
+  } = useE2EE();
   const navigate = useNavigate();
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
   const heartbeatTimer = useRef(null);
+  const sessionInvalidatedRef = useRef(false);
   const voiceRef = useRef(null);
   const currentServerRef = useRef(null);
   const currentChannelRef = useRef(null);
@@ -189,8 +147,12 @@ export default function MainLayout() {
   const [channels, setChannels] = useState([]);
   const [currentChannel, setCurrentChannel] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [channelHistoryCursor, setChannelHistoryCursor] = useState(null);
+  const [channelHasOlderMessages, setChannelHasOlderMessages] = useState(false);
+  const [loadingOlderChannelMessages, setLoadingOlderChannelMessages] = useState(false);
   const [members, setMembers] = useState([]);
   const [roles, setRoles] = useState([]);
+  const [viewerContext, setViewerContext] = useState(null);
   const [serverSettingsRequest, setServerSettingsRequest] = useState(null);
   const [showChannels, setShowChannels] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
@@ -198,6 +160,10 @@ export default function MainLayout() {
   const [dmConversations, setDmConversations] = useState([]);
   const [currentDmUser, setCurrentDmUser] = useState(null);
   const [dmMessages, setDmMessages] = useState([]);
+  const [dmHistoryCursor, setDmHistoryCursor] = useState(null);
+  const [dmHasOlderMessages, setDmHasOlderMessages] = useState(false);
+  const [loadingOlderDmMessages, setLoadingOlderDmMessages] = useState(false);
+  const [dmTrustNotice, setDmTrustNotice] = useState(false);
   const [typingUsers, setTypingUsers] = useState({});
   const [unreadMap, setUnreadMap] = useState({});
   const [serverUnreadMap, setServerUnreadMap] = useState({});
@@ -214,6 +180,41 @@ export default function MainLayout() {
   useEffect(() => {
     currentDmUserRef.current = currentDmUser;
   }, [currentDmUser]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!currentDmUser?.id || !isDesktopCapable || !e2eeReady) {
+      setDmTrustNotice(false);
+      return undefined;
+    }
+
+    (async () => {
+      try {
+        const recipients = await fetchDmRecipients(currentDmUser.id);
+        const result = await inspectRecipientTrust({
+          scopeKind: "dm",
+          scopeId: currentDmUser.id,
+          recipientsResponse: recipients,
+        });
+        if (!cancelled) {
+          setDmTrustNotice(Boolean(result.changed));
+        }
+      } catch {
+        if (!cancelled) {
+          setDmTrustNotice(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentDmUser?.id, e2eeReady, fetchDmRecipients, inspectRecipientTrust, isDesktopCapable]);
+
+  useEffect(() => {
+    sessionInvalidatedRef.current = false;
+  }, [token]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -275,6 +276,8 @@ export default function MainLayout() {
     if (!channelId) {
       latestChannelLoadRef.current += 1;
       setMessages([]);
+      setChannelHistoryCursor(null);
+      setChannelHasOlderMessages(false);
       return;
     }
 
@@ -287,32 +290,58 @@ export default function MainLayout() {
     if (cachedMessages.length > 0) {
       setMessages(cachedMessages);
     }
+    setChannelHistoryCursor(null);
+    setChannelHasOlderMessages(false);
 
     try {
-      const nextMessages = await fetchAllChannelMessages(channelId);
+      const history = await fetchMessageHistoryWindow(`/channels/${channelId}/messages`);
       if (latestChannelLoadRef.current !== requestId) {
         return;
       }
-      setMessages(nextMessages);
+      setMessages(mergeTimelineMessages(cachedMessages, history.messages));
+      setChannelHistoryCursor(history.nextBefore);
+      setChannelHasOlderMessages(history.hasMoreBefore);
     } catch {
       if (latestChannelLoadRef.current !== requestId) {
         return;
       }
       setMessages(cachedMessages);
+      setChannelHistoryCursor(null);
+      setChannelHasOlderMessages(false);
     }
   }, [user?.id]);
 
+  const loadOlderChannelMessages = useCallback(async () => {
+    if (!currentChannelRef.current?.id || !channelHasOlderMessages || loadingOlderChannelMessages) {
+      return;
+    }
+
+    setLoadingOlderChannelMessages(true);
+    try {
+      const envelope = await fetchMessageHistoryPage(`/channels/${currentChannelRef.current.id}/messages`, {
+        before: channelHistoryCursor,
+      });
+      setMessages((previous) => mergeTimelineMessages(envelope.messages, previous));
+      setChannelHistoryCursor(envelope.nextBefore);
+      setChannelHasOlderMessages(envelope.hasMoreBefore);
+    } finally {
+      setLoadingOlderChannelMessages(false);
+    }
+  }, [channelHasOlderMessages, channelHistoryCursor, loadingOlderChannelMessages]);
+
   const loadServerSnapshot = useCallback(async (serverId, options = {}) => {
     const { preferredChannelId = null } = options;
-    const [channelRes, memberRes, roleRes] = await Promise.all([
+    const [channelRes, memberRes, roleRes, viewerContextRes] = await Promise.all([
       api.get(`/servers/${serverId}/channels`),
       api.get(`/servers/${serverId}/members`),
       api.get(`/servers/${serverId}/roles`),
+      api.get(`/servers/${serverId}/viewer-context`),
     ]);
 
     setChannels(channelRes.data);
     setMembers(memberRes.data);
     setRoles(roleRes.data);
+    setViewerContext(viewerContextRes.data || null);
 
     const nextChannel = (
       currentChannelRef.current && channelRes.data.some((channel) => channel.id === currentChannelRef.current.id)
@@ -332,6 +361,8 @@ export default function MainLayout() {
 
     latestChannelLoadRef.current += 1;
     setMessages([]);
+    setChannelHistoryCursor(null);
+    setChannelHasOlderMessages(false);
   }, [loadChannelMessages]);
 
   const selectChannel = useCallback(async (channel) => {
@@ -340,6 +371,8 @@ export default function MainLayout() {
     if (!channel || channel.type !== "text") {
       latestChannelLoadRef.current += 1;
       setMessages([]);
+      setChannelHistoryCursor(null);
+      setChannelHasOlderMessages(false);
       return;
     }
     await loadChannelMessages(channel.id);
@@ -353,7 +386,7 @@ export default function MainLayout() {
     try {
       await loadServerSnapshot(server.id, options);
     } catch {
-      toast.error(t("chat.loadServerFailed"));
+      toast.error(formatAppError(t, null, { fallbackKey: "chat.loadServerFailed" }));
     }
   }, [loadServerSnapshot, t]);
 
@@ -369,13 +402,14 @@ export default function MainLayout() {
         setChannels([]);
         setMembers([]);
         setRoles([]);
+        setViewerContext(null);
         setUnreadMap({});
         setServerUnreadMap({});
         navigate("/onboarding");
         return;
       }
 
-      // Invite accepts can hint which community should open next.
+      // Invite accepts can hint which server should open next.
       const preferredServerId = consumePreferredServer();
       const persistedState = getPersistedWorkspaceState(user?.id);
       const activeServer =
@@ -392,7 +426,7 @@ export default function MainLayout() {
       if (error.response?.status === 401) {
         navigate("/login");
       } else {
-        toast.error(t("chat.loadServersFailed"));
+        toast.error(formatAppError(t, error, { fallbackKey: "chat.loadServersFailed" }));
       }
     }
   }, [loadDmConversations, navigate, selectServer, t, user?.id]);
@@ -407,13 +441,37 @@ export default function MainLayout() {
     if (cachedMessages.length > 0) {
       setDmMessages(cachedMessages);
     }
+    setDmHistoryCursor(null);
+    setDmHasOlderMessages(false);
     try {
-      const nextMessages = await fetchAllDmMessages(dmUser.id);
-      setDmMessages(nextMessages);
+      const history = await fetchMessageHistoryWindow(`/dm/${dmUser.id}`);
+      setDmMessages(mergeTimelineMessages(cachedMessages, history.messages));
+      setDmHistoryCursor(history.nextBefore);
+      setDmHasOlderMessages(history.hasMoreBefore);
     } catch {
       setDmMessages(cachedMessages);
+      setDmHistoryCursor(null);
+      setDmHasOlderMessages(false);
     }
   }, [user?.id]);
+
+  const loadOlderDmMessages = useCallback(async () => {
+    if (!currentDmUserRef.current?.id || !dmHasOlderMessages || loadingOlderDmMessages) {
+      return;
+    }
+
+    setLoadingOlderDmMessages(true);
+    try {
+      const envelope = await fetchMessageHistoryPage(`/dm/${currentDmUserRef.current.id}`, {
+        before: dmHistoryCursor,
+      });
+      setDmMessages((previous) => mergeTimelineMessages(envelope.messages, previous));
+      setDmHistoryCursor(envelope.nextBefore);
+      setDmHasOlderMessages(envelope.hasMoreBefore);
+    } finally {
+      setLoadingOlderDmMessages(false);
+    }
+  }, [dmHasOlderMessages, dmHistoryCursor, loadingOlderDmMessages]);
 
   const switchToDm = useCallback(() => {
     setView("dm");
@@ -431,6 +489,7 @@ export default function MainLayout() {
     setChannels([]);
     setMembers([]);
     setRoles([]);
+    setViewerContext(null);
     setMessages([]);
     setCurrentChannel(null);
 
@@ -443,6 +502,24 @@ export default function MainLayout() {
 
   const handleWsEvent = useCallback(async (data) => {
     switch (data.type) {
+      case "session_revoked":
+        sessionInvalidatedRef.current = true;
+        if (reconnectTimer.current) {
+          clearTimeout(reconnectTimer.current);
+          reconnectTimer.current = null;
+        }
+        if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
+          try {
+            wsRef.current.close(4001, "session_revoked");
+          } catch {
+            // Ignore close failures for already-closing sockets.
+          }
+        }
+        toast.error(formatAppError(t, { detail: { code: "session_revoked" } }));
+        await clearAuthState();
+        navigate("/login", { replace: true });
+        break;
+
       case "new_message":
         if (data.channel_id === currentChannelRef.current?.id) {
           setMessages((previous) => mergeMessages(previous, data.message));
@@ -639,13 +716,8 @@ export default function MainLayout() {
         setChannels((previous) => removeVoiceUser(previous, user?.id, data.channel_id));
         break;
 
-      case "voice_offer":
-      case "voice_answer":
-      case "voice_ice":
-        voiceRef.current?.handleSignal(data);
-        break;
-
       case "notification":
+        pushNotification(data.notification);
         toast(data.notification.title, {
           description: data.notification.body,
           action: data.notification.link ? {
@@ -653,7 +725,6 @@ export default function MainLayout() {
             onClick: () => navigate(data.notification.link)
           } : undefined
         });
-        window.dispatchEvent(new CustomEvent("refresh-notifications"));
         if (config?.isDesktop && notificationPreferencesRef.current?.desktop_push_enabled !== false) {
           import("@tauri-apps/plugin-notification").then(({ sendNotification }) => {
             sendNotification({ title: data.notification.title, body: data.notification.body });
@@ -681,10 +752,10 @@ export default function MainLayout() {
       default:
         break;
     }
-  }, [config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id]);
+  }, [clearAuthState, config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id]);
 
   const connectWs = useCallback(() => {
-    if (!token || !config?.wsBase) return;
+    if (!token || !config?.wsBase || sessionInvalidatedRef.current) return;
 
     if (wsRef.current) {
       wsRef.current.close();
@@ -733,6 +804,9 @@ export default function MainLayout() {
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
       }
+      if (sessionInvalidatedRef.current) {
+        return;
+      }
       reconnectTimer.current = setTimeout(connectWs, 3000);
     };
 
@@ -741,7 +815,7 @@ export default function MainLayout() {
 
   useEffect(() => {
     void loadServers();
-    const unreadInterval = window.setInterval(refreshUnread, 15000);
+    const unreadInterval = window.setInterval(refreshUnread, 5 * 60 * 1000);
     void refreshUnread();
     return () => window.clearInterval(unreadInterval);
   }, [loadServers, refreshUnread]);
@@ -825,8 +899,12 @@ export default function MainLayout() {
   const refreshChannels = useCallback(async () => {
     if (!currentServerRef.current) return;
     try {
-      const res = await api.get(`/servers/${currentServerRef.current.id}/channels`);
-      setChannels(res.data);
+      const [channelRes, viewerContextRes] = await Promise.all([
+        api.get(`/servers/${currentServerRef.current.id}/channels`),
+        api.get(`/servers/${currentServerRef.current.id}/viewer-context`),
+      ]);
+      setChannels(channelRes.data);
+      setViewerContext(viewerContextRes.data || null);
     } catch {
       // keep last state
     }
@@ -835,8 +913,12 @@ export default function MainLayout() {
   const refreshMembers = useCallback(async () => {
     if (!currentServerRef.current) return;
     try {
-      const res = await api.get(`/servers/${currentServerRef.current.id}/members`);
-      setMembers(res.data);
+      const [memberRes, viewerContextRes] = await Promise.all([
+        api.get(`/servers/${currentServerRef.current.id}/members`),
+        api.get(`/servers/${currentServerRef.current.id}/viewer-context`),
+      ]);
+      setMembers(memberRes.data);
+      setViewerContext(viewerContextRes.data || null);
     } catch {
       // keep last state
     }
@@ -867,7 +949,9 @@ export default function MainLayout() {
         setServers((previous) => previous.filter((entry) => entry.id !== server.id));
       }
     } catch (error) {
-      toast.error(t("server.deleteFailed", { error: error?.response?.data?.detail || error?.message || "Unknown error" }));
+      toast.error(t("server.deleteFailed", {
+        error: formatAppError(t, error, { fallbackKey: "errors.unknown" }),
+      }));
     }
   }, [loadServers, t]);
 
@@ -913,6 +997,7 @@ export default function MainLayout() {
               user={user}
               members={members}
               roles={roles}
+              viewerContext={viewerContext}
               unreadMap={unreadMap}
               voiceEngineRef={voiceRef}
               onLogout={logout}
@@ -943,9 +1028,13 @@ export default function MainLayout() {
               serverId={currentServer?.id}
               members={members}
               roles={roles}
+              viewerContext={viewerContext}
               onSendTyping={sendTyping}
               typingUsers={typingUsers[currentChannel?.id] || {}}
               onChannelRead={refreshUnread}
+              hasOlderMessages={channelHasOlderMessages}
+              onLoadOlderMessages={loadOlderChannelMessages}
+              loadingOlderMessages={loadingOlderChannelMessages}
             />
           </div>
 
@@ -956,6 +1045,7 @@ export default function MainLayout() {
               serverId={currentServer?.id}
               server={currentServer}
               user={user}
+              viewerContext={viewerContext}
               onStartDM={(dmUser) => {
                 switchToDm();
                 void selectDmUser(dmUser);
@@ -1019,11 +1109,36 @@ export default function MainLayout() {
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {!isDesktopCapable ? (
-                  <div className="workspace-card p-6 text-sm text-[#A1A1AA]">
-                    Strong end-to-end encrypted direct messages are only available in the desktop app.
-                  </div>
-                ) : dmMessages.map((message) => (
-                  <div key={message.id} className="flex gap-3 fade-in" data-testid={`dm-msg-${message.id}`}>
+                  <E2EEStatus
+                    variant="guard"
+                    scope="dm"
+                    ready={e2eeReady}
+                    isDesktopCapable={isDesktopCapable}
+                    className="workspace-card p-6"
+                  />
+                ) : (
+                  <>
+                    {dmTrustNotice && (
+                      <E2EEStatus
+                        variant="notice"
+                        messageKey="e2ee.deviceListChanged"
+                        className="mb-4"
+                      />
+                    )}
+                    {dmHasOlderMessages && (
+                      <div className="flex justify-center pb-2">
+                        <button
+                          type="button"
+                          onClick={() => void loadOlderDmMessages()}
+                          disabled={loadingOlderDmMessages}
+                          className="rounded-xl border border-white/10 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-300 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {loadingOlderDmMessages ? t("common.loading") : t("chat.loadOlderMessages")}
+                        </button>
+                      </div>
+                    )}
+                    {dmMessages.map((message) => (
+                      <div key={message.id} className="flex gap-3 fade-in" data-testid={`dm-msg-${message.id}`}>
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#27272A] text-xs font-bold">
                       {message.sender?.avatar_url ? (
                         <img src={resolveAssetUrl(message.sender.avatar_url, config?.assetBase)} alt={message.sender?.display_name || message.sender?.username || "avatar"} className="h-full w-full object-cover" />
@@ -1045,8 +1160,10 @@ export default function MainLayout() {
                         ) : message.content}
                       </p>
                     </div>
-                  </div>
-                ))}
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
               {isDesktopCapable ? (
                 <DmInput
@@ -1188,7 +1305,7 @@ function DmInput({ userId, onSent, e2eeReady }) {
         <input
           value={content}
           onChange={(event) => setContent(event.target.value)}
-          placeholder={e2eeReady ? t("dm.encryptedMessage") : "Restore or verify this desktop device to send encrypted DMs"}
+          placeholder={e2eeReady ? t("dm.encryptedMessage") : t("e2ee.dmVerifyDevice")}
           disabled={!e2eeReady}
           data-testid="dm-message-input"
           className="flex-1 bg-[#27272A] border border-[#27272A]/50 rounded-lg px-4 py-2.5 text-sm text-white placeholder:text-[#52525B] outline-none focus:border-[#6366F1]/50 disabled:text-[#71717A]"
@@ -1220,7 +1337,7 @@ function DecryptedContent({ msg, config }) {
   const decrypt = useCallback(async () => {
     try {
       if (!e2eeReady) {
-        setStatusText("Use a verified desktop device or recovery to decrypt this message.");
+        setStatusText(t("e2ee.dmVerifyDevice"));
         return;
       }
       const decrypted = await decryptMessage(msg);

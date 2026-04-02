@@ -1,17 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { PaperPlaneRight, Paperclip, ShieldCheck, X } from "@phosphor-icons/react";
+import { PaperPlaneRight, Paperclip, X } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import { formatAppError } from "@/lib/appErrors";
 import MessageReferencePreview from "@/components/chat/MessageReferencePreview";
 import { useE2EE } from "@/contexts/E2EEContext";
+import E2EEStatus from "@/components/security/E2EEStatus";
 
-function renderEncryptedLabel() {
+function EncryptedBadge() {
   return (
-    <div className="mt-1 flex items-center gap-1 text-[10px] uppercase tracking-[0.18em] text-[#818CF8]">
-      <ShieldCheck size={12} weight="fill" />
-      <span>End-to-end encrypted</span>
-    </div>
+    <E2EEStatus variant="badge" className="mt-1" />
   );
 }
 
@@ -125,7 +124,9 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
 
       if (isE2EEThread) {
         if (!canUseE2EEThread) {
-          throw new Error("Use a verified desktop device to reply in encrypted threads.");
+          toast.error(t("e2ee.threadVerifyDevice"));
+          setSending(false);
+          return;
         }
         const recipients = await fetchChannelRecipients(channelId);
         const encryptedPayload = await encryptForRecipients({
@@ -144,8 +145,8 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
       setContent("");
       onReplySent?.(response.data, messageId);
       await loadThread();
-    } catch {
-      toast.error(t("thread.replyFailed"));
+    } catch (error) {
+      toast.error(formatAppError(t, error, { fallbackKey: "thread.replyFailed" }));
     } finally {
       setSending(false);
     }
@@ -160,7 +161,7 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch {
-      toast.error("Encrypted attachment could not be opened.");
+      toast.error(t("errors.encryptedAttachmentOpenFailed"));
     }
   };
 
@@ -227,13 +228,15 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
           <span className="text-sm font-semibold text-white">{thread.parent?.author?.display_name}</span>
           <span className="text-[10px] text-[#52525B]">{new Date(thread.parent?.created_at).toLocaleString()}</span>
         </div>
-        {thread.parent?.is_e2ee ? renderEncryptedLabel() : null}
+        {thread.parent?.is_e2ee ? <EncryptedBadge /> : null}
         {!canUseE2EEThread && isE2EEThread ? (
-          <p className="text-sm text-[#A1A1AA]">
-            {isDesktopCapable
-              ? "Verify or restore this desktop device to read encrypted thread messages."
-              : "Encrypted threads are only available in the desktop app."}
-          </p>
+          <E2EEStatus
+            variant="guard"
+            scope="thread"
+            ready={e2eeReady}
+            isDesktopCapable={isDesktopCapable}
+            className="mt-3"
+          />
         ) : (
           <>
             <p className="text-sm text-[#E4E4E7]">{parentText}</p>
@@ -273,7 +276,7 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
                     />
                   </div>
                 )}
-                {reply.is_e2ee ? renderEncryptedLabel() : null}
+                {reply.is_e2ee ? <EncryptedBadge /> : null}
                 <p className="text-sm text-[#E4E4E7] mt-0.5 break-words">{replyText}</p>
                 {renderAttachments(replyAttachments, Boolean(reply.is_e2ee))}
               </div>
@@ -288,7 +291,7 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
           <input
             value={content}
             onChange={(event) => setContent(event.target.value)}
-            placeholder={t("thread.placeholder")}
+            placeholder={canUseE2EEThread ? t("thread.placeholder") : t("e2ee.threadVerifyDevice")}
             disabled={!canUseE2EEThread}
             data-testid="thread-reply-input"
             className="flex-1 bg-transparent text-sm text-white placeholder:text-[#52525B] outline-none disabled:text-[#71717A]"

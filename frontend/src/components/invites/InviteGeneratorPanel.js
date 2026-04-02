@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Copy, LinkSimple, Sparkle } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import {
   buildDesktopInviteLink,
   buildInviteLink,
+  formatInviteExpiry,
+  formatInviteUsage,
 } from "@/lib/inviteLinks";
 
 export default function InviteGeneratorPanel({ serverId }) {
@@ -43,29 +46,15 @@ export default function InviteGeneratorPanel({ serverId }) {
     return buildDesktopInviteLink(baseUrl, invite.code);
   }, [config?.instanceUrl, invite?.code]);
 
-  const usageSummary = useMemo(() => {
-    const parsedMaxUses = Number(invite?.max_uses || 0);
-    const parsedUses = Number(invite?.uses || 0);
-    if (!parsedMaxUses) {
-      return t("inviteGenerator.unlimitedUses");
-    }
+  const usageSummary = useMemo(
+    () => formatInviteUsage(t, invite?.max_uses, invite?.uses),
+    [invite?.max_uses, invite?.uses, t],
+  );
 
-    const remainingUses = Math.max(parsedMaxUses - parsedUses, 0);
-    return `${t("inviteGenerator.maxUsesCount", { count: parsedMaxUses })} · ${t("inviteGenerator.usesLeft", { count: remainingUses })}`;
-  }, [invite?.max_uses, invite?.uses, t]);
-
-  const expirySummary = useMemo(() => {
-    if (!invite?.expires_at) {
-      return t("inviteGenerator.doesNotExpire");
-    }
-
-    const expiresDate = new Date(invite.expires_at);
-    if (Number.isNaN(expiresDate.getTime())) {
-      return t("inviteGenerator.expiresSoon");
-    }
-
-    return t("inviteGenerator.expiresAt", { value: expiresDate.toLocaleString() });
-  }, [invite?.expires_at, t]);
+  const expirySummary = useMemo(
+    () => formatInviteExpiry(t, invite?.expires_at),
+    [invite?.expires_at, t],
+  );
 
   const generateInvite = async () => {
     const parsedMaxUses = Number.parseInt(maxUses || "0", 10);
@@ -90,7 +79,7 @@ export default function InviteGeneratorPanel({ serverId }) {
       setInvite(response.data);
       toast.success(t("inviteGenerator.created"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "invite.acceptFailed" }));
     } finally {
       setLoading(false);
     }

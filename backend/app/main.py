@@ -14,7 +14,6 @@ import re
 import secrets
 import uuid
 
-import bcrypt
 from dotenv import load_dotenv
 from fastapi import (
     APIRouter,
@@ -35,13 +34,37 @@ from pydantic import BaseModel, ConfigDict, Field
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 from typing import Any, Dict, List, Optional
+from app.auth_service import (
+    AuthConfig,
+    build_access_token,
+    clear_auth_cookies,
+    create_auth_session,
+    get_request_token,
+    hash_password,
+    load_active_session,
+    load_current_user,
+    normalize_client_platform,
+    normalize_jwt_secret,
+    revoke_session,
+    revoke_user_sessions,
+    set_auth_cookies,
+    verify_password,
+    refresh_auth_session,
+    list_user_sessions,
+)
 from app.emailing import render_password_reset_email, render_verification_email, send_email
 from app.blob_storage import ensure_bucket, get_blob, put_blob
 from app.permissions import (
     DEFAULT_PERMISSIONS,
+    build_viewer_context,
+    get_channel_permissions,
     get_message_history_cutoff as get_permission_history_cutoff,
+    has_channel_permission,
     has_server_permission,
 )
+from app.pagination import clamp_page_limit
+from app.rate_limits import enforce_fixed_window_rate_limit
+from app.voice_access import build_voice_capabilities
 from app.ws import ws_mgr
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -52,7 +75,7 @@ load_dotenv(ROOT_DIR / ".env")
 # ============================================================
 mongo_url = os.environ["MONGO_URL"]
 db_name = os.environ["DB_NAME"]
-jwt_secret = os.environ.get("JWT_SECRET", secrets.token_hex(32))
+jwt_secret = normalize_jwt_secret(os.environ.get("JWT_SECRET", secrets.token_hex(32)))
 cookie_secure = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
 livekit_url = os.environ.get("LIVEKIT_URL", "").strip()
 livekit_api_key = os.environ.get("LIVEKIT_API_KEY", "").strip()
@@ -93,6 +116,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Singra Vox", version="1.0.0")
+app.state.auth_config = AuthConfig(jwt_secret=jwt_secret, cookie_secure=cookie_secure)
 
 app.add_middleware(
     CORSMiddleware,
@@ -114,10 +138,12 @@ def new_id():
     return str(uuid.uuid4())
 
 def hash_pw(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return hash_password(password)
+
 
 def verify_pw(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    valid, _ = verify_password(plain, hashed)
+    return valid
 
 
 def normalize_username(value: str) -> str:
@@ -139,17 +165,8 @@ def generate_numeric_code(length: int = EMAIL_VERIFICATION_CODE_LENGTH) -> str:
     digits = "0123456789"
     return "".join(secrets.choice(digits) for _ in range(length))
 
-def make_access_token(uid: str, email: str) -> str:
-    return pyjwt.encode(
-        {"sub": uid, "email": email, "exp": datetime.now(timezone.utc) + timedelta(hours=1), "type": "access"},
-        jwt_secret, algorithm=JWT_ALG
-    )
-
-def make_refresh_token(uid: str) -> str:
-    return pyjwt.encode(
-        {"sub": uid, "exp": datetime.now(timezone.utc) + timedelta(days=7), "type": "refresh"},
-        jwt_secret, algorithm=JWT_ALG
-    )
+def make_access_token(uid: str, email: str, session_id: str) -> str:
+    return build_access_token(user_id=uid, email=email, session_id=session_id, jwt_secret=jwt_secret)
 
 
 def sanitize_user(user: dict) -> dict:
@@ -164,36 +181,13 @@ def sanitize_user(user: dict) -> dict:
     return safe_user
 
 
-def get_request_token(request: Request, prefer_refresh: bool = False) -> Optional[str]:
-    cookie_name = "refresh_token" if prefer_refresh else "access_token"
-    token = request.cookies.get(cookie_name)
-    if token:
-        return token
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        return auth_header[7:]
-    return None
-
 async def current_user(request: Request) -> dict:
-    token = get_request_token(request)
-    if not token:
-        raise HTTPException(401, "Not authenticated")
-    try:
-        p = pyjwt.decode(token, jwt_secret, algorithms=[JWT_ALG])
-        if p.get("type") != "access":
-            raise HTTPException(401, "Invalid token")
-        user = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
-        if not user:
-            raise HTTPException(401, "User not found")
-        return sanitize_user(user)
-    except pyjwt.ExpiredSignatureError:
-        raise HTTPException(401, "Token expired")
-    except pyjwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid token")
+    user, _session = await load_current_user(db, request)
+    return sanitize_user(user)
+
 
 def set_cookies(resp: Response, at: str, rt: str):
-    resp.set_cookie("access_token", at, httponly=True, secure=cookie_secure, samesite="lax", max_age=3600, path="/")
-    resp.set_cookie("refresh_token", rt, httponly=True, secure=cookie_secure, samesite="lax", max_age=604800, path="/")
+    set_auth_cookies(response=resp, access_token=at, refresh_token=rt, cookie_secure=cookie_secure)
 
 
 async def get_instance_settings() -> dict:
@@ -206,7 +200,7 @@ async def get_instance_settings() -> dict:
         "instance_name": "",
         "owner_user_id": None,
         "allow_open_signup": False,
-        "community_count": 0,
+        "server_count": 0,
     }
 
 
@@ -228,12 +222,14 @@ async def require_instance_owner(user: dict) -> dict:
         raise HTTPException(403, "Instance owner required")
     return user
 
-async def check_permission(user_id: str, server_id: str, permission: str) -> bool:
+async def check_permission(user_id: str, server_id: str, permission: str, *, channel: Optional[dict] = None) -> bool:
+    if channel is not None:
+        return await has_channel_permission(db, user_id, channel, permission)
     return await has_server_permission(db, user_id, server_id, permission)
 
 
-async def get_message_history_cutoff(user_id: str, server_id: str) -> Optional[str]:
-    return await get_permission_history_cutoff(db, user_id, server_id)
+async def get_message_history_cutoff(user_id: str, server_id: str, *, channel: Optional[dict] = None) -> Optional[str]:
+    return await get_permission_history_cutoff(db, user_id, server_id, channel=channel)
 
 async def log_audit(server_id, actor_id, action, target_type, target_id, details):
     await db.audit_log.insert_one({
@@ -255,6 +251,13 @@ def email_verification_required_detail(email: str) -> dict:
         "code": "email_verification_required",
         "message": "Verify your email before signing in",
         "email": email,
+    }
+
+
+def session_closed_payload(reason: str) -> dict:
+    return {
+        "type": "session_revoked",
+        "reason": reason,
     }
 
 
@@ -327,15 +330,32 @@ async def get_server_member(server_id: str, user_id: str) -> Optional[dict]:
     )
 
 
-def auth_response_for_user(user: dict) -> dict:
+def auth_response_for_user(user: dict, *, session_id: str, refresh_token: str) -> dict:
     safe_user = sanitize_user(user)
-    access_token = make_access_token(safe_user["id"], safe_user["email"])
-    refresh_token = make_refresh_token(safe_user["id"])
+    access_token = make_access_token(safe_user["id"], safe_user["email"], session_id)
     return {
         "user": safe_user,
         "access_token": access_token,
         "refresh_token": refresh_token,
+        "session_id": session_id,
     }
+
+
+async def issue_auth_response(user: dict, request: Request, response: Response) -> dict:
+    session, access_token, refresh_token = await create_auth_session(
+        db,
+        user=user,
+        request=request,
+        auth_config=app.state.auth_config,
+        device_id=request_device_id(request),
+    )
+    payload = auth_response_for_user(
+        user,
+        session_id=session["session_id"],
+        refresh_token=refresh_token,
+    )
+    set_cookies(response, access_token, refresh_token)
+    return payload
 
 
 async def list_member_server_ids(user_id: str) -> List[str]:
@@ -505,8 +525,8 @@ async def list_active_voice_participant_user_ids(channel_id: str) -> List[str]:
 async def ensure_private_channel_member_access(user_id: str, channel: dict) -> None:
     if not channel.get("is_private"):
         return
-    recipients = await list_channel_recipient_user_ids(channel)
-    if user_id not in recipients:
+    required_permission = "join_voice" if channel.get("type") == "voice" else "read_messages"
+    if not await has_channel_permission(db, user_id, channel, required_permission):
         raise HTTPException(403, "No access to this private channel")
 
 
@@ -569,7 +589,7 @@ async def authorize_blob_access(user: dict, blob_record: dict) -> None:
         channel = await db.channels.find_one({"id": scope_id}, {"_id": 0})
         if not channel:
             raise HTTPException(404, "Channel not found")
-        if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+        if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
             raise HTTPException(403, "No access to this encrypted attachment")
         await ensure_private_channel_member_access(user["id"], channel)
         return
@@ -618,6 +638,7 @@ async def resolve_message_mentions(
     *,
     server_id: str,
     actor_id: str,
+    channel: Optional[dict] = None,
     content: str,
     mentioned_user_ids: Optional[List[str]] = None,
     mentioned_role_ids: Optional[List[str]] = None,
@@ -629,7 +650,7 @@ async def resolve_message_mentions(
     ).to_list(2000)
     member_map = {member["user_id"]: member for member in member_docs}
 
-    can_mention_everyone = await check_permission(actor_id, server_id, "mention_everyone")
+    can_mention_everyone = await check_permission(actor_id, server_id, "mention_everyone", channel=channel)
 
     valid_user_ids: List[str] = []
     provided_user_ids = list(dict.fromkeys(mentioned_user_ids or []))
@@ -694,7 +715,7 @@ async def resolve_message_mentions(
     }
 
 
-async def create_default_community(owner: dict, name: str, description: str = "") -> dict:
+async def create_default_server(owner: dict, name: str, description: str = "") -> dict:
     sid = new_id()
     general_channel_id = new_id()
     voice_channel_id = new_id()
@@ -1066,36 +1087,50 @@ async def login(inp: LoginInput, request: Request, response: Response):
     await require_instance_initialized()
     email = inp.email.lower().strip()
     ip = request.client.host if request.client else "unknown"
-    ident = f"{ip}:{email}"
-    attempt = await db.login_attempts.find_one({"identifier": ident}, {"_id": 0})
-    if attempt and attempt.get("count", 0) >= 5:
-        locked = attempt.get("locked_until", "")
-        if locked and datetime.fromisoformat(locked) > datetime.now(timezone.utc):
-            raise HTTPException(429, "Too many attempts. Try again later.")
-        else:
-            await db.login_attempts.delete_one({"identifier": ident})
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="auth.login",
+        key=f"{ip}:{email}",
+        limit=5,
+        window_seconds=15 * 60,
+        error_message="Too many login attempts. Try again later.",
+        code="login_rate_limited",
+    )
     user = await db.users.find_one({"email": email}, {"_id": 0})
-    if not user or not verify_pw(inp.password, user["password_hash"]):
-        await db.login_attempts.update_one(
-            {"identifier": ident},
-            {"$inc": {"count": 1}, "$set": {"locked_until": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}},
-            upsert=True
-        )
+    valid_password = False
+    needs_rehash = False
+    if user:
+        valid_password, needs_rehash = verify_password(inp.password, user["password_hash"])
+    if not user or not valid_password:
         raise HTTPException(401, "Invalid credentials")
     if not user.get("email_verified", True):
         raise HTTPException(403, email_verification_required_detail(email))
-    await db.login_attempts.delete_one({"identifier": ident})
+    if needs_rehash:
+        upgraded_hash = hash_pw(inp.password)
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"password_hash": upgraded_hash}},
+        )
+        user["password_hash"] = upgraded_hash
     await db.users.update_one({"id": user["id"]}, {"$set": {"status": "online", "last_seen": now_utc()}})
     await log_status_history(user["id"], "online")
-    auth_payload = auth_response_for_user(user)
-    set_cookies(response, auth_payload["access_token"], auth_payload["refresh_token"])
+    auth_payload = await issue_auth_response(user, request, response)
     await broadcast_presence_update(user["id"])
     return auth_payload
 
 
 @auth_r.post("/verify-email")
-async def verify_email(inp: VerifyEmailInput, response: Response):
+async def verify_email(inp: VerifyEmailInput, request: Request, response: Response):
     email = inp.email.lower().strip()
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="auth.verify_email",
+        key=f"{request.client.host if request.client else 'unknown'}:{email}",
+        limit=10,
+        window_seconds=15 * 60,
+        error_message="Too many verification attempts. Try again later.",
+        code="verify_email_rate_limited",
+    )
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         raise HTTPException(404, "Account not found")
@@ -1130,15 +1165,23 @@ async def verify_email(inp: VerifyEmailInput, response: Response):
     await db.email_verifications.delete_many({"user_id": user["id"], "purpose": EMAIL_VERIFICATION_PURPOSE})
 
     verified_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
-    auth_payload = auth_response_for_user(verified_user)
-    set_cookies(response, auth_payload["access_token"], auth_payload["refresh_token"])
+    auth_payload = await issue_auth_response(verified_user, request, response)
     await broadcast_presence_update(verified_user["id"])
     return auth_payload
 
 
 @auth_r.post("/resend-verification")
-async def resend_verification(inp: ResendVerificationInput):
+async def resend_verification(inp: ResendVerificationInput, request: Request):
     email = inp.email.lower().strip()
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="auth.resend_verification",
+        key=f"{request.client.host if request.client else 'unknown'}:{email}",
+        limit=5,
+        window_seconds=15 * 60,
+        error_message="Too many verification requests. Try again later.",
+        code="resend_verification_rate_limited",
+    )
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         return {"ok": True}
@@ -1158,8 +1201,17 @@ async def resend_verification(inp: ResendVerificationInput):
 
 
 @auth_r.post("/forgot-password")
-async def forgot_password(inp: ForgotPasswordInput):
+async def forgot_password(inp: ForgotPasswordInput, request: Request):
     email = inp.email.lower().strip()
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="auth.forgot_password",
+        key=f"{request.client.host if request.client else 'unknown'}:{email}",
+        limit=5,
+        window_seconds=15 * 60,
+        error_message="Too many password reset requests. Try again later.",
+        code="forgot_password_rate_limited",
+    )
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user or not user.get("email_verified", True):
         return {"ok": True}
@@ -1178,8 +1230,17 @@ async def forgot_password(inp: ForgotPasswordInput):
 
 
 @auth_r.post("/reset-password")
-async def reset_password(inp: ResetPasswordInput):
+async def reset_password(inp: ResetPasswordInput, request: Request):
     email = inp.email.lower().strip()
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="auth.reset_password",
+        key=f"{request.client.host if request.client else 'unknown'}:{email}",
+        limit=10,
+        window_seconds=15 * 60,
+        error_message="Too many password reset attempts. Try again later.",
+        code="reset_password_rate_limited",
+    )
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         raise HTTPException(400, "Invalid reset code")
@@ -1202,7 +1263,8 @@ async def reset_password(inp: ResetPasswordInput):
     if expected_hash != reset_request.get("code_hash"):
         raise HTTPException(400, "Invalid reset code")
 
-    if verify_pw(inp.new_password, user["password_hash"]):
+    password_matches, _ = verify_password(inp.new_password, user["password_hash"])
+    if password_matches:
         raise HTTPException(400, "Choose a different password")
 
     await db.users.update_one(
@@ -1210,47 +1272,103 @@ async def reset_password(inp: ResetPasswordInput):
         {"$set": {"password_hash": hash_pw(inp.new_password), "last_seen": now_utc()}},
     )
     await db.email_verifications.delete_many({"user_id": user["id"], "purpose": PASSWORD_RESET_PURPOSE})
+    await revoke_user_sessions(db, user["id"])
     return {"ok": True}
 
 @auth_r.post("/logout")
 async def logout(request: Request, response: Response):
     try:
-        user = await current_user(request)
+        user, session = await load_current_user(db, request)
+        await revoke_session(db, session["session_id"])
+        await ws_mgr.close_session(session["session_id"], session_closed_payload("logout"))
         await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "last_seen": now_utc()}})
         await log_status_history(user["id"], "offline")
         await clear_voice_membership(user["id"])
         await broadcast_presence_update(user["id"])
     except Exception:
         pass
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    clear_auth_cookies(response)
+    return {"ok": True}
+
+
+@auth_r.post("/logout-all")
+async def logout_all(request: Request, response: Response):
+    user, _session = await load_current_user(db, request)
+    await revoke_user_sessions(db, user["id"])
+    await ws_mgr.close_user_sessions(user["id"], session_closed_payload("logout_all"))
+    await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "last_seen": now_utc()}})
+    await log_status_history(user["id"], "offline")
+    await clear_voice_membership(user["id"])
+    await broadcast_presence_update(user["id"])
+    clear_auth_cookies(response)
+    return {"ok": True}
+
+
+@auth_r.get("/sessions")
+async def auth_sessions(request: Request):
+    user, current_session = await load_current_user(db, request)
+    sessions = await list_user_sessions(db, user["id"])
+    for session in sessions:
+        session["current"] = session["session_id"] == current_session["session_id"]
+    return {"sessions": sessions}
+
+
+@auth_r.delete("/sessions/{session_id}")
+async def revoke_auth_session(session_id: str, request: Request):
+    user, current_session = await load_current_user(db, request)
+    target = await db.auth_sessions.find_one(
+        {"session_id": session_id, "user_id": user["id"]},
+        {"_id": 0, "session_id": 1},
+    )
+    if not target:
+        raise HTTPException(404, "Session not found")
+    await revoke_session(db, session_id)
+    await ws_mgr.close_session(session_id, session_closed_payload("session_revoked"))
+    if session_id == current_session["session_id"]:
+        await clear_voice_membership(user["id"])
+        await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "last_seen": now_utc()}})
+        await log_status_history(user["id"], "offline")
+        await broadcast_presence_update(user["id"])
     return {"ok": True}
 
 @auth_r.get("/me")
 async def me(request: Request):
-    user = await current_user(request)
-    at = make_access_token(user["id"], user.get("email", ""))
-    return {**sanitize_user(user), "access_token": at}
+    user, session = await load_current_user(db, request)
+    at = make_access_token(user["id"], user.get("email", ""), session["session_id"])
+    return {**sanitize_user(user), "access_token": at, "session_id": session["session_id"]}
 
 @auth_r.post("/refresh")
 async def refresh(inp: RefreshInput, request: Request, response: Response):
     rt = inp.refresh_token or get_request_token(request, prefer_refresh=True)
     if not rt:
         raise HTTPException(401, "No refresh token")
-    try:
-        p = pyjwt.decode(rt, jwt_secret, algorithms=[JWT_ALG])
-        if p.get("type") != "refresh":
-            raise HTTPException(401, "Invalid token")
-        user = await db.users.find_one({"id": p["sub"]}, {"_id": 0})
-        if not user:
-            raise HTTPException(401, "User not found")
-        at = make_access_token(user["id"], user["email"])
-        response.set_cookie("access_token", at, httponly=True, secure=cookie_secure, samesite="lax", max_age=3600, path="/")
-        return {"ok": True, "access_token": at}
-    except pyjwt.ExpiredSignatureError:
-        raise HTTPException(401, "Refresh token expired")
-    except pyjwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid token")
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="auth.refresh",
+        key=f"{request.client.host if request.client else 'unknown'}:{normalize_client_platform(request)}",
+        limit=30,
+        window_seconds=15 * 60,
+        error_message="Too many refresh attempts. Try again later.",
+        code="refresh_rate_limited",
+    )
+    user, session, access_token, refresh_token = await refresh_auth_session(
+        db,
+        refresh_token=rt,
+        request=request,
+        auth_config=app.state.auth_config,
+        requested_device_id=request_device_id(request),
+    )
+    previous_session_id = session.get("replaced_from")
+    if previous_session_id:
+        await ws_mgr.close_session(previous_session_id, session_closed_payload("session_rotated"))
+    set_cookies(response, access_token, refresh_token)
+    return {
+        "ok": True,
+        "user": sanitize_user(user),
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "session_id": session["session_id"],
+    }
 
 # ============================================================
 # E2EE ROUTES
@@ -1431,7 +1549,7 @@ async def channel_recipients(channel_id: str, request: Request):
         raise HTTPException(404, "Channel not found")
     if not channel.get("is_private"):
         raise HTTPException(400, "Only private channels use the end-to-end recipient API")
-    if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+    if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
         raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     recipients = await list_channel_recipient_user_ids(channel)
@@ -1563,7 +1681,7 @@ async def get_current_media_key(channel_id: str, request: Request):
         raise HTTPException(404, "Channel not found")
     if not channel.get("is_private") or channel.get("type") != "voice":
         raise HTTPException(400, "Only private voice channels use encrypted media keys")
-    if not await check_permission(user["id"], channel["server_id"], "join_voice"):
+    if not await check_permission(user["id"], channel["server_id"], "join_voice", channel=channel):
         raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     active_voice_user_ids = await list_active_voice_participant_user_ids(channel_id)
@@ -1596,7 +1714,7 @@ async def rotate_media_key(channel_id: str, inp: EncryptedMediaKeyInput, request
         raise HTTPException(404, "Channel not found")
     if not channel.get("is_private") or channel.get("type") != "voice":
         raise HTTPException(400, "Only private voice channels use encrypted media keys")
-    if not await check_permission(user["id"], channel["server_id"], "join_voice"):
+    if not await check_permission(user["id"], channel["server_id"], "join_voice", channel=channel):
         raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
 
@@ -1628,17 +1746,18 @@ setup_r = APIRouter(prefix="/api/setup", tags=["Setup"])
 @setup_r.get("/status")
 async def setup_status():
     settings = await get_instance_settings()
-    community_count = await db.servers.count_documents({})
+    server_count = await db.servers.count_documents({})
     return {
         "initialized": settings.get("initialized", False),
         "setup_required": not settings.get("initialized", False),
         "allow_open_signup": settings.get("allow_open_signup", False),
-        "community_count": community_count,
+        "community_count": server_count,
+        "server_count": server_count,
         "instance_name": settings.get("instance_name", ""),
     }
 
 @setup_r.post("/bootstrap")
-async def bootstrap(inp: BootstrapInput, response: Response):
+async def bootstrap(inp: BootstrapInput, request: Request, response: Response):
     existing_settings = await get_instance_settings()
     if existing_settings.get("initialized"):
         raise HTTPException(409, "Instance is already initialized")
@@ -1700,8 +1819,7 @@ async def bootstrap(inp: BootstrapInput, response: Response):
         await db.users.delete_one({"id": uid})
         raise
 
-    auth_payload = auth_response_for_user(owner_user)
-    set_cookies(response, auth_payload["access_token"], auth_payload["refresh_token"])
+    auth_payload = await issue_auth_response(owner_user, request, response)
     return {
         **auth_payload,
         "setup": {
@@ -1778,7 +1896,7 @@ async def list_servers(request: Request):
 async def create_server(inp: ServerCreateInput, request: Request):
     user = await current_user(request)
     await require_instance_owner(user)
-    server = await create_default_community(user, inp.name, inp.description)
+    server = await create_default_server(user, inp.name, inp.description)
     ws_mgr.add_server(user["id"], server["id"])
     server.pop("_id", None)
     return server
@@ -1896,11 +2014,9 @@ async def list_channels(server_id: str, request: Request):
     visible_channels = []
     # Add voice states to voice channels
     for ch in channels:
-        if ch.get("is_private"):
-            try:
-                await ensure_private_channel_member_access(user["id"], ch)
-            except HTTPException:
-                continue
+        visible_permission = "join_voice" if ch.get("type") == "voice" else "read_messages"
+        if not await check_permission(user["id"], server_id, visible_permission, channel=ch):
+            continue
         if ch["type"] == "voice":
             states = await db.voice_states.find({"channel_id": ch["id"]}, {"_id": 0}).to_list(50)
             for s in states:
@@ -1966,6 +2082,15 @@ async def list_members(server_id: str, request: Request):
             m["user"] = u
             result.append(m)
     return result
+
+
+@servers_r.get("/{server_id}/viewer-context")
+async def get_server_viewer_context(server_id: str, request: Request):
+    user = await current_user(request)
+    member = await db.server_members.find_one({"server_id": server_id, "user_id": user["id"]}, {"_id": 0})
+    if not member or member.get("is_banned"):
+        raise HTTPException(403, "Not a member")
+    return await build_viewer_context(db, user["id"], server_id)
 
 
 @servers_r.get("/{server_id}/moderation/bans")
@@ -2090,6 +2215,15 @@ async def ban_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "ban_members"):
         raise HTTPException(403, "No permission")
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="moderation.ban",
+        key=f"{server_id}:{actor['id']}",
+        limit=20,
+        window_seconds=10 * 60,
+        error_message="Too many moderation actions. Try again later.",
+        code="moderation_rate_limited",
+    )
     server = await db.servers.find_one({"id": server_id}, {"_id": 0, "owner_id": 1})
     if server and server.get("owner_id") == inp.user_id:
         raise HTTPException(400, "Cannot ban the server owner")
@@ -2110,6 +2244,15 @@ async def unban_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "ban_members"):
         raise HTTPException(403, "No permission")
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="moderation.unban",
+        key=f"{server_id}:{actor['id']}",
+        limit=20,
+        window_seconds=10 * 60,
+        error_message="Too many moderation actions. Try again later.",
+        code="moderation_rate_limited",
+    )
     membership = await get_server_member(server_id, inp.user_id)
     if not membership or not membership.get("is_banned"):
         raise HTTPException(404, "Banned member not found")
@@ -2145,6 +2288,15 @@ async def mute_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "mute_members"):
         raise HTTPException(403, "No permission")
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="moderation.mute",
+        key=f"{server_id}:{actor['id']}",
+        limit=40,
+        window_seconds=10 * 60,
+        error_message="Too many moderation actions. Try again later.",
+        code="moderation_rate_limited",
+    )
     muted_until = (datetime.now(timezone.utc) + timedelta(minutes=inp.duration_minutes or 10)).isoformat()
     await db.server_members.update_one(
         {"server_id": server_id, "user_id": inp.user_id},
@@ -2158,6 +2310,15 @@ async def unmute_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "mute_members"):
         raise HTTPException(403, "No permission")
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="moderation.unmute",
+        key=f"{server_id}:{actor['id']}",
+        limit=40,
+        window_seconds=10 * 60,
+        error_message="Too many moderation actions. Try again later.",
+        code="moderation_rate_limited",
+    )
     await db.server_members.update_one(
         {"server_id": server_id, "user_id": inp.user_id},
         {"$set": {"muted_until": None}}
@@ -2169,6 +2330,15 @@ async def deafen_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "deafen_members"):
         raise HTTPException(403, "No permission")
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="moderation.deafen",
+        key=f"{server_id}:{actor['id']}",
+        limit=40,
+        window_seconds=10 * 60,
+        error_message="Too many moderation actions. Try again later.",
+        code="moderation_rate_limited",
+    )
 
     await db.voice_states.update_many(
         {"server_id": server_id, "user_id": inp.user_id},
@@ -2196,6 +2366,15 @@ async def undeafen_member(server_id: str, inp: ModerationInput, request: Request
     actor = await current_user(request)
     if not await check_permission(actor["id"], server_id, "deafen_members"):
         raise HTTPException(403, "No permission")
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="moderation.undeafen",
+        key=f"{server_id}:{actor['id']}",
+        limit=40,
+        window_seconds=10 * 60,
+        error_message="Too many moderation actions. Try again later.",
+        code="moderation_rate_limited",
+    )
 
     await db.voice_states.update_many(
         {"server_id": server_id, "user_id": inp.user_id},
@@ -2251,11 +2430,11 @@ async def create_invite(server_id: str, inp: InviteCreateInput, request: Request
 @servers_r.post("/{server_id}/voice/{channel_id}/join")
 async def voice_join(server_id: str, channel_id: str, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "join_voice"):
-        raise HTTPException(403, "No permission")
     channel = await db.channels.find_one({"id": channel_id, "server_id": server_id, "type": "voice"}, {"_id": 0})
     if not channel:
         raise HTTPException(404, "Voice channel not found")
+    if not await check_permission(user["id"], server_id, "join_voice", channel=channel):
+        raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     await clear_voice_membership(user["id"])
     state = {
@@ -2294,14 +2473,17 @@ voice_r = APIRouter(prefix="/api/voice", tags=["Voice"])
 @voice_r.post("/token")
 async def create_voice_token(inp: VoiceTokenInput, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], inp.server_id, "join_voice"):
-        raise HTTPException(403, "No permission")
     channel = await db.channels.find_one(
         {"id": inp.channel_id, "server_id": inp.server_id, "type": "voice"},
         {"_id": 0},
     )
     if not channel:
         raise HTTPException(404, "Voice channel not found")
+    can_join = await check_permission(user["id"], inp.server_id, "join_voice", channel=channel)
+    can_speak = await check_permission(user["id"], inp.server_id, "speak", channel=channel)
+    can_stream = await check_permission(user["id"], inp.server_id, "stream", channel=channel)
+    if not can_join:
+        raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     if not livekit_url or not livekit_api_key or not livekit_api_secret:
         raise HTTPException(503, "Voice service is not configured")
@@ -2313,10 +2495,12 @@ async def create_voice_token(inp: VoiceTokenInput, request: Request):
         .with_name(user.get("display_name") or user.get("username") or user["id"])
         .with_grants(
             livekit_api.VideoGrants(
-                room_join=True,
                 room=room_name,
-                can_publish=True,
-                can_subscribe=True,
+                **build_voice_capabilities(
+                    can_join=can_join,
+                    can_speak=can_speak,
+                    can_stream=can_stream,
+                ),
             )
         )
         .to_jwt()
@@ -2458,11 +2642,12 @@ async def get_messages(channel_id: str, request: Request, before: str = None, li
     channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not channel:
         raise HTTPException(404, "Channel not found")
-    if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+    limit = clamp_page_limit(limit)
+    if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
         raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     query = {"channel_id": channel_id, "is_deleted": {"$ne": True}}
-    history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"])
+    history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"], channel=channel)
     created_at_filters = {}
     if before:
         created_at_filters["$lt"] = before
@@ -2476,7 +2661,12 @@ async def get_messages(channel_id: str, request: Request, before: str = None, li
         author = await db.users.find_one({"id": msg["author_id"]}, {"_id": 0, "password_hash": 0})
         msg["author"] = author
         await hydrate_message_mentions(msg)
-    return messages
+    next_before = messages[0]["created_at"] if messages else None
+    return {
+        "messages": messages,
+        "next_before": next_before,
+        "has_more_before": len(messages) == limit,
+    }
 
 @channels_r.post("/{channel_id}/messages")
 async def send_message(channel_id: str, inp: MessageCreateInput, request: Request):
@@ -2484,8 +2674,10 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     ch = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not ch:
         raise HTTPException(404, "Channel not found")
-    if not await check_permission(user["id"], ch["server_id"], "send_messages"):
+    if not await check_permission(user["id"], ch["server_id"], "send_messages", channel=ch):
         raise HTTPException(403, "No permission")
+    if inp.attachments and not await check_permission(user["id"], ch["server_id"], "attach_files", channel=ch):
+        raise HTTPException(403, "No permission to upload files")
     await ensure_private_channel_member_access(user["id"], ch)
     member = await db.server_members.find_one({"server_id": ch["server_id"], "user_id": user["id"]}, {"_id": 0})
     if member and member.get("muted_until"):
@@ -2495,6 +2687,7 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     mention_data = await resolve_message_mentions(
         server_id=ch["server_id"],
         actor_id=user["id"],
+        channel=ch,
         content=inp.content,
         mentioned_user_ids=inp.mentioned_user_ids,
         mentioned_role_ids=inp.mentioned_role_ids,
@@ -2593,6 +2786,7 @@ async def edit_message(message_id: str, request: Request):
     mention_data = await resolve_message_mentions(
         server_id=ch["server_id"],
         actor_id=user["id"],
+        channel=ch,
         content=new_content,
         mentioned_user_ids=[],
         mentioned_role_ids=[],
@@ -2629,7 +2823,7 @@ async def delete_message(message_id: str, request: Request):
         raise HTTPException(404, "Message not found")
     ch = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
     is_author = msg["author_id"] == user["id"]
-    can_manage = ch and await check_permission(user["id"], ch["server_id"], "manage_messages")
+    can_manage = ch and await check_permission(user["id"], ch["server_id"], "manage_messages", channel=ch)
     if not is_author and not can_manage:
         raise HTTPException(403, "No permission")
     await db.messages.update_one({"id": message_id}, {"$set": {"is_deleted": True, "content": "[deleted]"}})
@@ -2647,10 +2841,10 @@ async def get_message(message_id: str, request: Request):
     channel = await db.channels.find_one({"id": msg["channel_id"]}, {"_id": 0})
     if not channel:
         raise HTTPException(404, "Channel not found")
-    if not await check_permission(user["id"], channel["server_id"], "read_messages"):
+    if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
         raise HTTPException(403, "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
-    history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"])
+    history_cutoff = await get_message_history_cutoff(user["id"], channel["server_id"], channel=channel)
     if history_cutoff and msg.get("created_at") and msg["created_at"] < history_cutoff:
         raise HTTPException(403, "No permission to read message history")
 
@@ -2712,6 +2906,7 @@ async def dm_conversations(request: Request):
 @dm_r.get("/{other_user_id}")
 async def get_dm_messages(other_user_id: str, request: Request, before: str = None, limit: int = 50):
     user = await current_user(request)
+    limit = clamp_page_limit(limit)
     query = {"$or": [
         {"sender_id": user["id"], "receiver_id": other_user_id},
         {"sender_id": other_user_id, "receiver_id": user["id"]}
@@ -2727,7 +2922,12 @@ async def get_dm_messages(other_user_id: str, request: Request, before: str = No
     for msg in messages:
         sender = await db.users.find_one({"id": msg["sender_id"]}, {"_id": 0, "password_hash": 0})
         msg["sender"] = sender
-    return messages
+    next_before = messages[0]["created_at"] if messages else None
+    return {
+        "messages": messages,
+        "next_before": next_before,
+        "has_more_before": len(messages) == limit,
+    }
 
 @dm_r.post("/{other_user_id}")
 async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
@@ -2810,6 +3010,15 @@ async def get_invite(code: str):
 @invites_r.post("/{code}/accept")
 async def accept_invite(code: str, request: Request):
     user = await current_user(request)
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="invites.accept",
+        key=f"{user['id']}:{code}",
+        limit=15,
+        window_seconds=10 * 60,
+        error_message="Too many invite accept attempts. Try again later.",
+        code="invite_accept_rate_limited",
+    )
     invite = await db.invites.find_one({"code": code}, {"_id": 0})
     if not invite:
         raise HTTPException(404, "Invite not found")
@@ -3033,6 +3242,13 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: 
         return
     try:
         p = pyjwt.decode(ws_token, jwt_secret, algorithms=[JWT_ALG])
+        if p.get("type") != "access" or not p.get("sid"):
+            await websocket.close(code=4001)
+            return
+        session = await load_active_session(db, session_id=p["sid"])
+        if not session:
+            await websocket.close(code=4001)
+            return
         uid = p["sub"]
         user = await db.users.find_one({"id": uid}, {"_id": 0})
         if not user:
@@ -3042,7 +3258,7 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: 
         await websocket.close(code=4001)
         return
     
-    connection_id = await ws_mgr.connect(websocket, uid, platform)
+    connection_id = await ws_mgr.connect(websocket, uid, platform, p["sid"])
     
     # Initialize user servers and presence
     if uid not in ws_mgr.user_servers:
@@ -3074,15 +3290,6 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: 
             elif data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             # ── WebRTC Voice Signaling (P2P relay) ──
-            elif data.get("type") in ("voice_offer", "voice_answer", "voice_ice"):
-                target = data.get("target_user_id")
-                if target:
-                    await ws_mgr.send(target, {
-                        "type": data["type"],
-                        "from_user_id": uid,
-                        "sdp": data.get("sdp"),
-                        "candidate": data.get("candidate"),
-                    })
     except WebSocketDisconnect:
         pass
     except Exception as e:
@@ -3119,7 +3326,12 @@ async def startup():
     await db.email_verifications.create_index("expires_at")
     await db.voice_states.create_index("user_id")
     await db.audit_log.create_index([("server_id", 1), ("created_at", -1)])
-    await db.login_attempts.create_index("identifier")
+    await db.auth_sessions.create_index("session_id", unique=True)
+    await db.auth_sessions.create_index([("user_id", 1), ("issued_at", -1)])
+    await db.auth_sessions.create_index("refresh_token_hash", unique=True)
+    await db.auth_sessions.create_index("expires_at")
+    await db.rate_limits.create_index([("scope", 1), ("key_hash", 1), ("window_id", 1)], unique=True)
+    await db.rate_limits.create_index("expires_at")
     await db.e2ee_accounts.create_index("user_id", unique=True)
     await db.e2ee_devices.create_index([("user_id", 1), ("device_id", 1)], unique=True)
     await db.e2ee_devices.create_index([("user_id", 1), ("verified_at", 1), ("revoked_at", 1)])
@@ -3142,7 +3354,7 @@ async def startup():
         f.write("# Singra Vox Setup\n\n")
         f.write("- Open `/setup` on the instance after the first start.\n")
         f.write("- The first admin is created through the setup wizard.\n\n")
-        f.write("## Auth Endpoints\n- POST /api/setup/bootstrap\n- POST /api/auth/register\n- POST /api/auth/verify-email\n- POST /api/auth/resend-verification\n- POST /api/auth/forgot-password\n- POST /api/auth/reset-password\n- POST /api/auth/login\n- POST /api/auth/logout\n- GET /api/auth/me\n- POST /api/auth/refresh\n")
+        f.write("## Auth Endpoints\n- POST /api/setup/bootstrap\n- POST /api/auth/register\n- POST /api/auth/verify-email\n- POST /api/auth/resend-verification\n- POST /api/auth/forgot-password\n- POST /api/auth/reset-password\n- POST /api/auth/login\n- POST /api/auth/logout\n- POST /api/auth/logout-all\n- GET /api/auth/me\n- GET /api/auth/sessions\n- DELETE /api/auth/sessions/{id}\n- POST /api/auth/refresh\n")
 
     logger.info("Singra Vox backend started")
 

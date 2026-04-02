@@ -71,21 +71,41 @@ export function AuthProvider({ children }) {
           authMode: "token",
           accessToken: stored.accessToken,
           refreshToken: stored.refreshToken,
+          platform: config.isDesktop ? "desktop" : "web",
         });
 
-        if (!stored.accessToken) {
-          if (!cancelled) {
-            setUser(null);
-            setToken(null);
-            setLoading(false);
+        if (!stored.accessToken && stored.refreshToken) {
+          try {
+            const refreshResponse = await api.post("/auth/refresh", {
+              refresh_token: stored.refreshToken,
+            });
+            const refreshedAccessToken = refreshResponse.data?.access_token || null;
+            const refreshedRefreshToken = refreshResponse.data?.refresh_token || stored.refreshToken;
+            setApiSession({
+              authMode: "token",
+              accessToken: refreshedAccessToken,
+              refreshToken: refreshedRefreshToken,
+              platform: "desktop",
+            });
+            await persistSession({
+              accessToken: refreshedAccessToken,
+              refreshToken: refreshedRefreshToken,
+            });
+          } catch {
+            if (!cancelled) {
+              setUser(null);
+              setToken(null);
+              setLoading(false);
+            }
+            return;
           }
-          return;
         }
       } else {
         setApiSession({
           authMode: "cookie",
           accessToken: null,
           refreshToken: null,
+          platform: "web",
         });
       }
 
@@ -125,13 +145,14 @@ export function AuthProvider({ children }) {
       authMode: config?.authMode || "cookie",
       accessToken: data.access_token || null,
       refreshToken: data.refresh_token || null,
+      platform: config?.isDesktop ? "desktop" : "web",
     });
     await persistSession({
       accessToken: data.access_token || null,
       refreshToken: data.refresh_token || null,
     });
     return data;
-  }, [config?.authMode, persistSession]);
+  }, [config?.authMode, config?.isDesktop, persistSession]);
 
   const login = useCallback(async (email, password) => {
     const res = await api.post("/auth/login", { email, password });
@@ -185,6 +206,24 @@ export function AuthProvider({ children }) {
     await clearSession();
   }, [clearSession]);
 
+  const logoutAll = useCallback(async () => {
+    try {
+      await api.post("/auth/logout-all");
+    } finally {
+      await clearSession();
+    }
+  }, [clearSession]);
+
+  const listSessions = useCallback(async () => {
+    const response = await api.get("/auth/sessions");
+    return response.data?.sessions || [];
+  }, []);
+
+  const revokeSession = useCallback(async (sessionId) => {
+    const response = await api.delete(`/auth/sessions/${sessionId}`);
+    return response.data;
+  }, []);
+
   const value = useMemo(() => ({
     user,
     loading,
@@ -197,15 +236,23 @@ export function AuthProvider({ children }) {
     resetPassword,
     bootstrap,
     logout,
+    logoutAll,
+    listSessions,
+    revokeSession,
+    clearAuthState: clearSession,
     setUser,
   }), [
     bootstrap,
+    clearSession,
     forgotPassword,
     loading,
+    listSessions,
     login,
     logout,
+    logoutAll,
     register,
     resendVerification,
+    revokeSession,
     resetPassword,
     token,
     user,

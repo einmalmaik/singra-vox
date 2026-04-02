@@ -14,10 +14,13 @@ import {
   VideoCamera,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
+import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { useE2EE } from "@/contexts/E2EEContext";
 import SettingsOverlayShell from "@/components/settings/SettingsOverlayShell";
+import E2EEStatus from "@/components/security/E2EEStatus";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -126,6 +129,7 @@ export default function GlobalSettingsOverlay({
   pttDebug = null,
 }) {
   const { t, i18n } = useTranslation();
+  const { logoutAll, listSessions, revokeSession } = useAuth();
   const { config } = useRuntime();
   const {
     loading: e2eeLoading,
@@ -183,6 +187,9 @@ export default function GlobalSettingsOverlay({
   const [confirmRecoveryPassphrase, setConfirmRecoveryPassphrase] = useState("");
   const [e2eeSubmitting, setE2eeSubmitting] = useState(false);
   const [currentDeviceFingerprint, setCurrentDeviceFingerprint] = useState("");
+  const [authSessions, setAuthSessions] = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [sessionActionTarget, setSessionActionTarget] = useState("");
 
   const updateVoicePreferences = useCallback(async (partialUpdate) => {
     const nextPreferences = saveVoicePreferences(user?.id, partialUpdate, { isDesktop });
@@ -261,6 +268,54 @@ export default function GlobalSettingsOverlay({
       cancelled = true;
     };
   }, [open]);
+
+  const loadAuthSessions = useCallback(async () => {
+    setLoadingSessions(true);
+    try {
+      const sessions = await listSessions();
+      setAuthSessions(Array.isArray(sessions) ? sessions : []);
+    } catch (error) {
+      toast.error(formatAppError(t, error, { fallbackKey: "settings.sessionsLoadFailed" }));
+      setAuthSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [listSessions, t]);
+
+  useEffect(() => {
+    if (!open || activeSection !== "account") {
+      return;
+    }
+    void loadAuthSessions();
+  }, [activeSection, loadAuthSessions, open]);
+
+  const handleRevokeSession = useCallback(async (sessionId) => {
+    if (!sessionId) {
+      return;
+    }
+    setSessionActionTarget(sessionId);
+    try {
+      await revokeSession(sessionId);
+      toast.success(t("settings.sessionRevoked"));
+      await loadAuthSessions();
+    } catch (error) {
+      toast.error(formatAppError(t, error, { fallbackKey: "settings.sessionRevokeFailed" }));
+    } finally {
+      setSessionActionTarget("");
+    }
+  }, [loadAuthSessions, revokeSession, t]);
+
+  const handleLogoutAllSessions = useCallback(async () => {
+    setSessionActionTarget("__all__");
+    try {
+      await logoutAll();
+      toast.success(t("settings.loggedOutEverywhere"));
+    } catch (error) {
+      toast.error(formatAppError(t, error, { fallbackKey: "settings.logoutAllFailed" }));
+    } finally {
+      setSessionActionTarget("");
+    }
+  }, [logoutAll, t]);
 
   useEffect(() => {
     if (!isDesktop) {
@@ -463,7 +518,7 @@ export default function GlobalSettingsOverlay({
       if (String(err?.message || "").startsWith("avatar-")) {
         toast.error(t("settings.avatarProcessFailed"));
       } else {
-        toast.error(formatError(err?.response?.data?.detail));
+        toast.error(formatAppError(t, err, { fallbackKey: "settings.accountUpdateFailed" }));
       }
     } finally {
       setSavingAccount(false);
@@ -483,7 +538,7 @@ export default function GlobalSettingsOverlay({
       URL.revokeObjectURL(url);
       toast.success(t("settings.exportSuccess"));
     } catch (err) {
-      toast.error(formatError(err?.response?.data?.detail));
+      toast.error(formatAppError(t, err, { fallbackKey: "settings.exportFailed" }));
     } finally {
       setExporting(false);
     }
@@ -502,7 +557,7 @@ export default function GlobalSettingsOverlay({
       onClose?.();
       setTimeout(() => onLogout?.(), 600);
     } catch (err) {
-      toast.error(formatError(err?.response?.data?.detail));
+      toast.error(formatAppError(t, err, { fallbackKey: "settings.accountDeleteFailed" }));
     } finally {
       setDeleting(false);
     }
@@ -510,11 +565,11 @@ export default function GlobalSettingsOverlay({
 
   const handleInitializeE2EE = async () => {
     if (recoveryPassphrase.length < 12) {
-      toast.error("Use a longer recovery passphrase for end-to-end encryption.");
+      toast.error(t("errors.recoveryPassphraseTooShort"));
       return;
     }
     if (recoveryPassphrase !== confirmRecoveryPassphrase) {
-      toast.error("The recovery passphrases do not match.");
+      toast.error(t("errors.recoveryPassphraseMismatch"));
       return;
     }
     setE2eeSubmitting(true);
@@ -525,9 +580,9 @@ export default function GlobalSettingsOverlay({
       });
       setRecoveryPassphrase("");
       setConfirmRecoveryPassphrase("");
-      toast.success("End-to-end encryption is now enabled on this desktop.");
+      toast.success(t("settings.e2eeInitialized"));
     } catch (error) {
-      toast.error(formatError(error?.response?.data?.detail || error.message));
+      toast.error(formatAppError(t, error, { fallbackKey: "errors.unknown" }));
     } finally {
       setE2eeSubmitting(false);
     }
@@ -535,7 +590,7 @@ export default function GlobalSettingsOverlay({
 
   const handleRestoreE2EE = async () => {
     if (!recoveryPassphrase) {
-      toast.error("Enter the recovery passphrase for this account.");
+      toast.error(t("errors.recoveryPassphraseRequired"));
       return;
     }
     setE2eeSubmitting(true);
@@ -546,9 +601,9 @@ export default function GlobalSettingsOverlay({
       });
       setRecoveryPassphrase("");
       setConfirmRecoveryPassphrase("");
-      toast.success("This desktop was restored for end-to-end encryption.");
+      toast.success(t("settings.e2eeRestored"));
     } catch (error) {
-      toast.error(formatError(error?.response?.data?.detail || error.message));
+      toast.error(formatAppError(t, error, { fallbackKey: "errors.unknown" }));
     } finally {
       setE2eeSubmitting(false);
     }
@@ -575,7 +630,7 @@ export default function GlobalSettingsOverlay({
       setConfirmPassword("");
       toast.success(t("settings.passwordChanged"));
     } catch (err) {
-      toast.error(formatError(err?.response?.data?.detail));
+      toast.error(formatAppError(t, err, { fallbackKey: "settings.passwordChangeFailed" }));
     } finally {
       setChangingPassword(false);
     }
@@ -598,7 +653,7 @@ export default function GlobalSettingsOverlay({
         await engine.stopMicTest();
       }
     } catch (err) {
-      toast.error(formatError(err?.response?.data?.detail || err?.message));
+      toast.error(formatAppError(t, err, { fallbackKey: "settings.micTestToggleFailed" }));
     }
   };
 
@@ -1035,6 +1090,83 @@ export default function GlobalSettingsOverlay({
                 </Select>
               </div>
             </section>
+
+            <section className="workspace-card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-bold text-white" style={{ fontFamily: "Manrope" }}>
+                    {t("settings.sessionsTitle")}
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400">{t("settings.sessionsDescription")}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadAuthSessions()}
+                    disabled={loadingSessions}
+                    className="rounded-2xl border-white/10 bg-zinc-950/60 text-white hover:bg-white/8"
+                  >
+                    {t("common.refresh")}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleLogoutAllSessions()}
+                    disabled={sessionActionTarget === "__all__"}
+                    className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300"
+                  >
+                    {sessionActionTarget === "__all__" ? t("settings.loggingOutEverywhere") : t("settings.logoutAllAction")}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {loadingSessions && (
+                  <p className="text-sm text-zinc-500">{t("settings.loadingSessions")}</p>
+                )}
+                {!loadingSessions && authSessions.length === 0 && (
+                  <p className="rounded-2xl border border-white/8 bg-zinc-950/60 px-4 py-3 text-sm text-zinc-500">
+                    {t("settings.noSessions")}
+                  </p>
+                )}
+                {!loadingSessions && authSessions.map((session) => (
+                  <div
+                    key={session.session_id}
+                    className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-white/8 bg-zinc-950/60 px-4 py-3"
+                  >
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-white">
+                        {t(`settings.sessionPlatform.${session.platform || "web"}`, {
+                          defaultValue: session.platform || "web",
+                        })}
+                      </p>
+                      <p className="text-xs text-zinc-400">
+                        {t("settings.sessionIssuedAt", {
+                          value: new Date(session.issued_at).toLocaleString(),
+                        })}
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        {t("settings.sessionLastSeen", {
+                          value: new Date(session.last_seen_at || session.issued_at).toLocaleString(),
+                        })}
+                      </p>
+                      {session.user_agent ? (
+                        <p className="max-w-[440px] text-xs text-zinc-500">{session.user_agent}</p>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleRevokeSession(session.session_id)}
+                      disabled={sessionActionTarget === session.session_id}
+                      className="rounded-2xl border-red-500/20 bg-transparent text-red-300 hover:bg-red-500/10"
+                    >
+                      {sessionActionTarget === session.session_id ? t("settings.revokingSession") : t("settings.revokeSession")}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
         </div>
       )}
@@ -1045,39 +1177,38 @@ export default function GlobalSettingsOverlay({
             <div className="flex items-start gap-3">
               <ShieldCheck size={20} className="mt-0.5 text-[#22C55E]" />
               <div className="flex-1">
-                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>End-to-end encryption</h3>
-                <p className="mt-1 text-sm text-[#71717A]">
-                  {isDesktopCapable
-                    ? "Private channels and direct messages are only readable on verified desktop devices."
-                    : "Strong end-to-end encryption is only available in the desktop app. The web app stays a convenience client."}
-                </p>
+                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.e2eeSectionTitle")}</h3>
+                <p className="mt-1 text-sm text-[#71717A]">{t("e2ee.title")}</p>
 
                 {!isDesktopCapable && (
-                  <div className="mt-4 rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-3 text-sm text-[#A1A1AA]">
-                    Install or open the desktop app to bootstrap recovery, verify devices and decrypt protected conversations.
-                  </div>
+                  <E2EEStatus
+                    variant="guard"
+                    scope="private_channel"
+                    isDesktopCapable={isDesktopCapable}
+                    className="mt-4"
+                  />
                 )}
 
                 {isDesktopCapable && !e2eeEnabled && (
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Device name</Label>
+                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.e2eeDeviceName")}</Label>
                       <Input value={e2eeDeviceName} onChange={(event) => setE2eeDeviceName(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Recovery passphrase</Label>
+                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.recoveryPassphrase")}</Label>
                       <Input type="password" value={recoveryPassphrase} onChange={(event) => setRecoveryPassphrase(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">Confirm recovery passphrase</Label>
+                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.recoveryPassphraseConfirm")}</Label>
                       <Input type="password" value={confirmRecoveryPassphrase} onChange={(event) => setConfirmRecoveryPassphrase(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
                     </div>
                     <div className="md:col-span-2 flex flex-wrap gap-3">
                       <Button onClick={handleInitializeE2EE} disabled={e2eeSubmitting} className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
-                        {e2eeSubmitting ? "Configuring..." : "Enable E2EE on this desktop"}
+                        {e2eeSubmitting ? t("settings.e2eeConfiguring") : t("settings.e2eeEnableDesktop")}
                       </Button>
                       <Button type="button" variant="outline" onClick={handleRestoreE2EE} disabled={e2eeSubmitting} className="rounded-2xl border-white/10 bg-zinc-950/60 text-white hover:bg-white/8">
-                        Restore with recovery passphrase
+                        {t("settings.e2eeRestoreAction")}
                       </Button>
                     </div>
                   </div>
@@ -1090,11 +1221,11 @@ export default function GlobalSettingsOverlay({
                         <div>
                           <p className="text-sm font-semibold text-white">{currentDevice?.device_name || e2eeDeviceName}</p>
                           <p className="mt-1 text-xs text-[#71717A]">
-                            {e2eeReady ? "Verified desktop device" : "Recovery or verification still required"}
+                            {e2eeReady ? t("settings.e2eeDeviceVerified") : t("settings.e2eeDevicePending")}
                           </p>
                         </div>
                         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${e2eeReady ? "bg-[#14532D] text-[#86EFAC]" : "bg-[#3F3F46] text-[#E4E4E7]"}`}>
-                          {e2eeReady ? "Ready" : "Pending"}
+                          {e2eeReady ? t("common.ready") : t("common.pending")}
                         </span>
                       </div>
                       {currentDeviceFingerprint && (
@@ -1105,28 +1236,30 @@ export default function GlobalSettingsOverlay({
                     </div>
 
                     <div className="rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-4">
-                      <h4 className="text-sm font-semibold text-white">Trusted devices</h4>
+                      <h4 className="text-sm font-semibold text-white">{t("settings.trustedDevices")}</h4>
                       <div className="mt-3 space-y-3">
                         {e2eeLoading && (
-                          <p className="text-sm text-[#71717A]">Loading encrypted device state...</p>
+                          <p className="text-sm text-[#71717A]">{t("settings.loadingTrustedDevices")}</p>
                         )}
                         {!e2eeLoading && e2eeDevices.map((device) => (
                           <div key={device.device_id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-zinc-950/75 px-3 py-3">
                             <div>
                               <p className="text-sm font-medium text-white">{device.device_name}</p>
                               <p className="mt-1 text-xs text-[#71717A]">
-                                {device.verified_at ? `Verified at ${new Date(device.verified_at).toLocaleString()}` : "Waiting for approval or recovery"}
+                                {device.verified_at
+                                  ? t("settings.deviceVerifiedAt", { value: new Date(device.verified_at).toLocaleString() })
+                                  : t("settings.deviceAwaitingApproval")}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
                               {!device.verified_at && (
                                 <Button type="button" size="sm" onClick={() => approveDevice(device.device_id)} className="rounded-2xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300">
-                                  Approve
+                                  {t("settings.approveDevice")}
                                 </Button>
                               )}
                               {currentDevice?.device_id !== device.device_id && !device.revoked_at && (
                                 <Button type="button" size="sm" variant="outline" onClick={() => revokeDevice(device.device_id)} className="border-[#EF4444]/30 bg-transparent text-[#FCA5A5] hover:bg-[#450A0A]">
-                                  Revoke
+                                  {t("settings.revokeDevice")}
                                 </Button>
                               )}
                             </div>

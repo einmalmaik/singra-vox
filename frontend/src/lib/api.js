@@ -10,6 +10,7 @@ let currentSession = {
   refreshToken: null,
   authMode: "cookie",
   deviceId: null,
+  platform: "web",
 };
 
 let onUnauthorized = null;
@@ -64,12 +65,20 @@ async function refreshSession() {
       const res = await axios.post(
         `${runtimeConfig.apiBase}/auth/refresh`,
         { refresh_token: currentSession.refreshToken },
-        { headers: { "Content-Type": "application/json" } },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "X-Singra-Client-Platform": currentSession.platform || "web",
+          },
+        },
       );
-      setApiSession({ accessToken: res.data.access_token || null });
+      setApiSession({
+        accessToken: res.data.access_token || null,
+        refreshToken: res.data.refresh_token || null,
+      });
       await onSessionChange?.({
         accessToken: res.data.access_token || null,
-        refreshToken: currentSession.refreshToken,
+        refreshToken: res.data.refresh_token || null,
       });
       return res.data.access_token || null;
     }
@@ -77,7 +86,12 @@ async function refreshSession() {
     await axios.post(
       `${runtimeConfig.apiBase}/auth/refresh`,
       {},
-      { withCredentials: true },
+      {
+        withCredentials: true,
+        headers: {
+          "X-Singra-Client-Platform": currentSession.platform || "web",
+        },
+      },
     );
     return null;
   })().finally(() => {
@@ -96,6 +110,8 @@ api.interceptors.request.use(async (config) => {
     config.headers = config.headers || {};
     config.headers["X-Singra-Device-Id"] = currentSession.deviceId;
   }
+  config.headers = config.headers || {};
+  config.headers["X-Singra-Client-Platform"] = currentSession.platform || "web";
   config.withCredentials = currentSession.authMode === "cookie";
   return config;
 });

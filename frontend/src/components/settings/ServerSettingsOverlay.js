@@ -26,7 +26,8 @@ import {
   UsersThree,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
 import SettingsOverlayShell from "@/components/settings/SettingsOverlayShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +47,7 @@ import {
   parseContainerDropId,
   ROOT_CHANNEL_CONTAINER_ID,
 } from "@/lib/channelOrganization";
-import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
+import { buildServerCapabilities } from "@/lib/serverPermissions";
 import SortableChannelItem from "@/components/channels/SortableChannelItem";
 import ChannelContainerDropZone from "@/components/channels/ChannelContainerDropZone";
 import InviteGeneratorPanel from "@/components/invites/InviteGeneratorPanel";
@@ -68,6 +69,7 @@ export default function ServerSettingsOverlay({
   members,
   roles,
   user,
+  viewerContext,
   onRefreshServers,
 }) {
   const { t } = useTranslation();
@@ -92,8 +94,8 @@ export default function ServerSettingsOverlay({
   const [transferringOwnership, setTransferringOwnership] = useState(false);
   const [leavingServer, setLeavingServer] = useState(false);
   const capabilities = useMemo(
-    () => buildWorkspaceCapabilities({ user, server, members, roles }),
-    [members, roles, server, user],
+    () => buildServerCapabilities({ user, server, viewerContext }),
+    [server, user, viewerContext],
   );
   const channelOrganization = useMemo(
     () => buildChannelOrganization(channels || []),
@@ -234,6 +236,7 @@ export default function ServerSettingsOverlay({
     mention_everyone: t("permissions.mentionEveryone"),
     join_voice: t("permissions.joinVoice"),
     speak: t("permissions.speak"),
+    stream: t("permissions.stream"),
     mute_members: t("permissions.muteMembers"),
     deafen_members: t("permissions.deafenMembers"),
     priority_speaker: t("permissions.prioritySpeaker"),
@@ -263,7 +266,7 @@ export default function ServerSettingsOverlay({
       });
       toast.success(t("serverSettings.channelUpdated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelUpdateFailed" }));
     }
   };
 
@@ -273,7 +276,7 @@ export default function ServerSettingsOverlay({
       await api.delete(`/channels/${selectedChannel.id}`);
       toast.success(t("serverSettings.channelDeleted"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelDeleteFailed" }));
     }
   };
 
@@ -291,7 +294,7 @@ export default function ServerSettingsOverlay({
       setSelectedChannelId(res.data.id);
       toast.success(newChannelType === "category" ? t("serverSettings.categoryCreated") : t("serverSettings.channelCreated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelCreateFailed" }));
     }
   };
 
@@ -350,7 +353,7 @@ export default function ServerSettingsOverlay({
       await reorderChannels(items);
       toast.success(t("serverSettings.channelOrderUpdated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelReorderFailed" }));
     }
   }, [channels, reorderChannels, t]);
 
@@ -364,7 +367,7 @@ export default function ServerSettingsOverlay({
       await api.put(`/channels/${channel.id}`, { name: nextName.trim() });
       toast.success(channel.type === "category" ? t("serverSettings.categoryRenamed") : t("serverSettings.channelRenamed"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelRenameFailed" }));
     }
   };
 
@@ -379,7 +382,7 @@ export default function ServerSettingsOverlay({
       await api.delete(`/channels/${channel.id}`);
       toast.success(channel.type === "category" ? t("serverSettings.categoryDeleted") : t("serverSettings.channelDeleted"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelDeleteFailed" }));
     }
   };
 
@@ -396,7 +399,7 @@ export default function ServerSettingsOverlay({
       await reorderChannels(items);
       toast.success(t("serverSettings.movedToTopLevel"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelReorderFailed" }));
     }
   }, [channels, reorderChannels, t]);
 
@@ -535,7 +538,7 @@ export default function ServerSettingsOverlay({
       setSelectedRoleId(res.data.id);
       toast.success(t("serverSettings.roleCreated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.roleCreateFailed" }));
     }
   };
 
@@ -553,7 +556,7 @@ export default function ServerSettingsOverlay({
       await api.put(`/servers/${server.id}/roles/${selectedRole.id}`, payload);
       toast.success(t("serverSettings.roleUpdated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.roleUpdateFailed" }));
     }
   };
 
@@ -573,7 +576,7 @@ export default function ServerSettingsOverlay({
       await api.delete(`/servers/${server.id}/roles/${selectedRole.id}`);
       toast.success(t("serverSettings.roleDeleted"));
     } catch (error) {
-      toast.error(error.response?.data?.detail || t("serverSettings.roleDeleteFailed"));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.roleDeleteFailed" }));
     }
   };
 
@@ -586,7 +589,7 @@ export default function ServerSettingsOverlay({
       await api.put(`/servers/${server.id}/members/${member.user_id}`, { roles: nextRoles });
       toast.success(t("serverSettings.memberUpdated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.memberUpdateFailed" }));
     }
   };
 
@@ -625,7 +628,7 @@ export default function ServerSettingsOverlay({
         ban: t("memberList.ban"),
         unban: t("server.unban"),
       }[action] || action;
-      toast.error(formatError(error.response?.data?.detail || t("serverSettings.memberActionFailed", { action: actionLabel })));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.memberActionFailed", fallbackParams: { action: actionLabel } }));
     }
   };
 
@@ -647,7 +650,7 @@ export default function ServerSettingsOverlay({
       await onRefreshServers?.();
       onClose?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.transferFailed" }));
     } finally {
       setTransferringOwnership(false);
     }
@@ -672,7 +675,7 @@ export default function ServerSettingsOverlay({
       await onRefreshServers?.();
       onClose?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.leaveFailed" }));
     } finally {
       setLeavingServer(false);
     }
@@ -703,7 +706,7 @@ export default function ServerSettingsOverlay({
                 <Input value={serverDescription} onChange={(event) => setServerDescription(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
               </div>
             </div>
-            <Button onClick={saveGeneral} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">{t("serverSettings.saveChanges")}</Button>
+            <Button onClick={saveGeneral} className="mt-5 bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveChanges")}</Button>
           </section>
 
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
@@ -745,7 +748,7 @@ export default function ServerSettingsOverlay({
                 <Button
                   onClick={handleTransferOwnership}
                   disabled={!isServerOwner || !ownershipTargetId || transferringOwnership}
-                  className="w-full bg-[#6366F1] hover:bg-[#4F46E5]"
+                  className="w-full bg-cyan-400 text-zinc-950 hover:bg-cyan-300"
                 >
                   {transferringOwnership ? t("serverSettings.transferring") : t("server.transferOwnership")}
                 </Button>
@@ -952,7 +955,7 @@ export default function ServerSettingsOverlay({
                   />
                 </div>
                 <div className="mt-5 flex gap-2">
-                  <Button onClick={saveChannel} className="bg-[#6366F1] hover:bg-[#4F46E5]">{t("serverSettings.saveChannel")}</Button>
+                  <Button onClick={saveChannel} className="bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveChannel")}</Button>
                   <Button onClick={deleteChannel} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
                     <Trash size={14} className="mr-2" />
                     {t("common.delete")}
@@ -990,7 +993,7 @@ export default function ServerSettingsOverlay({
               </div>
               <Switch checked={newRoleMentionable} onCheckedChange={setNewRoleMentionable} />
             </div>
-            <Button onClick={createRole} disabled={!newRoleName.trim()} className="mb-4 w-full bg-[#6366F1] hover:bg-[#4F46E5]">
+            <Button onClick={createRole} disabled={!newRoleName.trim()} className="mb-4 w-full bg-cyan-400 text-zinc-950 hover:bg-cyan-300">
               <Plus size={14} className="mr-2" />
               {t("common.create")} {t("server.roles")}
             </Button>
@@ -1064,7 +1067,7 @@ export default function ServerSettingsOverlay({
                   </div>
                 )}
 
-                <Button onClick={saveRole} className="mt-5 bg-[#6366F1] hover:bg-[#4F46E5]">{t("serverSettings.saveRole")}</Button>
+                <Button onClick={saveRole} className="mt-5 bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveRole")}</Button>
 
                 <div className="mt-6 grid gap-3 md:grid-cols-2">
                   {Object.entries(permissionLabels).map(([permissionKey, label]) => (
@@ -1185,7 +1188,7 @@ export default function ServerSettingsOverlay({
                         </div>
                         <Button
                           onClick={() => moderateMember(member.user_id, "unban")}
-                          className="bg-[#6366F1] hover:bg-[#4F46E5]"
+                          className="bg-cyan-400 text-zinc-950 hover:bg-cyan-300"
                         >
                           {t("server.unban")}
                         </Button>

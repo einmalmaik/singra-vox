@@ -24,9 +24,10 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
 import { toast } from "sonner";
-import { canCreateCommunity } from "@/lib/workspacePermissions";
+import { canCreateServer } from "@/lib/serverPermissions";
+import { formatAppError } from "@/lib/appErrors";
 
 function ServerIcon({
   active,
@@ -88,7 +89,7 @@ export default function ServerSidebar({
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
-  const canCreateServer = canCreateCommunity(user);
+  const canCreateNewServer = canCreateServer(user);
 
   const handleCreate = async (event) => {
     event.preventDefault();
@@ -101,7 +102,7 @@ export default function ServerSidebar({
       setName("");
       onRefreshServers?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "onboarding.serverCreateFailed" }));
     } finally {
       setCreating(false);
     }
@@ -185,7 +186,7 @@ export default function ServerSidebar({
           );
         })}
 
-        {canCreateServer && (
+        {canCreateNewServer && (
           <Dialog open={showCreate} onOpenChange={setShowCreate}>
             <Tooltip>
               <TooltipTrigger asChild>

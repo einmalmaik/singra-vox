@@ -6,7 +6,8 @@ import { useRuntime } from "@/contexts/RuntimeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatError } from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
+import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 
 export default function ConnectPage() {
   const { t } = useTranslation();
@@ -25,7 +26,7 @@ export default function ConnectPage() {
       const { status } = await connectToInstance(instanceUrl);
       navigate(status?.initialized ? "/login" : "/setup");
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || t("connect.couldNotReach"));
+      setError(formatAppError(t, err, { fallbackKey: "connect.couldNotReach" }));
     } finally {
       setLoading(false);
     }
@@ -44,11 +45,7 @@ export default function ConnectPage() {
 
         <div className="bg-[#121212] border border-[#27272A] rounded-xl p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-md text-sm" data-testid="connect-error">
-                {error}
-              </div>
-            )}
+            <LocalizedErrorBanner message={error} className="rounded-md text-red-200" data-testid="connect-error" />
 
             <div className="space-y-2">
               <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("connect.instanceUrl")}</Label>

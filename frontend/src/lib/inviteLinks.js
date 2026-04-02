@@ -62,6 +62,28 @@ export function buildDesktopInviteLink(instanceUrl, code) {
   return `singravox://invite/${encodeURIComponent(code)}${params.toString() ? `?${params}` : ""}`;
 }
 
+export function normalizeInstanceUrl(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const parsedUrl = new URL(trimmed);
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      return "";
+    }
+    if (!parsedUrl.hostname || parsedUrl.username || parsedUrl.password) {
+      return "";
+    }
+    parsedUrl.hash = "";
+    parsedUrl.search = "";
+    return parsedUrl.toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
 export function parseDesktopInviteLink(url) {
   try {
     const parsedUrl = new URL(url);
@@ -83,7 +105,7 @@ export function parseDesktopInviteLink(url) {
 
     return {
       code,
-      instanceUrl: String(parsedUrl.searchParams.get("instance") || "").replace(/\/+$/, ""),
+      instanceUrl: normalizeInstanceUrl(parsedUrl.searchParams.get("instance") || ""),
     };
   } catch {
     return null;
@@ -195,4 +217,28 @@ export function describeInviteExpiry(expiresAt) {
   }
 
   return `Expires ${expiresDate.toLocaleString()}`;
+}
+
+export function formatInviteUsage(t, maxUses, uses = 0) {
+  const parsedMaxUses = Number(maxUses || 0);
+  const parsedUses = Number(uses || 0);
+  if (!parsedMaxUses) {
+    return t("inviteGenerator.unlimitedUses");
+  }
+
+  const remainingUses = Math.max(parsedMaxUses - parsedUses, 0);
+  return `${t("inviteGenerator.maxUsesCount", { count: parsedMaxUses })} · ${t("inviteGenerator.usesLeft", { count: remainingUses })}`;
+}
+
+export function formatInviteExpiry(t, expiresAt) {
+  if (!expiresAt) {
+    return t("inviteGenerator.doesNotExpire");
+  }
+
+  const expiresDate = new Date(expiresAt);
+  if (Number.isNaN(expiresDate.getTime())) {
+    return t("inviteGenerator.expiresSoon");
+  }
+
+  return t("inviteGenerator.expiresAt", { value: expiresDate.toLocaleString() });
 }

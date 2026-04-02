@@ -65,11 +65,12 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { useE2EE } from "@/contexts/E2EEContext";
 import { loadVoicePreferences, saveVoicePreferences, subscribeVoicePreferences } from "@/lib/voicePreferences";
-import { buildWorkspaceCapabilities } from "@/lib/workspacePermissions";
+import { buildServerCapabilities } from "@/lib/serverPermissions";
 import {
   buildChannelOrganization,
   computeChannelReorderPayload,
@@ -99,6 +100,7 @@ export default function ChannelSidebar({
   user,
   members,
   roles,
+  viewerContext,
   unreadMap,
   voiceEngineRef,
   onLogout,
@@ -157,7 +159,7 @@ export default function ChannelSidebar({
   );
   const preferredMuted = Boolean(localVoicePreferences.selfMuteEnabled);
   const preferredDeafened = Boolean(localVoicePreferences.selfDeafenEnabled);
-  const capabilities = buildWorkspaceCapabilities({ user, server, members, roles });
+  const capabilities = buildServerCapabilities({ user, server, viewerContext });
   const channelOrganization = useMemo(
     () => buildChannelOrganization(channels),
     [channels],
@@ -434,7 +436,7 @@ export default function ChannelSidebar({
           return;
         }
         setCaptureSourcesStatus("error");
-        toast.error(formatError(error?.message || "Native capture sources could not be loaded."));
+        toast.error(formatAppError(t, error, { fallbackKey: "errors.nativeCaptureSourcesLoadFailed" }));
       }
     };
 
@@ -443,7 +445,7 @@ export default function ChannelSidebar({
     return () => {
       cancelled = true;
     };
-  }, [isDesktop, screenShareDialogOpen]);
+  }, [isDesktop, screenShareDialogOpen, t]);
 
   useEffect(() => {
     if (!voiceChannel?.is_private || !voiceEngineRef?.current || currentVoiceParticipantIds.length === 0) {
@@ -461,7 +463,7 @@ export default function ChannelSidebar({
       } catch (error) {
         console.error("Encrypted media rotation failed", error);
         if (!cancelled) {
-          toast.error(formatError(error?.response?.data?.detail || "Encrypted media keys could not be rotated."));
+          toast.error(formatAppError(t, error, { fallbackKey: "errors.encryptedMediaKeysRotateFailed" }));
         }
       }
     };
@@ -478,7 +480,7 @@ export default function ChannelSidebar({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [currentVoiceParticipantIds, voiceChannel?.id, voiceChannel?.is_private, voiceEngineRef]);
+  }, [currentVoiceParticipantIds, t, voiceChannel?.id, voiceChannel?.is_private, voiceEngineRef]);
 
   useEffect(() => {
     if (!stageState.open || !stageState.participantId || !stageState.source) {
@@ -538,7 +540,7 @@ export default function ChannelSidebar({
       setChName("");
       onRefreshChannels?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelCreateFailed" }));
     } finally {
       setCreating(false);
     }
@@ -594,7 +596,7 @@ export default function ChannelSidebar({
       await syncChannelOrder(payload);
       toast.success(t("serverSettings.channelOrderUpdated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelReorderFailed" }));
     }
   }, [channels, syncChannelOrder, t]);
 
@@ -602,11 +604,11 @@ export default function ChannelSidebar({
     try {
       if (voiceChannel?.id === channel.id) return;
       if (channel.is_private && !isDesktopCapable) {
-        toast.error("Encrypted voice channels are only available in the desktop app.");
+        toast.error(t("e2ee.privateChannelDesktopOnly"));
         return;
       }
       if (channel.is_private && !e2eeReady) {
-        toast.error("Restore or verify this desktop device before joining encrypted voice channels.");
+        toast.error(t("e2ee.privateChannelVerifyDevice"));
         return;
       }
 
@@ -657,7 +659,7 @@ export default function ChannelSidebar({
       toast.success(t("channel.voiceConnected"));
     } catch (error) {
       console.error("Voice join error:", error);
-      toast.error(formatError(error?.response?.data?.detail || t("channel.joinVoiceFailed")));
+      toast.error(formatAppError(t, error, { fallbackKey: "channel.joinVoiceFailed" }));
     }
   }, [bindVoiceEngine, config, e2eeReady, isDesktop, isDesktopCapable, localVoicePreferences.selfDeafenEnabled, localVoicePreferences.selfMuteEnabled, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
 
@@ -686,7 +688,7 @@ export default function ChannelSidebar({
       setStageState({ open: false, participantId: null, participantName: "", source: null });
       onRefreshChannels?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail || t("channel.leaveVoiceFailed")));
+      toast.error(formatAppError(t, error, { fallbackKey: "channel.leaveVoiceFailed" }));
     }
   }, [onRefreshChannels, preferredDeafened, preferredMuted, server?.id, t, voiceChannel, voiceEngineRef]);
 
@@ -711,7 +713,7 @@ export default function ChannelSidebar({
       engine?.setMuted(previousMuted);
       setIsMuted(previousMuted);
       await updateLocalPreferences({ selfMuteEnabled: previousMuted });
-      toast.error(formatError(error.response?.data?.detail || t("channel.muteUpdateFailed")));
+      toast.error(formatAppError(t, error, { fallbackKey: "channel.muteUpdateFailed" }));
     }
   };
 
@@ -736,7 +738,7 @@ export default function ChannelSidebar({
       engine?.setDeafened(previousDeafened);
       setIsDeafened(previousDeafened);
       await updateLocalPreferences({ selfDeafenEnabled: previousDeafened });
-      toast.error(formatError(error.response?.data?.detail || t("channel.deafenUpdateFailed")));
+      toast.error(formatAppError(t, error, { fallbackKey: "channel.deafenUpdateFailed" }));
     }
   };
 
@@ -746,7 +748,7 @@ export default function ChannelSidebar({
       const enabled = await voiceEngineRef.current.toggleCamera();
       setCameraEnabled(Boolean(enabled));
     } catch (error) {
-      toast.error(formatError(error?.message || "Camera could not be toggled."));
+      toast.error(formatAppError(t, error, { fallbackKey: "errors.cameraToggleFailed" }));
     }
   };
 
@@ -760,7 +762,7 @@ export default function ChannelSidebar({
       const enabled = await voiceEngineRef.current.toggleScreenShare();
       setScreenShareEnabled(Boolean(enabled));
     } catch (error) {
-      toast.error(formatError(error?.message || "Screen sharing could not be toggled."));
+      toast.error(formatAppError(t, error, { fallbackKey: "errors.screenShareToggleFailed" }));
     }
   };
 
@@ -768,7 +770,7 @@ export default function ChannelSidebar({
     if (!voiceChannel || !voiceEngineRef?.current) return;
     try {
       if (isDesktop && !selectedCaptureSourceId) {
-        toast.error(t("channel.captureSourceMissing", { defaultValue: "Choose a screen or a window first." }));
+        toast.error(t("channel.captureSourceMissing"));
         return;
       }
 
@@ -795,12 +797,10 @@ export default function ChannelSidebar({
       setScreenShareEnabled(Boolean(enabled));
       setScreenShareDialogOpen(false);
       if (isDesktop && screenShareAudio) {
-        toast.info(t("channel.nativeAudioPending", {
-          defaultValue: "The native desktop capture path is live. Desktop audio is the next step and is not sent yet.",
-        }));
+        toast.info(t("channel.nativeAudioPending"));
       }
     } catch (error) {
-      toast.error(formatError(error?.message || "Screen sharing could not be started."));
+      toast.error(formatAppError(t, error, { fallbackKey: "errors.screenShareStartFailed" }));
     }
   };
 
@@ -811,7 +811,7 @@ export default function ChannelSidebar({
       setScreenShareEnabled(false);
       setScreenShareDialogOpen(false);
     } catch (error) {
-      toast.error(formatError(error?.message || "Screen sharing could not be stopped."));
+      toast.error(formatAppError(t, error, { fallbackKey: "errors.screenShareStopFailed" }));
     }
   };
 
@@ -831,7 +831,7 @@ export default function ChannelSidebar({
       onRefreshChannels?.();
       toast.success(t("serverSettings.memberUpdated"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail || t("serverSettings.memberActionGenericFailed")));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.memberActionGenericFailed" }));
     }
   };
 
@@ -846,7 +846,7 @@ export default function ChannelSidebar({
       toast.success(channel.type === "category" ? t("serverSettings.categoryRenamed") : t("serverSettings.channelRenamed"));
       onRefreshChannels?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelRenameFailed" }));
     }
   };
 
@@ -862,7 +862,7 @@ export default function ChannelSidebar({
       toast.success(channel.type === "category" ? t("serverSettings.categoryDeleted") : t("serverSettings.channelDeleted"));
       onRefreshChannels?.();
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelDeleteFailed" }));
     }
   };
 
@@ -879,7 +879,7 @@ export default function ChannelSidebar({
       await syncChannelOrder(payload);
       toast.success(t("serverSettings.movedToTopLevel"));
     } catch (error) {
-      toast.error(formatError(error.response?.data?.detail));
+      toast.error(formatAppError(t, error, { fallbackKey: "serverSettings.channelReorderFailed" }));
     }
   }, [channels, syncChannelOrder, t]);
 
@@ -1509,6 +1509,7 @@ export default function ChannelSidebar({
         members={members}
         roles={roles}
         user={user}
+        viewerContext={viewerContext}
         onRefreshServers={onRefreshServers}
       />
       <GlobalSettingsOverlay
@@ -1545,12 +1546,12 @@ export default function ChannelSidebar({
                     <div className="space-y-2 p-3">
                       {captureSourcesStatus === "loading" && (
                         <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-400">
-                          {t("channel.loadingCaptureSources", { defaultValue: "Loading native capture sources..." })}
+                          {t("channel.loadingCaptureSources")}
                         </div>
                       )}
                       {captureSourcesStatus === "ready" && filteredCaptureSources.length === 0 && (
                         <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-400">
-                          {t("channel.noCaptureSources", { defaultValue: "No capture sources are available right now." })}
+                          {t("channel.noCaptureSources")}
                         </div>
                       )}
                       {filteredCaptureSources.map((source) => {
@@ -1577,7 +1578,7 @@ export default function ChannelSidebar({
                               </div>
                               {isSelected && (
                                 <span className="rounded-full bg-cyan-400/15 px-2 py-1 text-[11px] font-medium text-cyan-200">
-                                  {t("common.selected", { defaultValue: "Selected" })}
+                                  {t("common.selected")}
                                 </span>
                               )}
                             </div>
@@ -1609,24 +1610,17 @@ export default function ChannelSidebar({
                   <div>
                     <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
                     <p className="text-xs text-zinc-400">
-                      {t("channel.nativeAudioHint", {
-                        defaultValue: "The native picker is live. Desktop audio is the next native step and is still off.",
-                      })}
+                      {t("channel.nativeAudioHint")}
                     </p>
                   </div>
                   <Switch checked={false} disabled />
                 </div>
 
                 <div className="workspace-card space-y-2 px-4 py-3 text-xs text-zinc-400">
-                  <p>{t("channel.nativeShareHint", {
-                    defaultValue: "Desktop mode uses a native source picker and a native frame bridge instead of the browser capture dialog.",
-                  })}</p>
+                  <p>{t("channel.nativeShareHint")}</p>
                   {screenShareEnabled && screenShareMeta.sourceLabel && (
                     <p className="text-cyan-200">
-                      {t("channel.currentShareSource", {
-                        defaultValue: "Current source: {{source}}",
-                        source: screenShareMeta.sourceLabel,
-                      })}
+                      {t("channel.currentShareSource", { source: screenShareMeta.sourceLabel })}
                     </p>
                   )}
                 </div>
@@ -1653,7 +1647,7 @@ export default function ChannelSidebar({
                       onClick={() => void stopScreenShareFromDialog()}
                       className="rounded-2xl border-red-400/30 bg-red-500/10 text-red-100 hover:bg-red-500/15"
                     >
-                      {t("channel.stopSharing", { defaultValue: "Stop sharing" })}
+                      {t("channel.stopSharing")}
                     </Button>
                   )}
                   <Button
@@ -1663,7 +1657,7 @@ export default function ChannelSidebar({
                     disabled={captureSourcesStatus !== "ready" || !selectedCaptureSourceId}
                   >
                     {screenShareEnabled
-                      ? t("channel.switchShareSource", { defaultValue: "Switch source" })
+                      ? t("channel.switchShareSource")
                       : t("channel.startSharing")}
                   </Button>
                 </div>

@@ -3,11 +3,13 @@ import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
-import api, { formatError } from "@/lib/api";
+import api from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AuthShell from "@/components/auth/AuthShell";
+import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { ShieldCheck } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
@@ -35,12 +37,12 @@ export default function LoginPage() {
           const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
           clearPendingInvite();
           rememberPreferredServer(inviteResponse.data.server_id);
-          toast.success("Joined community");
+          toast.success(t("invite.joinedServer"));
           navigate("/", { replace: true });
           return;
         } catch (inviteError) {
           clearPendingInvite();
-          toast.error(formatError(inviteError.response?.data?.detail));
+          toast.error(formatAppError(t, inviteError, { fallbackKey: "invite.acceptFailed" }));
           navigate(`/invite/${pendingInvite.code}`, { replace: true, state: { skipAutoAccept: true } });
           return;
         }
@@ -54,7 +56,7 @@ export default function LoginPage() {
         navigate("/verify-email", { state: { email: verificationEmail } });
         return;
       }
-      setError(formatError(err.response?.data?.detail) || err.message);
+      setError(formatAppError(t, err, { fallbackKey: "auth.signInFailed" }));
     } finally {
       setLoading(false);
     }
@@ -85,11 +87,7 @@ export default function LoginPage() {
         ) : null}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {error && (
-            <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300" data-testid="login-error">
-              {error}
-            </div>
-          )}
+          <LocalizedErrorBanner message={error} className="text-red-200" data-testid="login-error" />
           <div className="space-y-2">
             <Label htmlFor="email" className="workspace-section-label">{t("auth.email")}</Label>
             <Input

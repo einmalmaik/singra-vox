@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AuthShell from "@/components/auth/AuthShell";
-import { formatError } from "@/lib/api";
+import { formatAppError } from "@/lib/appErrors";
+import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 
 export default function ForgotPasswordPage() {
   const { t } = useTranslation();
@@ -27,7 +28,7 @@ export default function ForgotPasswordPage() {
       toast.success(t("auth.passwordResetCodeSent"));
       navigate("/reset-password", { state: { email } });
     } catch (err) {
-      setError(formatError(err.response?.data?.detail) || err.message);
+      setError(formatAppError(t, err, { fallbackKey: "auth.passwordResetRequestFailed" }));
     } finally {
       setLoading(false);
     }
@@ -53,11 +54,7 @@ export default function ForgotPasswordPage() {
       )}
     >
       <form onSubmit={handleSubmit} className="space-y-5" data-testid="forgot-password-page">
-        {error ? (
-          <div className="rounded-2xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {error}
-          </div>
-        ) : null}
+        <LocalizedErrorBanner message={error} className="text-red-200" />
 
         <div className="space-y-2">
           <Label className="workspace-section-label">{t("auth.email")}</Label>
