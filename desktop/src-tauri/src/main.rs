@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod native_capture;
+
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, State};
@@ -545,13 +547,16 @@ fn clear_ptt_listener(state: State<'_, DesktopState>) -> Result<PttStatus, Strin
 
 fn main() {
     let desktop_state = DesktopState::default();
+    let capture_state = native_capture::DesktopCaptureStore::default();
     #[cfg(target_os = "windows")]
     let ptt_state = desktop_state.ptt.clone();
 
     tauri::Builder::default()
         .manage(desktop_state)
+        .manage(capture_state)
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
             #[cfg(target_os = "windows")]
@@ -567,6 +572,11 @@ fn main() {
             get_desktop_runtime_info,
             configure_ptt_listener,
             clear_ptt_listener,
+            native_capture::list_capture_sources,
+            native_capture::start_desktop_capture,
+            native_capture::stop_desktop_capture,
+            native_capture::get_desktop_capture_frame,
+            native_capture::get_desktop_capture_session,
         ])
         .run(tauri::generate_context!())
         .expect("error running Singra Vox desktop");

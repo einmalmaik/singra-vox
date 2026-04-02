@@ -15,6 +15,17 @@ import uuid
 import secrets
 import re
 import jwt as pyjwt
+import json
+from app.ws import ws_mgr
+try:
+    from pywebpush import webpush, WebPushException
+except ImportError:
+    webpush = None
+    WebPushException = Exception
+
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
+VAPID_CLAIMS = {"sub": f"mailto:{os.environ.get('VAPID_EMAIL', 'admin@singravox.com')}"}
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -119,13 +130,68 @@ async def _assert_channel_access(user_id, channel):
 
 # ── Helper: create notification ──
 async def _notify(user_id, ntype, title, body, link=None, from_user_id=None):
-    await db.notifications.insert_one({
-        "id": _id(), "user_id": user_id, "type": ntype,
+    # 1. Store in database (Fallback/In-App Center)
+    nid = _id()
+    notif = {
+        "id": nid, "user_id": user_id, "type": ntype,
         "title": title, "body": body, "link": link or "",
         "from_user_id": from_user_id, "read": False,
         "created_at": _now()
-    })
+    }
+    await db.notifications.insert_one(notif)
+    
+    # Hydrate from_user if available for WS
+    if from_user_id:
+        from_user = await db.users.find_one({"id": from_user_id}, {"_id": 0, "password_hash": 0})
+        notif["from_user"] = from_user
 
+    # 2. Check user status
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "status": 1, "notification_preferences": 1})
+    if not user:
+        return
+    
+    status = user.get("status", "online")
+    if status == "dnd":
+        # Don't send push/real-time notifications if DND is active
+        return
+
+    # 3. Send real-time notification via WebSocket
+    await ws_mgr.send(user_id, {"type": "notification", "notification": notif})
+
+    # 4. Send Web Push if no active "web" connection
+    platforms = ws_mgr.get_platforms(user_id)
+    if "web" not in platforms and webpush:
+        prefs = user.get("notification_preferences") or {"web_push_enabled": True}
+        if prefs.get("web_push_enabled"):
+            subscriptions = await db.push_subscriptions.find({"user_id": user_id, "platform": "web"}).to_list(10)
+            for sub in subscriptions:
+                try:
+                    webpush(
+                        subscription_info=sub["subscription"],
+                        data=json.dumps({
+                            "title": title,
+                            "body": body,
+                            "url": link or "/",
+                            "icon": "/logo192.png"
+                        }),
+                        vapid_private_key=VAPID_PRIVATE_KEY,
+                        vapid_claims=VAPID_CLAIMS
+                    )
+                except Exception:
+                    pass
+
+
+class BotTokenCreateInput(BaseModel):
+    name: str
+    permissions: dict = {"send_messages": True, "read_messages": True}
+
+class PushSubscriptionInput(BaseModel):
+    subscription: dict
+    platform: str # "web" | "desktop"
+
+class NotificationPreferenceInput(BaseModel):
+    web_push_enabled: bool = True
+    desktop_push_enabled: bool = True
 
 phase3 = APIRouter(prefix="/api", tags=["Phase3"])
 
@@ -228,6 +294,37 @@ async def delete_notif(notif_id: str, request: Request):
     user = await _user(request)
     await db.notifications.delete_one({"id": notif_id, "user_id": user["id"]})
     return {"ok": True}
+
+@phase3.get("/notifications/vapid-public-key")
+async def get_vapid_key():
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+@phase3.get("/users/me/notifications/preferences")
+async def get_notif_prefs(request: Request):
+    user = await _user(request)
+    return user.get("notification_preferences") or {"web_push_enabled": True, "desktop_push_enabled": True}
+
+@phase3.put("/users/me/notifications/preferences")
+async def update_notif_prefs(inp: NotificationPreferenceInput, request: Request):
+    user = await _user(request)
+    await db.users.update_one({"id": user["id"]}, {"$set": {"notification_preferences": inp.model_dump()}})
+    return inp
+
+@phase3.post("/users/me/notifications/subscriptions")
+async def add_push_sub(inp: PushSubscriptionInput, request: Request):
+    user = await _user(request)
+    await db.push_subscriptions.update_one(
+        {"user_id": user["id"], "subscription.endpoint": inp.subscription.get("endpoint")},
+        {"$set": {"subscription": inp.subscription, "platform": inp.platform, "updated_at": _now()}},
+        upsert=True
+    )
+    return {"ok": True}
+
+@phase3.get("/users/{user_id}/status/history")
+async def get_status_history(user_id: str, request: Request):
+    await _user(request)
+    history = await db.status_history.find({"user_id": user_id}).sort("created_at", -1).to_list(50)
+    return history
 
 # ═══════════════════════════════════════════════════
 #  CUSTOM EMOJI

@@ -11,6 +11,7 @@ export default function VoiceMediaStage({
   participantId,
   participantName,
   source,
+  mediaRevision,
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
@@ -45,7 +46,7 @@ export default function VoiceMediaStage({
       videoElement?.pause?.();
       detach?.();
     };
-  }, [documentHidden, open, participantId, source, voiceEngineRef]);
+  }, [documentHidden, mediaRevision, open, participantId, source, voiceEngineRef]);
 
   const isScreenShare = source === "screen_share";
   const title = isScreenShare

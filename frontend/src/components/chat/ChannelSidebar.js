@@ -45,6 +45,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -80,12 +82,12 @@ import ServerSettingsOverlay from "@/components/settings/ServerSettingsOverlay";
 import GlobalSettingsOverlay from "@/components/settings/GlobalSettingsOverlay";
 import VoiceMediaStage from "@/components/chat/VoiceMediaStage";
 import { useDesktopPtt } from "@/hooks/useDesktopPtt";
-
-const SCREEN_SHARE_PRESETS = {
-  "480p30": { width: 854, height: 480, frameRate: 30 },
-  "720p30": { width: 1280, height: 720, frameRate: 30 },
-  "1080p60": { width: 1920, height: 1080, frameRate: 60 },
-};
+import { getDesktopCaptureSession, listDesktopCaptureSources } from "@/lib/desktop";
+import {
+  DEFAULT_SCREEN_SHARE_PRESET_ID,
+  SCREEN_SHARE_PRESET_OPTIONS,
+  getScreenSharePreset,
+} from "@/lib/screenSharePresets";
 
 export default function ChannelSidebar({
   server,
@@ -116,12 +118,20 @@ export default function ChannelSidebar({
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [screenShareDialogOpen, setScreenShareDialogOpen] = useState(false);
-  const [screenShareQuality, setScreenShareQuality] = useState("1080p60");
+  const [screenShareQuality, setScreenShareQuality] = useState(DEFAULT_SCREEN_SHARE_PRESET_ID);
   const [screenShareAudio, setScreenShareAudio] = useState(true);
   const [screenShareSurface, setScreenShareSurface] = useState("monitor");
+  const [captureSourcesStatus, setCaptureSourcesStatus] = useState("idle");
+  const [captureSources, setCaptureSources] = useState([]);
+  const [captureSourceType, setCaptureSourceType] = useState("display");
+  const [selectedCaptureSourceId, setSelectedCaptureSourceId] = useState(null);
   const [screenShareMeta, setScreenShareMeta] = useState({
     hasAudio: false,
     actualCaptureSettings: null,
+    sourceId: null,
+    sourceKind: null,
+    sourceLabel: null,
+    provider: null,
   });
   const [voiceChannel, setVoiceChannel] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -155,6 +165,10 @@ export default function ChannelSidebar({
     () => channelOrganization.topLevelItems.filter((channel) => channel.type === "category"),
     [channelOrganization],
   );
+  const filteredCaptureSources = useMemo(
+    () => captureSources.filter((source) => source.kind === captureSourceType),
+    [captureSourceType, captureSources],
+  );
   const currentVoiceParticipantIds = useMemo(() => {
     if (!voiceChannel?.id) {
       return [];
@@ -170,6 +184,13 @@ export default function ChannelSidebar({
     () => new Map(mediaParticipants.map((participant) => [participant.userId, participant])),
     [mediaParticipants],
   );
+  const mediaStageRevision = useMemo(() => {
+    const remoteSignature = [...mediaParticipants]
+      .map((participant) => `${participant.userId}:${Number(participant.hasCamera)}:${Number(participant.hasScreenShare)}:${Number(participant.hasScreenShareAudio)}`)
+      .sort()
+      .join("|");
+    return `${Number(cameraEnabled)}:${Number(screenShareEnabled)}:${remoteSignature}`;
+  }, [cameraEnabled, mediaParticipants, screenShareEnabled]);
   const memberDisplayNames = useMemo(
     () => new Map(
       members.map((member) => [
@@ -279,6 +300,10 @@ export default function ChannelSidebar({
         setScreenShareMeta({
           hasAudio: Boolean(event.hasAudio),
           actualCaptureSettings: event.actualCaptureSettings || null,
+          sourceId: event.sourceId || null,
+          sourceKind: event.sourceKind || null,
+          sourceLabel: event.sourceLabel || null,
+          provider: event.provider || null,
         });
       }
       if (event.type === "media_tracks_update") {
@@ -295,7 +320,14 @@ export default function ChannelSidebar({
         setVoiceActivity({ localSpeaking: false, activeSpeakerIds: [], audioLevel: 0 });
         setCameraEnabled(false);
         setScreenShareEnabled(false);
-        setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
+        setScreenShareMeta({
+          hasAudio: false,
+          actualCaptureSettings: null,
+          sourceId: null,
+          sourceKind: null,
+          sourceLabel: null,
+          provider: null,
+        });
         setMediaParticipants([]);
       }
     };
@@ -334,7 +366,14 @@ export default function ChannelSidebar({
       setIsDeafened(preferredDeafened);
       setCameraEnabled(false);
       setScreenShareEnabled(false);
-      setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
+      setScreenShareMeta({
+        hasAudio: false,
+        actualCaptureSettings: null,
+        sourceId: null,
+        sourceKind: null,
+        sourceLabel: null,
+        provider: null,
+      });
       setVoiceActivity({ localSpeaking: false, activeSpeakerIds: [], audioLevel: 0 });
       return;
     }
@@ -354,6 +393,56 @@ export default function ChannelSidebar({
       setServerSettingsOpen(true);
     }
   }, [server?.id, serverSettingsRequest]);
+
+  useEffect(() => {
+    if (!isDesktop || !screenShareDialogOpen) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadCaptureSources = async () => {
+      setCaptureSourcesStatus("loading");
+      try {
+        const [sources, activeSession] = await Promise.all([
+          listDesktopCaptureSources(),
+          getDesktopCaptureSession().catch(() => null),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setCaptureSources(Array.isArray(sources) ? sources : []);
+        setCaptureSourcesStatus("ready");
+
+        const preferredSourceKind = activeSession?.sourceKind || "display";
+        const nextSelectedSourceId = activeSession?.sourceId
+          || (Array.isArray(sources)
+            ? (sources.find((source) => source.kind === preferredSourceKind)?.id || sources[0]?.id || null)
+            : null);
+        const nextSelectedSource = (sources || []).find((source) => source.id === nextSelectedSourceId) || null;
+        if (nextSelectedSourceId) {
+          setSelectedCaptureSourceId(nextSelectedSourceId);
+        }
+        if (nextSelectedSource?.kind) {
+          setCaptureSourceType(nextSelectedSource.kind);
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setCaptureSourcesStatus("error");
+        toast.error(formatError(error?.message || "Native capture sources could not be loaded."));
+      }
+    };
+
+    void loadCaptureSources();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktop, screenShareDialogOpen]);
 
   useEffect(() => {
     if (!voiceChannel?.is_private || !voiceEngineRef?.current || currentVoiceParticipantIds.length === 0) {
@@ -555,7 +644,14 @@ export default function ChannelSidebar({
       setIsDeafened(Boolean(stateResponse?.data?.is_deafened ?? desiredDeafened));
       setCameraEnabled(false);
       setScreenShareEnabled(false);
-      setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
+      setScreenShareMeta({
+        hasAudio: false,
+        actualCaptureSettings: null,
+        sourceId: null,
+        sourceKind: null,
+        sourceLabel: null,
+        provider: null,
+      });
       onRefreshChannels?.();
       toast.success(t("channel.voiceConnected"));
     } catch (error) {
@@ -577,7 +673,14 @@ export default function ChannelSidebar({
       setIsDeafened(preferredDeafened);
       setCameraEnabled(false);
       setScreenShareEnabled(false);
-      setScreenShareMeta({ hasAudio: false, actualCaptureSettings: null });
+      setScreenShareMeta({
+        hasAudio: false,
+        actualCaptureSettings: null,
+        sourceId: null,
+        sourceKind: null,
+        sourceLabel: null,
+        provider: null,
+      });
       setMediaParticipants([]);
       setStageState({ open: false, participantId: null, participantName: "", source: null });
       onRefreshChannels?.();
@@ -648,7 +751,7 @@ export default function ChannelSidebar({
 
   const toggleScreenShare = async () => {
     if (!voiceChannel || !voiceEngineRef?.current) return;
-    if (!screenShareEnabled) {
+    if (!screenShareEnabled || isDesktop) {
       setScreenShareDialogOpen(true);
       return;
     }
@@ -663,15 +766,51 @@ export default function ChannelSidebar({
   const startScreenShare = async () => {
     if (!voiceChannel || !voiceEngineRef?.current) return;
     try {
-      const enabled = await voiceEngineRef.current.startScreenShare({
-        audio: screenShareAudio,
-        displaySurface: screenShareSurface,
-        resolution: SCREEN_SHARE_PRESETS[screenShareQuality] || SCREEN_SHARE_PRESETS["1080p60"],
-      });
+      if (isDesktop && !selectedCaptureSourceId) {
+        toast.error(t("channel.captureSourceMissing", { defaultValue: "Choose a screen or a window first." }));
+        return;
+      }
+
+      const selectedSource = captureSources.find((source) => source.id === selectedCaptureSourceId) || null;
+      const selectedPreset = getScreenSharePreset(screenShareQuality);
+      const enabled = await voiceEngineRef.current.startScreenShare(
+        isDesktop
+          ? {
+            audio: false,
+            nativeCapture: true,
+            sourceId: selectedCaptureSourceId,
+            sourceKind: selectedSource?.kind || captureSourceType,
+            sourceLabel: selectedSource?.label || null,
+            resolution: selectedPreset.resolution,
+            qualityPreset: selectedPreset.id,
+          }
+          : {
+            audio: screenShareAudio,
+            displaySurface: screenShareSurface,
+            resolution: selectedPreset.resolution,
+            qualityPreset: selectedPreset.id,
+          },
+      );
       setScreenShareEnabled(Boolean(enabled));
       setScreenShareDialogOpen(false);
+      if (isDesktop && screenShareAudio) {
+        toast.info(t("channel.nativeAudioPending", {
+          defaultValue: "The native desktop capture path is live. Desktop audio is the next step and is not sent yet.",
+        }));
+      }
     } catch (error) {
       toast.error(formatError(error?.message || "Screen sharing could not be started."));
+    }
+  };
+
+  const stopScreenShareFromDialog = async () => {
+    if (!voiceEngineRef?.current) return;
+    try {
+      await voiceEngineRef.current.stopScreenShare();
+      setScreenShareEnabled(false);
+      setScreenShareDialogOpen(false);
+    } catch (error) {
+      toast.error(formatError(error?.message || "Screen sharing could not be stopped."));
     }
   };
 
@@ -1395,23 +1534,168 @@ export default function ChannelSidebar({
         pttDebug={pttDebug}
       />
       <Dialog open={screenShareDialogOpen} onOpenChange={setScreenShareDialogOpen}>
-        <DialogContent className="workspace-panel-solid max-w-lg text-white">
+        <DialogContent className="workspace-panel-solid max-w-3xl text-white">
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "Manrope" }}>{t("channel.shareScreen")}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-5">
+          {isDesktop ? (
+            <div className="grid gap-5 lg:grid-cols-[1.35fr_minmax(0,0.9fr)]">
+              <div className="space-y-4">
+                <Tabs value={captureSourceType} onValueChange={setCaptureSourceType}>
+                  <TabsList className="grid w-full grid-cols-2 rounded-2xl border border-white/10 bg-zinc-950/70 p-1 text-white">
+                    <TabsTrigger value="display" className="rounded-xl data-[state=active]:bg-cyan-400 data-[state=active]:text-zinc-950">
+                      {t("channel.shareEntireScreen")}
+                    </TabsTrigger>
+                    <TabsTrigger value="window" className="rounded-xl data-[state=active]:bg-cyan-400 data-[state=active]:text-zinc-950">
+                      {t("channel.shareWindow")}
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                <div className="workspace-card overflow-hidden border border-white/10 bg-zinc-950/70">
+                  <ScrollArea className="h-[22rem]">
+                    <div className="space-y-2 p-3">
+                      {captureSourcesStatus === "loading" && (
+                        <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-400">
+                          {t("channel.loadingCaptureSources", { defaultValue: "Loading native capture sources..." })}
+                        </div>
+                      )}
+                      {captureSourcesStatus === "ready" && filteredCaptureSources.length === 0 && (
+                        <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-400">
+                          {t("channel.noCaptureSources", { defaultValue: "No capture sources are available right now." })}
+                        </div>
+                      )}
+                      {filteredCaptureSources.map((source) => {
+                        const isSelected = source.id === selectedCaptureSourceId;
+                        return (
+                          <button
+                            key={source.id}
+                            type="button"
+                            onClick={() => setSelectedCaptureSourceId(source.id)}
+                            className={`w-full rounded-2xl border px-4 py-3 text-left transition ${
+                              isSelected
+                                ? "border-cyan-400/70 bg-cyan-400/12 shadow-[0_0_0_1px_rgba(34,211,238,0.28)]"
+                                : "border-white/8 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.06]"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <p className="text-sm font-semibold text-white">{source.label}</p>
+                                <p className="text-xs text-zinc-400">
+                                  {source.appName
+                                    ? `${source.appName} · ${source.width} × ${source.height}`
+                                    : `${source.width} × ${source.height}`}
+                                </p>
+                              </div>
+                              {isSelected && (
+                                <span className="rounded-full bg-cyan-400/15 px-2 py-1 text-[11px] font-medium text-cyan-200">
+                                  {t("common.selected", { defaultValue: "Selected" })}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="workspace-section-label">{t("channel.shareQuality")}</Label>
+                  <select
+                    value={screenShareQuality}
+                    onChange={(event) => setScreenShareQuality(event.target.value)}
+                    className="h-12 w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-4 text-sm text-white outline-none transition focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/20"
+                  >
+                    {SCREEN_SHARE_PRESET_OPTIONS.map((preset) => (
+                      <option key={preset.id} value={preset.id} className="bg-zinc-950 text-white">
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="workspace-card flex items-center justify-between px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
+                    <p className="text-xs text-zinc-400">
+                      {t("channel.nativeAudioHint", {
+                        defaultValue: "The native picker is live. Desktop audio is the next native step and is still off.",
+                      })}
+                    </p>
+                  </div>
+                  <Switch checked={false} disabled />
+                </div>
+
+                <div className="workspace-card space-y-2 px-4 py-3 text-xs text-zinc-400">
+                  <p>{t("channel.nativeShareHint", {
+                    defaultValue: "Desktop mode uses a native source picker and a native frame bridge instead of the browser capture dialog.",
+                  })}</p>
+                  {screenShareEnabled && screenShareMeta.sourceLabel && (
+                    <p className="text-cyan-200">
+                      {t("channel.currentShareSource", {
+                        defaultValue: "Current source: {{source}}",
+                        source: screenShareMeta.sourceLabel,
+                      })}
+                    </p>
+                  )}
+                </div>
+
+                {screenShareEnabled && screenShareMeta.actualCaptureSettings && (
+                  <div className="workspace-card px-4 py-3 text-xs text-zinc-400">
+                    {`${Math.round(screenShareMeta.actualCaptureSettings.width || 0)} × ${Math.round(screenShareMeta.actualCaptureSettings.height || 0)} @ ${Math.round(screenShareMeta.actualCaptureSettings.frameRate || 0)} FPS`}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap justify-end gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setScreenShareDialogOpen(false)}
+                    className="rounded-2xl border-white/10 bg-transparent text-white hover:bg-white/8"
+                  >
+                    {t("common.cancel")}
+                  </Button>
+                  {screenShareEnabled && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void stopScreenShareFromDialog()}
+                      className="rounded-2xl border-red-400/30 bg-red-500/10 text-red-100 hover:bg-red-500/15"
+                    >
+                      {t("channel.stopSharing", { defaultValue: "Stop sharing" })}
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    onClick={() => void startScreenShare()}
+                    className="rounded-2xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300"
+                    disabled={captureSourcesStatus !== "ready" || !selectedCaptureSourceId}
+                  >
+                    {screenShareEnabled
+                      ? t("channel.switchShareSource", { defaultValue: "Switch source" })
+                      : t("channel.startSharing")}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-5">
             <div className="space-y-2">
               <Label className="workspace-section-label">{t("channel.shareQuality")}</Label>
-              <Select value={screenShareQuality} onValueChange={setScreenShareQuality}>
-                <SelectTrigger className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="workspace-panel-solid border-white/10 text-white">
-                  <SelectItem value="480p30">480p / 30 FPS</SelectItem>
-                  <SelectItem value="720p30">720p / 30 FPS</SelectItem>
-                  <SelectItem value="1080p60">1080p / 60 FPS</SelectItem>
-                </SelectContent>
-              </Select>
+              <select
+                value={screenShareQuality}
+                onChange={(event) => setScreenShareQuality(event.target.value)}
+                className="h-12 w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-4 text-sm text-white outline-none transition focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/20"
+              >
+                {SCREEN_SHARE_PRESET_OPTIONS.map((preset) => (
+                  <option key={preset.id} value={preset.id} className="bg-zinc-950 text-white">
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-2">
@@ -1463,7 +1747,8 @@ export default function ChannelSidebar({
                 {t("channel.startSharing")}
               </Button>
             </div>
-          </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
       <VoiceMediaStage
@@ -1473,6 +1758,7 @@ export default function ChannelSidebar({
         participantId={stageState.participantId}
         participantName={stageState.participantName}
         source={stageState.source}
+        mediaRevision={mediaStageRevision}
       />
     </>
   );

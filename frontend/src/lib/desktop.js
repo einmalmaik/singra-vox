@@ -172,3 +172,45 @@ export async function unregisterDesktopPttHotkey(shortcut = null) {
   }
   return true;
 }
+
+export async function listDesktopCaptureSources() {
+  const invoke = await getInvoke();
+  if (!invoke) return [];
+  return invoke("list_capture_sources");
+}
+
+export async function startDesktopCapture({
+  sourceId,
+  requestedWidth,
+  requestedHeight,
+  requestedFrameRate,
+}) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("start_desktop_capture", {
+    sourceId,
+    requestedWidth,
+    requestedHeight,
+    requestedFrameRate,
+  });
+}
+
+export async function stopDesktopCapture() {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("stop_desktop_capture");
+}
+
+export async function getDesktopCaptureFrame(lastFrameId = null) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("get_desktop_capture_frame", {
+    lastFrameId,
+  });
+}
+
+export async function getDesktopCaptureSession() {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("get_desktop_capture_session");
+}

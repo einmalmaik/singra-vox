@@ -1,6 +1,8 @@
 import api from "@/lib/api";
 import { Room, RoomEvent, Track, createLocalScreenTracks, createLocalVideoTrack } from "livekit-client";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
+import { getDesktopCaptureFrame, startDesktopCapture, stopDesktopCapture } from "@/lib/desktop";
+import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
 
 function clampVolume(value, min = 0, max = 200) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
@@ -23,6 +25,45 @@ function computeRms(dataArray) {
     sum += sample * sample;
   }
   return Math.sqrt(sum / dataArray.length);
+}
+
+function base64ToBlob(base64, mimeType) {
+  if (!base64) {
+    return null;
+  }
+
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType || "image/jpeg" });
+}
+
+function createSyntheticVideoTrackDescriptor(mediaStreamTrack, source, stop) {
+  const mediaStream = new MediaStream([mediaStreamTrack]);
+  return {
+    kind: Track.Kind.Video,
+    source,
+    mediaStreamTrack,
+    unpublishTarget: mediaStreamTrack,
+    attach(element) {
+      if (!element) {
+        return element;
+      }
+      element.srcObject = mediaStream;
+      element.autoplay = true;
+      element.playsInline = true;
+      return element;
+    },
+    detach(element) {
+      if (element?.srcObject === mediaStream) {
+        element.srcObject = null;
+      }
+      return [];
+    },
+    stop,
+  };
 }
 
 export class VoiceEngine {
@@ -74,6 +115,7 @@ export class VoiceEngine {
     this.analysisStream = null;
     this.cameraTrack = null;
     this.screenShareTracks = [];
+    this.nativeScreenShare = null;
   }
 
   addStateListener(listener) {
@@ -424,7 +466,27 @@ export class VoiceEngine {
       audio = false,
       displaySurface = "monitor",
       resolution = { width: 1920, height: 1080, frameRate: 60 },
+      qualityPreset = DEFAULT_SCREEN_SHARE_PRESET_ID,
+      nativeCapture = false,
+      sourceId = null,
+      sourceKind = null,
+      sourceLabel = null,
     } = options;
+
+    if (this.screenShareTracks.length > 0) {
+      await this.stopScreenShare();
+    }
+
+    if (nativeCapture && this.runtimeConfig?.isDesktop && sourceId) {
+      return this._startNativeDesktopScreenShare({
+        audio,
+        resolution,
+        qualityPreset,
+        sourceId,
+        sourceKind,
+        sourceLabel,
+      });
+    }
 
     this.screenShareTracks = await createLocalScreenTracks({
       // Screen-share audio is separate from the microphone track. Requesting it
@@ -439,6 +501,12 @@ export class VoiceEngine {
       suppressLocalAudioPlayback: true,
       contentHint: "detail",
     });
+    const screenShareStreamName = `screen-share-${Date.now()}`;
+    const screenSharePublishOptions = buildScreenSharePublishOptions(qualityPreset);
+    const screenShareVideoTrack = this.screenShareTracks.find((track) => track.kind === Track.Kind.Video);
+    if (screenShareVideoTrack?.mediaStreamTrack) {
+      screenShareVideoTrack.mediaStreamTrack.contentHint = "detail";
+    }
 
     this.screenShareTracks.forEach((track) => {
       track.mediaStreamTrack?.addEventListener("ended", () => {
@@ -448,13 +516,30 @@ export class VoiceEngine {
       }, { once: true });
     });
     await Promise.all(
-      this.screenShareTracks.map((track) => this.room.localParticipant.publishTrack(track)),
+      this.screenShareTracks.map((track, index) => this.room.localParticipant.publishTrack(
+        track,
+        track.kind === Track.Kind.Video
+          ? {
+            ...screenSharePublishOptions,
+            name: `screen-share-video-${index}-${Date.now()}`,
+            source: Track.Source.ScreenShare,
+            stream: screenShareStreamName,
+          }
+          : {
+            name: `screen-share-audio-${index}-${Date.now()}`,
+            source: Track.Source.ScreenShareAudio,
+            stream: screenShareStreamName,
+          },
+      )),
     );
-    const screenShareVideoTrack = this.screenShareTracks.find((track) => track.kind === Track.Kind.Video);
     const screenShareAudioTrack = this.screenShareTracks.find((track) => track.source === Track.Source.ScreenShareAudio);
     this._emitRemoteMediaUpdate();
     this._emit("screen_share_change", {
       enabled: true,
+      provider: "browser",
+      sourceId: null,
+      sourceKind: displaySurface,
+      sourceLabel: null,
       hasAudio: Boolean(screenShareAudioTrack),
       actualCaptureSettings: screenShareVideoTrack?.mediaStreamTrack?.getSettings?.() || null,
     });
@@ -463,13 +548,259 @@ export class VoiceEngine {
 
   async stopScreenShare() {
     if (!this.room || this.screenShareTracks.length === 0) return;
+    if (this.nativeScreenShare) {
+      await this._stopNativeDesktopScreenShare();
+      return;
+    }
     await Promise.all(
-      this.screenShareTracks.map((track) => this.room.localParticipant.unpublishTrack(track, false)),
+      this.screenShareTracks.map((track) => this.room.localParticipant.unpublishTrack(track.unpublishTarget || track, false)),
     );
-    this.screenShareTracks.forEach((track) => track.stop());
+    this.screenShareTracks.forEach((track) => track.stop?.());
     this.screenShareTracks = [];
     this._emitRemoteMediaUpdate();
-    this._emit("screen_share_change", { enabled: false, hasAudio: false, actualCaptureSettings: null });
+    this._emit("screen_share_change", {
+      enabled: false,
+      provider: null,
+      sourceId: null,
+      sourceKind: null,
+      sourceLabel: null,
+      hasAudio: false,
+      actualCaptureSettings: null,
+    });
+  }
+
+  async _startNativeDesktopScreenShare({
+    audio,
+    resolution,
+    qualityPreset,
+    sourceId,
+    sourceKind,
+    sourceLabel,
+  }) {
+    const session = await startDesktopCapture({
+      sourceId,
+      requestedWidth: resolution.width,
+      requestedHeight: resolution.height,
+      requestedFrameRate: resolution.frameRate,
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = resolution.width;
+    canvas.height = resolution.height;
+    const context = canvas.getContext("2d", { alpha: false, desynchronized: true });
+    if (!context) {
+      throw new Error("The native screen share canvas could not be initialized.");
+    }
+
+    this.nativeScreenShare = {
+      sourceId,
+      sourceKind: sourceKind || session?.sourceKind || "display",
+      sourceLabel: sourceLabel || session?.sourceLabel || "Desktop capture",
+      requestedFrameRate: resolution.frameRate,
+      qualityPreset,
+      frameId: null,
+      drawInFlight: false,
+      canvas,
+      context,
+      pumpTimer: null,
+      frameIntervalMs: Math.max(Math.round(1000 / Math.max(resolution.frameRate || 30, 1)), 16),
+      lastFrameSettings: null,
+    };
+
+    // Pull at least one frame before publishing so the local stage and the
+    // remote viewers do not start with a black canvas track.
+    const firstFrameReady = await this._waitForNativeDesktopFrame();
+    if (!firstFrameReady) {
+      await this._stopNativeDesktopScreenShare({ keepTracksArray: false });
+      throw new Error("The desktop capture started, but no video frame arrived.");
+    }
+
+    if (this.nativeScreenShare.lastFrameSettings?.width && this.nativeScreenShare.lastFrameSettings?.height) {
+      canvas.width = this.nativeScreenShare.lastFrameSettings.width;
+      canvas.height = this.nativeScreenShare.lastFrameSettings.height;
+    }
+
+    const mediaStream = canvas.captureStream(0);
+    const mediaStreamTrack = mediaStream.getVideoTracks()[0];
+    if (!mediaStreamTrack) {
+      await this._stopNativeDesktopScreenShare({ keepTracksArray: false });
+      throw new Error("The native screen share track could not be created.");
+    }
+    mediaStreamTrack.contentHint = "detail";
+
+    const descriptor = createSyntheticVideoTrackDescriptor(
+      mediaStreamTrack,
+      Track.Source.ScreenShare,
+      () => mediaStreamTrack.stop(),
+    );
+
+    this.nativeScreenShare.mediaStream = mediaStream;
+    this.nativeScreenShare.mediaStreamTrack = mediaStreamTrack;
+    this.nativeScreenShare.descriptor = descriptor;
+    this.screenShareTracks = [descriptor];
+    const screenSharePublishOptions = buildScreenSharePublishOptions(qualityPreset);
+    const screenShareStreamName = `native-screen-share-${Date.now()}`;
+
+    await this.room.localParticipant.publishTrack(mediaStreamTrack, {
+      ...screenSharePublishOptions,
+      name: `${screenShareStreamName}-video`,
+      source: Track.Source.ScreenShare,
+      stream: screenShareStreamName,
+    });
+
+    this._scheduleNativeDesktopFramePump(this.nativeScreenShare.frameIntervalMs);
+
+    this._emitRemoteMediaUpdate();
+    this._emit("screen_share_change", {
+      enabled: true,
+      provider: "tauri-native",
+      sourceId,
+      sourceKind: this.nativeScreenShare.sourceKind,
+      sourceLabel: this.nativeScreenShare.sourceLabel,
+      hasAudio: false,
+      actualCaptureSettings: this.nativeScreenShare.lastFrameSettings || {
+        width: resolution.width,
+        height: resolution.height,
+        frameRate: resolution.frameRate,
+      },
+      audioRequested: Boolean(audio),
+    });
+    return true;
+  }
+
+  async _waitForNativeDesktopFrame() {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const updated = await this._pumpNativeDesktopFrame();
+      if (updated) {
+        return true;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    return false;
+  }
+
+  _scheduleNativeDesktopFramePump(delayMs = 16) {
+    if (!this.nativeScreenShare || this.nativeScreenShare.pumpTimer) {
+      return;
+    }
+
+    this.nativeScreenShare.pumpTimer = window.setTimeout(async () => {
+      if (!this.nativeScreenShare) {
+        return;
+      }
+
+      this.nativeScreenShare.pumpTimer = null;
+      try {
+        await this._pumpNativeDesktopFrame();
+      } finally {
+        if (this.nativeScreenShare) {
+          this._scheduleNativeDesktopFramePump(this.nativeScreenShare.frameIntervalMs);
+        }
+      }
+    }, Math.max(delayMs, 16));
+  }
+
+  async _pumpNativeDesktopFrame() {
+    if (!this.nativeScreenShare || this.nativeScreenShare.drawInFlight) {
+      return false;
+    }
+
+    this.nativeScreenShare.drawInFlight = true;
+    try {
+      const frame = await getDesktopCaptureFrame(this.nativeScreenShare.frameId);
+      if (!frame?.dataBase64) {
+        return false;
+      }
+
+      const blob = base64ToBlob(frame.dataBase64, frame.mimeType);
+      if (!blob) {
+        return false;
+      }
+
+      const imageBitmap = await createImageBitmap(blob);
+      try {
+        if (
+          this.nativeScreenShare.canvas.width !== frame.width
+          || this.nativeScreenShare.canvas.height !== frame.height
+        ) {
+          this.nativeScreenShare.canvas.width = frame.width;
+          this.nativeScreenShare.canvas.height = frame.height;
+        }
+        this.nativeScreenShare.context.clearRect(
+          0,
+          0,
+          this.nativeScreenShare.canvas.width,
+          this.nativeScreenShare.canvas.height,
+        );
+        this.nativeScreenShare.context.drawImage(
+          imageBitmap,
+          0,
+          0,
+          this.nativeScreenShare.canvas.width,
+          this.nativeScreenShare.canvas.height,
+        );
+        this.nativeScreenShare.mediaStreamTrack?.requestFrame?.();
+      } finally {
+        imageBitmap.close?.();
+      }
+
+      this.nativeScreenShare.frameId = frame.frameId;
+      this.nativeScreenShare.lastFrameSettings = {
+        width: frame.width,
+        height: frame.height,
+        frameRate: this.nativeScreenShare.requestedFrameRate,
+      };
+
+      this._emit("screen_share_change", {
+        enabled: true,
+        provider: "tauri-native",
+        sourceId: this.nativeScreenShare.sourceId,
+        sourceKind: this.nativeScreenShare.sourceKind,
+        sourceLabel: this.nativeScreenShare.sourceLabel,
+        hasAudio: false,
+        actualCaptureSettings: this.nativeScreenShare.lastFrameSettings,
+      });
+      return true;
+    } finally {
+      if (this.nativeScreenShare) {
+        this.nativeScreenShare.drawInFlight = false;
+      }
+    }
+  }
+
+  async _stopNativeDesktopScreenShare({ keepTracksArray = false } = {}) {
+    if (!this.room) {
+      return;
+    }
+
+    const activeShare = this.nativeScreenShare;
+    if (activeShare?.pumpTimer) {
+      window.clearTimeout(activeShare.pumpTimer);
+    }
+
+    if (activeShare?.mediaStreamTrack) {
+      await this.room.localParticipant.unpublishTrack(activeShare.mediaStreamTrack, false);
+    }
+
+    activeShare?.mediaStream?.getTracks?.().forEach((track) => track.stop());
+    activeShare?.descriptor?.stop?.();
+
+    await stopDesktopCapture().catch(() => null);
+
+    if (!keepTracksArray) {
+      this.screenShareTracks = [];
+    }
+    this.nativeScreenShare = null;
+    this._emitRemoteMediaUpdate();
+    this._emit("screen_share_change", {
+      enabled: false,
+      provider: null,
+      sourceId: null,
+      sourceKind: null,
+      sourceLabel: null,
+      hasAudio: false,
+      actualCaptureSettings: null,
+    });
   }
 
   attachParticipantMediaElement(participantId, source, element) {
@@ -490,9 +821,14 @@ export class VoiceEngine {
     element.playsInline = true;
     element.muted = participantId === this.userId;
     track.attach(element);
+    void element.play?.().catch(() => {
+      // Autoplay may still be gated by the embedding runtime. The stage will
+      // retry on the next media revision if the track becomes available later.
+    });
 
     return () => {
       try {
+        element.pause?.();
         track.detach(element);
       } catch {
         // Ignore detach errors during rapid overlay switches.

@@ -37,6 +37,7 @@ from pymongo.errors import DuplicateKeyError
 from typing import Any, Dict, List, Optional
 from app.emailing import render_password_reset_email, render_verification_email, send_email
 from app.blob_storage import ensure_bucket, get_blob, put_blob
+from app.ws import ws_mgr
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
@@ -968,70 +969,17 @@ class VoiceTokenInput(BaseModel):
     server_id: str
     channel_id: str
 
+async def log_status_history(user_id: str, status: str):
+    await db.status_history.insert_one({
+        "id": new_id(),
+        "user_id": user_id,
+        "status": status,
+        "created_at": now_utc()
+    })
+
 # ============================================================
-# WebSocket Manager
+# Presence
 # ============================================================
-class WSManager:
-    def __init__(self):
-        self.conns: Dict[str, Dict[str, WebSocket]] = {}
-        self.user_servers: Dict[str, set] = {}
-
-    async def connect(self, ws: WebSocket, uid: str):
-        await ws.accept()
-        connection_id = new_id()
-        self.conns.setdefault(uid, {})[connection_id] = ws
-        if uid not in self.user_servers:
-            members = await db.server_members.find(
-                {"user_id": uid, "is_banned": {"$ne": True}}, {"_id": 0, "server_id": 1}
-            ).to_list(100)
-            self.user_servers[uid] = {m["server_id"] for m in members}
-        if len(self.conns[uid]) == 1:
-            await db.users.update_one({"id": uid}, {"$set": {"status": "online", "last_seen": now_utc()}})
-            await broadcast_presence_update(uid)
-        return connection_id
-
-    def disconnect(self, uid: str, connection_id: str) -> int:
-        user_connections = self.conns.get(uid)
-        if not user_connections:
-            return 0
-        user_connections.pop(connection_id, None)
-        if user_connections:
-            return len(user_connections)
-        self.conns.pop(uid, None)
-        self.user_servers.pop(uid, None)
-        return 0
-
-    async def send(self, uid: str, data: dict):
-        user_connections = self.conns.get(uid)
-        if not user_connections:
-            return
-
-        stale_connection_ids = []
-        for connection_id, ws in list(user_connections.items()):
-            try:
-                await ws.send_json(data)
-            except Exception:
-                stale_connection_ids.append(connection_id)
-
-        for connection_id in stale_connection_ids:
-            self.disconnect(uid, connection_id)
-
-    async def broadcast_server(self, sid: str, data: dict, exclude: str = None):
-        for uid, svrs in list(self.user_servers.items()):
-            if sid in svrs and uid != exclude:
-                await self.send(uid, data)
-
-    def add_server(self, uid: str, sid: str):
-        if uid in self.user_servers:
-            self.user_servers[uid].add(sid)
-
-    def remove_server(self, uid: str, sid: str):
-        if uid in self.user_servers:
-            self.user_servers[uid].discard(sid)
-
-ws_mgr = WSManager()
-
-
 async def broadcast_presence_update(user_id: str):
     member_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not member_user:
@@ -1162,6 +1110,7 @@ async def login(inp: LoginInput, request: Request, response: Response):
         raise HTTPException(403, email_verification_required_detail(email))
     await db.login_attempts.delete_one({"identifier": ident})
     await db.users.update_one({"id": user["id"]}, {"$set": {"status": "online", "last_seen": now_utc()}})
+    await log_status_history(user["id"], "online")
     auth_payload = auth_response_for_user(user)
     set_cookies(response, auth_payload["access_token"], auth_payload["refresh_token"])
     await broadcast_presence_update(user["id"])
@@ -1201,6 +1150,7 @@ async def verify_email(inp: VerifyEmailInput, response: Response):
         {"id": user["id"]},
         {"$set": {"email_verified": True, "email_verified_at": verified_at, "status": "online", "last_seen": verified_at}},
     )
+    await log_status_history(user["id"], "online")
     await db.email_verifications.delete_many({"user_id": user["id"], "purpose": EMAIL_VERIFICATION_PURPOSE})
 
     verified_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
@@ -1291,6 +1241,7 @@ async def logout(request: Request, response: Response):
     try:
         user = await current_user(request)
         await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "last_seen": now_utc()}})
+        await log_status_history(user["id"], "offline")
         await clear_voice_membership(user["id"])
         await broadcast_presence_update(user["id"])
     except Exception:
@@ -2957,6 +2908,8 @@ async def update_profile(inp: ProfileUpdateInput, request: Request):
                 raise HTTPException(400, "Username taken")
             updates["username"] = normalized_username
     if updates:
+        if "status" in updates and updates["status"] != user.get("status"):
+            await log_status_history(user["id"], updates["status"])
         await db.users.update_one({"id": user["id"]}, {"$set": updates})
         await broadcast_presence_update(user["id"])
     return await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
@@ -3087,7 +3040,7 @@ async def migrate_email_verification_state():
 # WebSocket
 # ============================================================
 @app.websocket("/api/ws")
-async def ws_endpoint(websocket: WebSocket, token: str = Query(None)):
+async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: str = Query("web")):
     ws_token = token
     if not ws_token:
         ws_token = websocket.cookies.get("access_token")
@@ -3104,7 +3057,26 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None)):
     except Exception:
         await websocket.close(code=4001)
         return
-    connection_id = await ws_mgr.connect(websocket, uid)
+    
+    connection_id = await ws_mgr.connect(websocket, uid, platform)
+    
+    # Initialize user servers and presence
+    if uid not in ws_mgr.user_servers:
+        members = await db.server_members.find(
+            {"user_id": uid, "is_banned": {"$ne": True}}, {"_id": 0, "server_id": 1}
+        ).to_list(100)
+        ws_mgr.user_servers[uid] = {m["server_id"] for m in members}
+    
+    if len(ws_mgr.conns[uid]) == 1:
+        # Check if user has a preferred status, otherwise default to online
+        current_status = user.get("status", "online")
+        if current_status == "offline":
+            current_status = "online"
+        
+        await db.users.update_one({"id": uid}, {"$set": {"status": current_status, "last_seen": now_utc()}})
+        await log_status_history(uid, current_status)
+        await broadcast_presence_update(uid)
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -3135,6 +3107,7 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None)):
         remaining_connections = ws_mgr.disconnect(uid, connection_id)
         if remaining_connections == 0:
             await db.users.update_one({"id": uid}, {"$set": {"status": "offline", "last_seen": now_utc()}})
+            await log_status_history(uid, "offline")
             await clear_voice_membership(uid)
             await broadcast_presence_update(uid)
 
@@ -3170,6 +3143,8 @@ async def startup():
     await db.e2ee_blobs.create_index("id", unique=True)
     await db.e2ee_blobs.create_index([("scope_kind", 1), ("scope_id", 1), ("created_at", -1)])
     await db.e2ee_media_keys.create_index([("channel_id", 1), ("created_at", -1)])
+    await db.push_subscriptions.create_index([("user_id", 1), ("endpoint", 1)], unique=True)
+    await db.status_history.create_index([("user_id", 1), ("created_at", -1)])
     await create_phase2_indexes()
     await create_phase3_indexes()
     await ensure_bucket()

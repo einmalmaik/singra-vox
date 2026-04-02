@@ -26,6 +26,28 @@ generate_secret() {
   openssl rand -hex 32
 }
 
+generate_vapid() {
+  # We use a temporary docker container to generate VAPID keys 
+  # This ensures the user doesn't need to install any extra tools on their host.
+  docker run --rm python:3.11-slim bash -c "pip install -q pywebpush cryptography && python3 -c '
+import base64
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+
+def b64url(data):
+    return base64.urlsafe_b64encode(data).decode(\"utf-8\").rstrip(\"=\")
+
+private_key = ec.generate_private_key(ec.SECP256R1())
+private_bytes = private_key.private_numbers().private_value.to_bytes(32, byteorder=\"big\")
+public_key = private_key.public_key()
+public_bytes = public_key.public_bytes(
+    encoding=serialization.Encoding.X962,
+    format=serialization.PublicFormat.UncompressedPoint
+)
+print(f\"{b64url(private_bytes)} {b64url(public_bytes)}\")
+'"
+}
+
 ensure_docker() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     return
@@ -49,6 +71,9 @@ write_env() {
   local rtc_domain="$8"
   local livekit_key="$9"
   local livekit_secret="${10}"
+  local vapid_private="${11}"
+  local vapid_public="${12}"
+  local vapid_email="${13:-admin@$domain}"
 
   cat > "$DEPLOY_DIR/.env" <<EOF
 DB_NAME=singravox
@@ -62,6 +87,9 @@ LIVEKIT_API_KEY=$livekit_key
 LIVEKIT_API_SECRET=$livekit_secret
 DOMAIN=$domain
 RTC_DOMAIN=$rtc_domain
+VAPID_PRIVATE_KEY=$vapid_private
+VAPID_PUBLIC_KEY=$vapid_public
+VAPID_EMAIL=$vapid_email
 EOF
 }
 
@@ -143,7 +171,17 @@ main() {
   local turn_secret
   turn_secret="$(generate_secret)"
 
-  write_env "$mode" "$frontend_url" "$cors_origins" "$cookie_secure" "$livekit_url" "$http_port" "$domain" "$rtc_domain" "$livekit_key" "$livekit_secret"
+  echo "Generating VAPID keys for Web-Push notifications..."
+  local vapid_keys
+  vapid_keys=$(generate_vapid)
+  local vapid_private
+  vapid_private=$(echo "$vapid_keys" | cut -d' ' -f1)
+  local vapid_public
+  vapid_public=$(echo "$vapid_keys" | cut -d' ' -f2)
+  local vapid_email
+  vapid_email="$(prompt "VAPID Admin Email (for push notifications)" "admin@$domain")"
+
+  write_env "$mode" "$frontend_url" "$cors_origins" "$cookie_secure" "$livekit_url" "$http_port" "$domain" "$rtc_domain" "$livekit_key" "$livekit_secret" "$vapid_private" "$vapid_public" "$vapid_email"
   write_livekit_config "$livekit_key" "$livekit_secret"
   write_turn_config "${domain:-singravox.local}" "$turn_secret"
 

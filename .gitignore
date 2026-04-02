@@ -31,6 +31,7 @@ dist/
 dist
 desktop/src-tauri/target/
 desktop/src-tauri/target-pttfix*/
+desktop/src-tauri/target-*/
 test_reports/
 
 # Environment files (comprehensive coverage)

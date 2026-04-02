@@ -1,18 +1,68 @@
-import { useState } from "react";
-import { GearSix, Export, Trash, ShieldCheck, X } from "@phosphor-icons/react";
+import { useState, useEffect } from "react";
+import { GearSix, Export, Trash, ShieldCheck, Bell, Clock, Monitor, Globe } from "@phosphor-icons/react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import api from "@/lib/api";
 import { toast } from "sonner";
+import { requestNotificationPermission, subscribeToPush, getNotificationPreferences, updateNotificationPreferences } from "@/lib/pushNotifications";
 
 export default function UserSettingsModal({ user, onLogout }) {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState("");
+  const [notifPrefs, setNotifPrefs] = useState({ web_push_enabled: true, desktop_push_enabled: true });
+  const [statusHistory, setStatusHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      loadNotifPrefs();
+      loadStatusHistory();
+    }
+  }, [open]);
+
+  const loadNotifPrefs = async () => {
+    try {
+      const prefs = await getNotificationPreferences();
+      setNotifPrefs(prefs);
+    } catch {}
+  };
+
+  const loadStatusHistory = async () => {
+    if (!user?.id) return;
+    setLoadingHistory(true);
+    try {
+      const res = await api.get(`/users/${user.id}/status/history`);
+      setStatusHistory(res.data || []);
+    } catch {
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleTogglePush = async (key, val) => {
+    const next = { ...notifPrefs, [key]: val };
+    setNotifPrefs(next);
+    try {
+      await updateNotificationPreferences(next);
+      if (val && key === "web_push_enabled") {
+        const granted = await requestNotificationPermission();
+        if (granted) {
+          await subscribeToPush();
+        } else {
+          toast.error("Notification permission denied");
+          setNotifPrefs({ ...next, [key]: false });
+        }
+      }
+    } catch {
+      toast.error("Failed to update preferences");
+    }
+  };
 
   const handleExport = async () => {
     setExporting(true);
@@ -61,12 +111,86 @@ export default function UserSettingsModal({ user, onLogout }) {
         <DialogHeader>
           <DialogTitle style={{ fontFamily: 'Manrope' }}>Account Settings</DialogTitle>
         </DialogHeader>
-        <Tabs defaultValue="privacy" className="mt-2">
-          <TabsList className="bg-[#121212] border border-[#27272A]">
+        <Tabs defaultValue="notifications" className="mt-2">
+          <TabsList className="bg-[#121212] border border-[#27272A] w-full justify-start">
+            <TabsTrigger value="notifications" className="data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-[#A1A1AA]">
+              <Bell size={14} className="mr-1" /> Notifications
+            </TabsTrigger>
+            <TabsTrigger value="status" className="data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-[#A1A1AA]">
+              <Clock size={14} className="mr-1" /> Status
+            </TabsTrigger>
             <TabsTrigger value="privacy" className="data-[state=active]:bg-[#27272A] data-[state=active]:text-white text-[#A1A1AA]">
               <ShieldCheck size={14} className="mr-1" /> Privacy
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="notifications" className="space-y-4 mt-4">
+            <div className="bg-[#121212] border border-[#27272A] rounded-lg p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Globe size={20} className="text-[#6366F1]" />
+                  <div>
+                    <p className="text-sm font-bold">Browser Push Notifications</p>
+                    <p className="text-[10px] text-[#71717A]">Receive notifications even when the app is closed.</p>
+                  </div>
+                </div>
+                <Switch 
+                  checked={notifPrefs.web_push_enabled} 
+                  onCheckedChange={(v) => handleTogglePush("web_push_enabled", v)} 
+                />
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Monitor size={20} className="text-[#6366F1]" />
+                  <div>
+                    <p className="text-sm font-bold">Desktop App Notifications</p>
+                    <p className="text-[10px] text-[#71717A]">Native notifications when using the desktop application.</p>
+                  </div>
+                </div>
+                <Switch 
+                  checked={notifPrefs.desktop_push_enabled} 
+                  onCheckedChange={(v) => handleTogglePush("desktop_push_enabled", v)} 
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-[#71717A] px-1 italic">
+              Note: Mentions and DMs will always be saved in your In-App Notification Center.
+            </p>
+          </TabsContent>
+
+          <TabsContent value="status" className="mt-4">
+            <div className="bg-[#121212] border border-[#27272A] rounded-lg overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#27272A] bg-[#18181B]/50">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#71717A]">Status History</h4>
+              </div>
+              <div className="max-h-[300px] overflow-y-auto">
+                {loadingHistory ? (
+                  <p className="text-center py-8 text-xs text-[#71717A]">Loading history...</p>
+                ) : statusHistory.length === 0 ? (
+                  <p className="text-center py-8 text-xs text-[#71717A]">No status history available.</p>
+                ) : (
+                  <div className="divide-y divide-[#27272A]">
+                    {statusHistory.map((h) => (
+                      <div key={h.id} className="px-4 py-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${
+                            h.status === "online" ? "bg-[#22C55E]" :
+                            h.status === "away" ? "bg-[#F59E0B]" :
+                            h.status === "dnd" ? "bg-[#EF4444]" : "bg-[#71717A]"
+                          }`} />
+                          <span className="text-xs font-medium capitalize">{h.status}</span>
+                        </div>
+                        <span className="text-[10px] text-[#52525B]">
+                          {new Date(h.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
 
           <TabsContent value="privacy" className="space-y-6 mt-4">
             {/* Data Export */}

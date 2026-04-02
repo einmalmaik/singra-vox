@@ -511,6 +511,25 @@ export default function MainLayout() {
         voiceRef.current?.handleSignal(data);
         break;
 
+      case "notification":
+        // This is handled by NotificationPanel through interval polling currently,
+        // but we can add a toast or trigger a refresh.
+        toast(data.notification.title, {
+          description: data.notification.body,
+          action: data.notification.link ? {
+            label: "View",
+            onClick: () => navigate(data.notification.link)
+          } : undefined
+        });
+        window.dispatchEvent(new CustomEvent("refresh-notifications"));
+        // If the user is on desktop, we can also show a native notification
+        if (config?.isDesktop) {
+          import("@tauri-apps/plugin-notification").then(({ sendNotification }) => {
+            sendNotification({ title: data.notification.title, body: data.notification.body });
+          }).catch(() => {});
+        }
+        break;
+
       default:
         break;
     }
@@ -523,7 +542,8 @@ export default function MainLayout() {
       wsRef.current.close();
     }
 
-    const ws = new WebSocket(`${config.wsBase}/api/ws?token=${token}`);
+    const platform = config?.isDesktop ? "desktop" : "web";
+    const ws = new WebSocket(`${config.wsBase}/api/ws?token=${token}&platform=${platform}`);
     wsRef.current = ws;
 
     ws.onopen = () => {

@@ -24,7 +24,12 @@ export default function NotificationPanel() {
   useEffect(() => {
     load();
     const interval = setInterval(load, 20000);
-    return () => clearInterval(interval);
+    const handleRefresh = () => load();
+    window.addEventListener("refresh-notifications", handleRefresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("refresh-notifications", handleRefresh);
+    };
   }, [load]);
 
   const markRead = async (id) => {
