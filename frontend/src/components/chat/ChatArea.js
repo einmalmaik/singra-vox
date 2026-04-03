@@ -27,6 +27,7 @@ import {
   normalizeSelectedMentions,
   renderMessageContent,
 } from "@/lib/messageMentions";
+import { AttachmentRenderer } from "@/components/chat/AttachmentRenderer";
 
 const REACTIONS = ["\u{1F44D}", "\u{2764}\u{FE0F}", "\u{1F525}", "\u{1F440}", "\u{2705}", "\u{1F602}", "\u{1F914}"];
 const MESSAGE_HIGHLIGHT_DURATION = 2200;
@@ -735,19 +736,13 @@ export default function ChatArea({
                   {displayAttachments?.length > 0 && (
                     <div className="mt-2 space-y-1">
                       {displayAttachments.map((att, j) => (
-                        <div key={j}>
-                          {!msg.is_e2ee && att.type?.startsWith('image/') ? (
-                            <img src={att.url ? `${config?.assetBase || ""}${att.url}` : att.data} alt={att.name}
-                              className="max-w-md max-h-80 rounded-2xl border border-white/10 shadow-[0_16px_40px_rgba(0,0,0,0.22)]" />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => (msg.is_e2ee ? handleEncryptedAttachmentDownload(att) : window.open(att.url ? `${config?.assetBase || ""}${att.url}` : "#", "_blank", "noopener,noreferrer"))}
-                              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-zinc-900/65 px-3 py-2 text-xs text-[#A1A1AA] transition-colors hover:bg-white/5 hover:text-white"
-                            >
-                              <Paperclip size={14} /> {att.name}
-                            </button>
-                          )}
+                        <div key={att?.blob_id || att?.id || j}>
+                          <AttachmentRenderer
+                            attachment={att}
+                            isE2EE={msg.is_e2ee}
+                            assetBase={config?.assetBase || ""}
+                            onDownload={handleEncryptedAttachmentDownload}
+                          />
                         </div>
                       ))}
                     </div>

@@ -80,6 +80,9 @@ cookie_secure = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
 livekit_url = os.environ.get("LIVEKIT_URL", "").strip()
 livekit_api_key = os.environ.get("LIVEKIT_API_KEY", "").strip()
 livekit_api_secret = os.environ.get("LIVEKIT_API_SECRET", "").strip()
+# Public URL clients (browsers/apps) use to connect to LiveKit.
+# Falls back to LIVEKIT_URL when not explicitly set.
+livekit_public_url = os.environ.get("LIVEKIT_PUBLIC_URL", "").strip() or livekit_url
 default_frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").strip()
 configured_cors = [
     origin.strip()
@@ -2506,7 +2509,7 @@ async def create_voice_token(inp: VoiceTokenInput, request: Request):
         .to_jwt()
     )
     return {
-        "server_url": livekit_url,
+        "server_url": livekit_public_url,
         "participant_token": access_token,
         "room_name": room_name,
         "e2ee_required": bool(channel.get("is_private")),

@@ -66,14 +66,19 @@ write_env() {
   local cors_origins="$3"
   local cookie_secure="$4"
   local livekit_url="$5"
-  local http_port="$6"
-  local domain="$7"
-  local rtc_domain="$8"
-  local livekit_key="$9"
-  local livekit_secret="${10}"
-  local vapid_private="${11}"
-  local vapid_public="${12}"
-  local vapid_email="${13:-admin@$domain}"
+  local livekit_public_url="$6"
+  local http_port="$7"
+  local domain="$8"
+  local rtc_domain="$9"
+  local livekit_key="${10}"
+  local livekit_secret="${11}"
+  local vapid_private="${12}"
+  local vapid_public="${13}"
+  local vapid_email="${14:-admin@$domain}"
+  local s3_key="${15:-singravox}"
+  local s3_secret="${16:-$(generate_secret)}"
+  local smtp_host="${17:-mailpit}"
+  local smtp_from="${18:-no-reply@$domain}"
 
   cat > "$DEPLOY_DIR/.env" <<EOF
 DB_NAME=singravox
@@ -83,6 +88,7 @@ HTTP_PORT=$http_port
 FRONTEND_URL=$frontend_url
 CORS_ORIGINS=$cors_origins
 LIVEKIT_URL=$livekit_url
+LIVEKIT_PUBLIC_URL=$livekit_public_url
 LIVEKIT_API_KEY=$livekit_key
 LIVEKIT_API_SECRET=$livekit_secret
 DOMAIN=$domain
@@ -90,6 +96,20 @@ RTC_DOMAIN=$rtc_domain
 VAPID_PRIVATE_KEY=$vapid_private
 VAPID_PUBLIC_KEY=$vapid_public
 VAPID_EMAIL=$vapid_email
+SMTP_HOST=$smtp_host
+SMTP_PORT=1025
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=$smtp_from
+SMTP_FROM_NAME=Singra Vox
+SMTP_USE_TLS=false
+SMTP_USE_SSL=false
+S3_ENDPOINT_URL=http://minio:9000
+S3_ACCESS_KEY=$s3_key
+S3_SECRET_KEY=$s3_secret
+S3_BUCKET=singravox-e2ee
+S3_REGION=us-east-1
+S3_FORCE_PATH_STYLE=true
 EOF
 }
 
@@ -133,9 +153,14 @@ EOF
 main() {
   ensure_docker
 
-  echo "Singra Vox installer"
-  echo "1) Quickstart (HTTP, IP:Port)"
-  echo "2) Production (Domain + HTTPS via Caddy)"
+  echo ""
+  echo "========================================"
+  echo "   Singra Vox – Self-Hosted Installer   "
+  echo "========================================"
+  echo ""
+  echo "1) Quickstart   (HTTP, localhost / IP)"
+  echo "2) Production   (Domain + HTTPS via Caddy)"
+  echo ""
   local mode
   mode="$(prompt "Choose mode 1 or 2" "1")"
 
@@ -145,6 +170,7 @@ main() {
   local cors_origins=""
   local cookie_secure="false"
   local livekit_url=""
+  local livekit_public_url=""
   local domain="localhost"
   local rtc_domain="rtc.localhost"
   local public_host="localhost"
@@ -152,17 +178,19 @@ main() {
   if [[ "$mode" == "2" ]]; then
     compose_file="docker-compose.prod.yml"
     domain="$(prompt "Primary domain" "chat.example.com")"
-    rtc_domain="$(prompt "Voice domain" "rtc.${domain#*.}")"
+    rtc_domain="$(prompt "Voice domain (LiveKit)" "rtc.${domain#*.}")"
     frontend_url="https://$domain"
     cors_origins="https://$domain,tauri://localhost,http://tauri.localhost"
     cookie_secure="true"
-    livekit_url="wss://$rtc_domain"
+    livekit_url="ws://livekit:7880"       # internal Docker address
+    livekit_public_url="wss://$rtc_domain" # public address browsers connect to
   else
     http_port="$(prompt "HTTP port" "8080")"
     public_host="$(prompt "Public host or IP" "localhost")"
     frontend_url="http://$public_host:$http_port"
     cors_origins="$frontend_url,http://localhost:3000,http://127.0.0.1:3000,tauri://localhost,http://tauri.localhost"
-    livekit_url="ws://$public_host:7880"
+    livekit_url="ws://livekit:7880"
+    livekit_public_url="ws://$public_host:7880"
   fi
 
   local livekit_key="lk$(openssl rand -hex 6)"
@@ -170,7 +198,10 @@ main() {
   livekit_secret="$(generate_secret)"
   local turn_secret
   turn_secret="$(generate_secret)"
+  local s3_secret
+  s3_secret="$(generate_secret | head -c 32)"
 
+  echo ""
   echo "Generating VAPID keys for Web-Push notifications..."
   local vapid_keys
   vapid_keys=$(generate_vapid)
@@ -179,21 +210,36 @@ main() {
   local vapid_public
   vapid_public=$(echo "$vapid_keys" | cut -d' ' -f2)
   local vapid_email
-  vapid_email="$(prompt "VAPID Admin Email (for push notifications)" "admin@$domain")"
+  vapid_email="$(prompt "Admin email (for push notifications)" "admin@$domain")"
 
-  write_env "$mode" "$frontend_url" "$cors_origins" "$cookie_secure" "$livekit_url" "$http_port" "$domain" "$rtc_domain" "$livekit_key" "$livekit_secret" "$vapid_private" "$vapid_public" "$vapid_email"
+  write_env "$mode" "$frontend_url" "$cors_origins" "$cookie_secure" \
+    "$livekit_url" "$livekit_public_url" "$http_port" "$domain" "$rtc_domain" \
+    "$livekit_key" "$livekit_secret" \
+    "$vapid_private" "$vapid_public" "$vapid_email" \
+    "singravox" "$s3_secret" "mailpit" "no-reply@$domain"
+
   write_livekit_config "$livekit_key" "$livekit_secret"
   write_turn_config "${domain:-singravox.local}" "$turn_secret"
 
+  echo ""
+  echo "Starting Singra Vox (this may take a minute on first run)..."
   cd "$DEPLOY_DIR"
   docker compose -f "$compose_file" up -d --build
 
-  echo
-  echo "Singra Vox is starting."
-  echo "Open $frontend_url/setup to create the first owner account."
+  echo ""
+  echo "========================================"
+  echo "   Singra Vox is ready!                "
+  echo "========================================"
+  echo ""
+  echo "  App:           $frontend_url"
+  echo "  Setup wizard:  $frontend_url/setup"
+  echo "  Voice (LiveKit): $livekit_public_url"
   if [[ "$mode" != "2" ]]; then
-    echo "Voice service: $livekit_url"
+    echo "  Mailpit UI:    http://$public_host:8025  (dev mail inbox)"
+    echo "  MinIO Console: http://$public_host:9001  (S3 storage UI)"
   fi
+  echo ""
+  echo "Open the setup wizard to create your admin account."
 }
 
 main "$@"
