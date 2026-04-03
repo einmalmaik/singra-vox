@@ -1,133 +1,134 @@
-# Singra Vox – PRD
+# Singra Vox – PRD (Stand: 2026-04-03)
 
 ## Original Problem Statement
-"Importieren Mein Rebo singra-vox, richte es danach in deiner Umgebung ein und dann checke die letzten Änderungen auf Fehler, die entstanden sind. Deine Aufgabe ist es, eine funktionierende App daraus zu machen. Es ist eine Discord-Alternative mit E2E-Verschlüsselung und vieles mehr. Deine Aufgabe ist es daher, zuzuschauen, was wir bereits haben, wo Fehler sind, wo Verwirrungen sind etc. Backend muss getrennt bleiben und das Ganze ist self-hosted, einmal die Tarui-Desktop-App und die Webversion, die vom Server ausgeliefert wird. Der Server-Install soll easy bleiben mit einem Command. Richte alles ein, alte die Docs aktuelle."
+"Es ist eine Discord-Alternative mit E2E-Verschlüsselung und vieles mehr. Backend muss getrennt bleiben, self-hosted. Tauri Desktop + Webversion. Server-Install per einem Command. Richte alles ein, Docs aktuell halten."
 
-## Project Description
-Singra Vox is a privacy-first, self-hosted Discord alternative with:
-- End-to-End Encryption (E2EE) for messages, images, and voice (NaCl Box / libsodium)
-- Web client (React, CRA + CRACO, Tailwind CSS)
-- Desktop client (Tauri v2)
-- Voice/Video/Screenshare via LiveKit SFU
-- Push notifications via Web-Push (VAPID)
-- JWT authentication with refresh tokens (argon2/bcrypt)
-- Role/permission system with channel overrides
-- Screen share quality presets (480p, 720p, 1080p 30/60fps)
-- System audio + app audio capture for screen share
+---
 
-## Architecture
-- **Backend:** FastAPI + Python 3.11, MongoDB, LiveKit API, WebSockets
-  - `backend/app/main.py` – All API routes (~3400 lines)
-  - `backend/app/auth_service.py` – Auth logic (Argon2/bcrypt, JWT, sessions)
-  - `backend/app/permissions.py` – Role/permission engine with channel overrides
-  - `backend/app/ws.py` – WebSocket manager
-  - `backend/app/emailing.py` – Email service (SMTP)
-  - `backend/app/blob_storage.py` – S3/MinIO for E2EE file attachments (optional)
-  - `backend/app/rate_limits.py` – Rate limiting (login: 10 attempts → 15min block)
-  - `backend/server.py` – Entry point
-- **Frontend:** React 18, livekit-client, libsodium-wrappers-sumo, i18next (EN/DE)
-  - `frontend/src/App.js` – Router, auth context
-  - `frontend/src/pages/MainLayout.js` – Main chat layout
-  - `frontend/src/contexts/E2EEContext.js` – E2EE state (now works on web + desktop)
-  - `frontend/src/lib/e2ee/` – Crypto, key storage (localStorage for web, Tauri keychain for desktop)
-  - `frontend/src/lib/voiceEngine.js` – LiveKit voice/video/screenshare engine
-  - `frontend/src/lib/screenSharePresets.js` – Quality presets (480p–1080p60)
-- **Desktop:** Tauri v2 shell
-  - `desktop/` – Tauri config, native API integration (secure keychain, native screen capture)
-- **Deployment:**
-  - `deploy/` – Docker Compose (quickstart + production with Caddy + TURN)
-  - `install.sh` – One-command Linux installer
-  - LiveKit SFU: `deploy/livekit.yaml` + docker-compose
+## Architektur
 
-## User Personas
-- **Self-hosted Community Admins** – Privacy-first Discord alternative
-- **End Users** – Communities, teams, friend groups
-- **Desktop Power Users** – Tauri app with native screen capture + secure key storage
+### Backend  `backend/`
+```
+backend/
+  app/
+    core/
+      __init__.py          # Re-exports: db, now_utc, new_id, Konstanten
+      database.py          # Einzelner Motor-MongoDB-Pool (geteilt überall)
+      utils.py             # now_utc(), new_id(), sanitize_user()
+      constants.py         # E2EE_DEVICE_HEADER, MAX_UPLOAD_BYTES, etc.
+    routes/
+      files.py             # NEU: Lokale Filesystem-Speicherung (UUID-Pfade)
+      threads.py           # Thread-Replies
+      search.py            # Nachrichten-Suche (ohne E2EE-Kanäle)
+      unread.py            # Ungelesene Nachrichten + Read-States
+      overrides.py         # Kanal-Berechtigungs-Overrides + Access-Listen
+      groups.py            # Gruppen-DMs
+      gdpr.py              # DSGVO: Datenexport + Account-Löschung
+      pins.py              # Nachrichtenpins + Kanal-Topic
+      notifications.py     # In-App + Web-Push Benachrichtigungen
+      emojis.py            # Custom Server-Emojis
+      webhooks.py          # Incoming Webhooks (rate-limited)
+      bots.py              # Bot-Token-Verwaltung
+    services/
+      __init__.py
+      notifications.py     # Zentraler Notification-Service (send_notification())
+    permissions.py         # Zentrale Berechtigungs-Engine:
+                           #   has_channel_permission(), has_server_permission()
+                           #   assert_channel_access(), list_channel_user_ids()
+    auth_service.py        # JWT, Argon2/bcrypt, Sessions
+    blob_storage.py        # S3/MinIO (optional, für E2EE-Anhänge)
+    emailing.py            # SMTP
+    pagination.py          # Cursor-Pagination
+    rate_limits.py         # Login-Rate-Limiting
+    voice_access.py        # LiveKit Voice-Zugangsprüfung
+    ws.py                  # WebSocket-Manager
+    main.py                # App-Factory: FastAPI-App + Router-Registration
+  server.py                # Einstiegspunkt (from app.main import app)
+  storage/
+    uploads/               # Lokale Datei-Uploads (UUID-Dateinamen, kein Klarname im Pfad)
+```
 
-## Core Requirements (Static)
-1. Single-command server install: `./install.sh`
-2. E2EE messaging and file attachments (NaCl)
-3. Voice/Video with LiveKit SFU + quality selection
-4. Screen share with system audio
-5. Role/permission system per channel
-6. Web version served from the same server
-7. Tauri desktop app connecting to any instance
-8. Setup wizard for first-run admin bootstrap
+### Frontend  `frontend/src/`
+```
+components/
+  chat/        # ChatArea, ChannelSidebar, ServerSidebar, VoiceMediaStage
+  security/    # E2EEStatus
+  settings/    # GlobalSettingsOverlay (Account, Voice, Privacy & Security)
+  ui/          # Shadcn-Komponenten
+contexts/
+  AuthContext, E2EEContext, RuntimeContext
+lib/
+  e2ee/        # crypto.js, deviceStorage.js (localStorage-Fallback für Web)
+  api.js, voiceEngine.js, screenSharePresets.js
+```
 
-## What's Been Implemented
-### 2026-04-03 – Initial Setup & Bugfixes
-- Created `backend/.env` (MONGO_URL, JWT_SECRET, CORS, LiveKit, VAPID)
-- Created `frontend/.env` (REACT_APP_BACKEND_URL)
-- Fixed `ModuleNotFoundError: livekit.protocol` → `livekit-protocol==1.1.3`
-- Made S3 blob storage optional (no startup crash without S3 credentials)
-- Fixed `push_subscriptions` MongoDB index: `endpoint` → `subscription.endpoint`
-- Removed debug `console.log` from `ChannelSidebar.js`
-- Bootstrapped instance: owner `admin@singravox.local`
+---
 
-### 2026-04-03 – Feature: Server Sidebar Scroll
-- Added scrollable container (max 10 items visible, then scrolls)
-- Works on all screen sizes via `min(600px, calc(100vh - 160px))`
-- `+` Add Server button always visible at bottom
-- 13 test servers created and scroll verified
+## Implementierungsstand
 
-### 2026-04-03 – Feature: E2EE Web Support
-- `deviceStorage.js`: localStorage fallback for web (previously Tauri-only)
-- `E2EEContext.js`: Removed `isDesktop` gating → E2EE works in browser
-- `GlobalSettingsOverlay.js`: E2EE setup form shown on web + security warning
-- `ChatArea.js`, `ThreadPanel.js`, `PinnedMessagesPanel.js`: Fixed `isDesktopCapable` blocks
-- `E2EEStatus.js`: Removed "Desktop Only" messaging
-- `clearIdentity()` now clears localStorage on web
-- Backend error messages updated (no more "desktop device" references)
-- **Verified:** 1 E2EE message in DB: `ciphertext: T/gmWhy5G05...`, `nonce`, `key_envelopes: 1`
+### 2026-04-03 – Setup & Bugfixes
+- .env-Dateien erstellt, livekit-protocol installiert, S3 optional, Index-Fix, debug-Log entfernt
 
-### 2026-04-03 – Feature: Voice/Streaming
-- Downloaded and configured LiveKit v1.10.1 (arm64)
-- Added LiveKit to supervisor (`/etc/supervisor/conf.d/livekit.conf`)
-- Updated backend `.env` with 32-char secret
-- Voice token API: `POST /api/voice/token` → **100% working** (returns server_url + JWT)
-- Screen share presets: 480p/720p/1080p 30/60fps
-- System audio toggle in screen share dialog
-- Fixed duplicate `joinVoice` E2EE check in `ChannelSidebar.js`
+### 2026-04-03 – Server-Sidebar-Scroll
+- Scrollbar ab 10 Servern, `+`-Button immer sichtbar, min(600px, calc(100vh-160px))
 
-## Test Status (iteration_8)
-- Backend API: **100%**
-- Frontend UI: **85%** (voice controls panel requires real microphone)
-- E2EE: **Verified** (encrypted message in DB)
-- Server scroll: **Verified** (13 servers, scroll container working)
-- Voice token: **Verified** (LiveKit JWT generated correctly)
+### 2026-04-03 – E2EE Web-Support
+- localStorage-Fallback, isDesktop-Gate entfernt, ChatArea/ThreadPanel/PinnedMessages gefixt
+- Verifiziert: 1 verschlüsselte Nachricht in DB mit ciphertext + nonce + key_envelopes
 
-## Prioritized Backlog
+### 2026-04-03 – Voice/Streaming
+- LiveKit v1.10.1 unter Supervisor, Voice-Token API 100% OK
+- Screen-Share Presets 480p–1080p60, System-Audio-Toggle
 
-### P0 – Blocking for production
-- [ ] SMTP configuration (email verification for new users)
-- [ ] S3/MinIO for E2EE file attachments (encrypted images)
-- [ ] LiveKit external URL for production (ws://localhost:7880 not accessible from browser)
+### 2026-04-03 – Backend-Modularisierung (MAJOR)
+- routes_phase2.py + routes_phase3.py → 11 neue Module unter app/routes/
+- app/core/ mit shared DB-Pool, Utils, Konstanten
+- app/services/notifications.py (zentraler Notification-Service)
+- permissions.py: +assert_channel_access(), +list_channel_user_ids()
+- Kein doppelter MongoDB-Client mehr (3×→1×)
+- Keine duplizierten Hilfsfunktionen mehr
 
-### P1 – Important
-- [ ] Tauri desktop app build pipeline
-- [ ] Production TURN server (COTURN) for NAT traversal
-- [ ] Install.sh end-to-end test on fresh Ubuntu 22.04
+### 2026-04-03 – Lokale Datei-Speicherung
+- routes/files.py: POST /api/upload → Filesystem (UUID-Pfad, kein Originalname im Pfad)
+- GET /api/files/{id}: StreamingResponse + Permission-Check für private Kanäle
+- Privacy-first: UUID-Dateinamen, Content-Type aus DB, keine Erweiterung im Pfad
+
+### 2026-04-03 – Settings UI Redesign
+- Account-Sektion: kompaktes 80px-Avatar-Widget statt 220px-Vorschau
+- Status-Selector entfernt (Status wird im Statusbereich unten links geändert)
+- Sauberes Grid-Layout, responsive für alle Geräte
+
+**Test-Status (Iteration 9): Backend 100% (20/20), Frontend 85%**
+
+---
+
+## Datenschutz-Prinzipien
+- Minimale Datenspeicherung: keine IP-Logs, keine unnötigen Metadaten
+- UUID-Dateinamen auf dem Filesystem (kein Original-Dateiname im Pfad)
+- E2EE: Server sieht nur Ciphertext + Nonce + Key-Envelopes
+- Account-Löschung (DSGVO Art. 17): Nachrichten anonymisiert, Keys gelöscht
+- Datenexport (DSGVO Art. 20): GET /api/users/me/export
+
+---
+
+## Priorisierter Backlog
+
+### P0 – Produktions-Blocker
+- [ ] SMTP konfigurieren (Email-Verifikation für neue User)
+- [ ] S3/MinIO für E2EE-Dateianhänge (verschlüsselte Bilder/Dateien)
+- [ ] LiveKit externe URL (ws://localhost:7880 nicht von außen erreichbar)
+
+### P1 – Wichtig
+- [ ] Frontend: Inline-Bildvorschau in Kanälen für /api/files/-Anhänge
+- [ ] Tauri Desktop-App Build-Pipeline
+- [ ] TURN-Server (COTURN) für NAT-Traversal bei Voice
 
 ### P2 – Backlog
-- [ ] Redis for scalable WebSocket broadcast
-- [ ] MLS ratchet migration (E2EE v2)
-- [ ] macOS/Windows Tauri packaging
+- [ ] Redis für WebSocket-Skalierung (Mehrere Backend-Instanzen)
+- [ ] MLS Ratchet Migration (E2EE v2)
+- [ ] macOS/Windows Tauri-Pakete
 
-## Environment Variables (backend/.env)
-```
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=singravox
-JWT_SECRET=singravox-dev-jwt-secret-change-in-production-32bytes
-COOKIE_SECURE=false
-FRONTEND_URL=https://d13615d9-ee80-4aa3-b700-dae2cf9e7fb2.preview.emergentagent.com
-CORS_ORIGINS=https://d13615d9-ee80-4aa3-b700-dae2cf9e7fb2.preview.emergentagent.com,...
-LIVEKIT_URL=ws://localhost:7880
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=devsecret-singravox-livekit-32chars!!
-# S3 (optional, for E2EE file attachments):
-# S3_ENDPOINT_URL=http://localhost:9000
-# S3_ACCESS_KEY=minioadmin
-# S3_SECRET_KEY=minioadmin
-# SMTP (required for user registration):
-# SMTP_HOST=...
-```
+---
+
+## Test-Credentials
+→ `/app/memory/test_credentials.md`
