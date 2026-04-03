@@ -127,7 +127,27 @@ lib/
   - In docker-compose.yml und docker-compose.prod.yml konfiguriert
 - **install.sh**: Aktualisiert mit SMTP, S3, LIVEKIT_PUBLIC_URL, MinIO-Auto-Start
 
-**Test-Status (Iteration 10): Backend 89% (8/9, 1 LOW-prio skipped), Frontend 100%**
+### 2026-04-03 – Vollständiges install.sh + Docker-Setup
+- **install.sh** komplett neu geschrieben (TeamSpeak-einfach):
+  - Automatische Docker-Installation falls nicht vorhanden
+  - 2 Modi: Quickstart (HTTP, IP/Port) und Produktiv (HTTPS, Caddy + Let's Encrypt)
+  - Automatische Admin-Account-Erstellung via `/api/setup/bootstrap` nach Start
+  - Nur 4-5 Fragen: Instanzname, Admin-E-Mail, Passwort, Modus (+ Domain bei Produktiv)
+  - Alles automatisch: Secrets, VAPID-Keys, MinIO, SMTP, LiveKit-Konfiguration
+  - `DATA_DIR=/opt/singravox` - alle Configs und Compose-Files werden dort erstellt
+  - Farbige Ausgabe mit Spinner, klare Erfolgs-/Fehlermeldungen
+- **docker-compose.prod.yml** aktualisiert:
+  - Alle SMTP + S3 + VAPID + LIVEKIT_PUBLIC_URL Variablen korrekt gesetzt
+  - HealthCheck für Backend + MongoDB
+  - `uploads_data` Volume hinzugefügt
+  - LiveKit Ports (7880/7881/7882) konfiguriert
+  - Mailpit als Dev-Only Service (profile: dev)
+- **docker-compose.yml** (Quickstart):
+  - LIVEKIT_PUBLIC_URL env_file-basiert
+  - nginx als Reverse Proxy (Port 8080 konfigurierbar)
+- **README.md** neu geschrieben: vollständige Anleitung ohne Vorkenntnisse, Hetzner/Netcup/Contabo Sektion, Firewall-Ports, Services-Tabelle
+
+**Test-Status (Iteration 11): Backend 100%, install.sh Syntax 100%**
 
 ---
 
