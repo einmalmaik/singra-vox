@@ -572,6 +572,8 @@ const en = {
     readMessageHistory: "Read Message History",
     manageMessages: "Manage Messages",
     attachFiles: "Attach Files",
+    pinMessages: "Pin Messages",
+    viewChannels: "View Channels",
     mentionEveryone: "Mention @everyone and all roles",
     joinVoice: "Join Voice",
     speak: "Speak",

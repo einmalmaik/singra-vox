@@ -570,6 +570,8 @@
     readMessageHistory: "Nachrichtenverlauf lesen",
     manageMessages: "Nachrichten verwalten",
     attachFiles: "Dateien anhängen",
+    pinMessages: "Nachrichten anpinnen",
+    viewChannels: "Kanäle sehen",
     mentionEveryone: "@everyone und alle Rollen erwähnen",
     joinVoice: "Voice beitreten",
     speak: "Sprechen",
