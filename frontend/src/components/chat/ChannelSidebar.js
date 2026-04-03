@@ -607,10 +607,6 @@ export default function ChannelSidebar({
         toast.error(t("e2ee.privateChannelVerifyDevice"));
         return;
       }
-      if (channel.is_private && !e2eeReady) {
-        toast.error(t("e2ee.privateChannelVerifyDevice"));
-        return;
-      }
 
       if (voiceEngineRef?.current) {
         await voiceEngineRef.current.disconnect();
