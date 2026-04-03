@@ -102,20 +102,24 @@ export function E2EEProvider({ children }) {
   }, []);
 
   const refreshState = useCallback(async () => {
-    if (!user || !config?.isDesktop) {
+    if (!user) {
       setState({ enabled: false, account: null, devices: [], current_device: null });
       setLoading(false);
       return;
     }
-    const response = await api.get("/e2ee/state");
-    setState(response.data);
+    try {
+      const response = await api.get("/e2ee/state");
+      setState(response.data);
+    } catch {
+      setState({ enabled: false, account: null, devices: [], current_device: null });
+    }
     setLoading(false);
-  }, [config?.isDesktop, user]);
+  }, [user]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!user || !config?.isDesktop) {
+      if (!user) {
         applyDeviceHeader(null);
         setIdentity(null);
         setState({ enabled: false, account: null, devices: [], current_device: null });
@@ -143,9 +147,6 @@ export function E2EEProvider({ children }) {
   }, [applyDeviceHeader, config, refreshState, user]);
 
   const initializeE2EE = useCallback(async ({ passphrase, deviceName }) => {
-    if (!config?.isDesktop) {
-      throw new Error("Strong end-to-end encryption is only available in the desktop app");
-    }
     const deviceId = await randomDeviceId();
     const [deviceKeys, recoveryKeys] = await Promise.all([
       generateBoxKeyPair(),
@@ -177,9 +178,6 @@ export function E2EEProvider({ children }) {
   }, [applyDeviceHeader, config]);
 
   const restoreE2EE = useCallback(async ({ passphrase, deviceName }) => {
-    if (!config?.isDesktop) {
-      throw new Error("Strong end-to-end encryption is only available in the desktop app");
-    }
     const deviceId = identity?.deviceId || await randomDeviceId();
     const deviceKeys = identity?.devicePrivateKey && identity?.devicePublicKey
       ? { publicKey: identity.devicePublicKey, privateKey: identity.devicePrivateKey }
@@ -375,13 +373,13 @@ export function E2EEProvider({ children }) {
     currentDevice: state.current_device,
     identity,
     ready: Boolean(
-      config?.isDesktop
-      && state.enabled
+      state.enabled
       && identity?.devicePrivateKey
       && identity?.devicePublicKey
       && (state.current_device?.verified_at || identity?.recoveryPrivateKey)
     ),
     isDesktopCapable: Boolean(config?.isDesktop),
+    isWebE2EE: Boolean(!config?.isDesktop && state.enabled),
     initializeE2EE,
     restoreE2EE,
     approveDevice,

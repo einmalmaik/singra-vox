@@ -19,7 +19,7 @@ export default function PinnedMessagesPanel({ channel, channelId, onClose, onJum
   const [loading, setLoading] = useState(true);
   const [decryptedPins, setDecryptedPins] = useState({});
   const isE2EEChannel = Boolean(channel?.is_private);
-  const canReadE2EEPins = !isE2EEChannel || (isDesktopCapable && e2eeReady);
+  const canReadE2EEPins = !isE2EEChannel || e2eeReady;
 
   const loadPins = useCallback(async () => {
     setLoading(true);

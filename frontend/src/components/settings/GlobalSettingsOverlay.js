@@ -1180,16 +1180,13 @@ export default function GlobalSettingsOverlay({
                 <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.e2eeSectionTitle")}</h3>
                 <p className="mt-1 text-sm text-[#71717A]">{t("e2ee.title")}</p>
 
-                {!isDesktopCapable && (
-                  <E2EEStatus
-                    variant="guard"
-                    scope="private_channel"
-                    isDesktopCapable={isDesktopCapable}
-                    className="mt-4"
-                  />
+                {!isDesktopCapable && !e2eeEnabled && (
+                  <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-200">
+                    Schlüssel werden im Browser gespeichert (weniger sicher als Desktop). Nur zum Testen empfohlen.
+                  </div>
                 )}
 
-                {isDesktopCapable && !e2eeEnabled && (
+                {!e2eeEnabled && (
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.e2eeDeviceName")}</Label>
@@ -1214,7 +1211,7 @@ export default function GlobalSettingsOverlay({
                   </div>
                 )}
 
-                {isDesktopCapable && e2eeEnabled && (
+                {e2eeEnabled && (
                   <div className="mt-5 space-y-4">
                     <div className="rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-4">
                       <div className="flex items-center justify-between gap-4">

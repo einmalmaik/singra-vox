@@ -184,7 +184,7 @@ export default function MainLayout() {
   useEffect(() => {
     let cancelled = false;
 
-    if (!currentDmUser?.id || !isDesktopCapable || !e2eeReady) {
+    if (!currentDmUser?.id || !e2eeReady) {
       setDmTrustNotice(false);
       return undefined;
     }
@@ -210,7 +210,7 @@ export default function MainLayout() {
     return () => {
       cancelled = true;
     };
-  }, [currentDmUser?.id, e2eeReady, fetchDmRecipients, inspectRecipientTrust, isDesktopCapable]);
+  }, [currentDmUser?.id, e2eeReady, fetchDmRecipients, inspectRecipientTrust]);
 
   useEffect(() => {
     sessionInvalidatedRef.current = false;
@@ -1108,7 +1108,7 @@ export default function MainLayout() {
                 <span className="ml-2 text-xs text-[#71717A]">@{currentDmUser.username}</span>
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                {!isDesktopCapable ? (
+                {!e2eeReady ? (
                   <E2EEStatus
                     variant="guard"
                     scope="dm"

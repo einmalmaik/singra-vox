@@ -603,8 +603,8 @@ export default function ChannelSidebar({
   const joinVoice = useCallback(async (channel) => {
     try {
       if (voiceChannel?.id === channel.id) return;
-      if (channel.is_private && !isDesktopCapable) {
-        toast.error(t("e2ee.privateChannelDesktopOnly"));
+      if (channel.is_private && !e2eeReady) {
+        toast.error(t("e2ee.privateChannelVerifyDevice"));
         return;
       }
       if (channel.is_private && !e2eeReady) {

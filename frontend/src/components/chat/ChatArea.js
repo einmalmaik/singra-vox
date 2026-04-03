@@ -119,7 +119,7 @@ export default function ChatArea({
     [activeMention?.query, members, roles, serverPermissions],
   );
   const isE2EEChannel = Boolean(channel?.is_private);
-  const canUseE2EEChannel = !isE2EEChannel || (isDesktopCapable && e2eeReady);
+  const canUseE2EEChannel = !isE2EEChannel || e2eeReady;
   const resolveAvatarUrl = (url) => resolveAssetUrl(url, config?.assetBase);
 
   useEffect(() => {

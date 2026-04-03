@@ -1,5 +1,7 @@
 import { deleteDesktopSecret, getDesktopSecret, isDesktopApp, setDesktopSecret } from "@/lib/desktop";
 
+const WEB_E2EE_PREFIX = "singravox:e2ee:";
+
 function instanceScope(config) {
   const raw = (config?.instanceUrl || "default").toLowerCase();
   return raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "default";
@@ -9,24 +11,43 @@ function scopedKey(config, suffix) {
   return `e2ee.${instanceScope(config)}.${suffix}`;
 }
 
-export async function loadLocalE2EEIdentity(config) {
-  if (!config?.isDesktop || !isDesktopApp()) {
-    return null;
-  }
+// localStorage-based storage for web mode (less secure than Tauri keychain)
+function loadWebSecret(config, suffix) {
+  try {
+    return localStorage.getItem(`${WEB_E2EE_PREFIX}${scopedKey(config, suffix)}`) || null;
+  } catch { return null; }
+}
+function saveWebSecret(config, suffix, value) {
+  try {
+    if (value) {
+      localStorage.setItem(`${WEB_E2EE_PREFIX}${scopedKey(config, suffix)}`, value);
+    } else {
+      localStorage.removeItem(`${WEB_E2EE_PREFIX}${scopedKey(config, suffix)}`);
+    }
+  } catch { /* ignore */ }
+}
+function deleteWebSecret(config, suffix) {
+  try {
+    localStorage.removeItem(`${WEB_E2EE_PREFIX}${scopedKey(config, suffix)}`);
+  } catch { /* ignore */ }
+}
 
+export async function loadLocalE2EEIdentity(config) {
   const keys = [
-    "device_id",
-    "device_name",
-    "device_public_key",
-    "device_private_key",
-    "recovery_public_key",
-    "recovery_private_key",
+    "device_id", "device_name", "device_public_key",
+    "device_private_key", "recovery_public_key", "recovery_private_key",
   ];
 
-  const entries = await Promise.all(
-    keys.map(async (key) => [key, await getDesktopSecret(scopedKey(config, key))]),
-  );
-  const identity = Object.fromEntries(entries);
+  let identity;
+  if (isDesktopApp()) {
+    const entries = await Promise.all(
+      keys.map(async (key) => [key, await getDesktopSecret(scopedKey(config, key))]),
+    );
+    identity = Object.fromEntries(entries);
+  } else {
+    identity = Object.fromEntries(keys.map((k) => [k, loadWebSecret(config, k)]));
+  }
+
   if (!identity.device_id || !identity.device_private_key || !identity.device_public_key) {
     return null;
   }
@@ -41,7 +62,6 @@ export async function loadLocalE2EEIdentity(config) {
 }
 
 export async function saveLocalE2EEIdentity(config, identity) {
-  if (!config?.isDesktop || !isDesktopApp()) return;
   const mappings = {
     device_id: identity.deviceId,
     device_name: identity.deviceName,
@@ -50,24 +70,27 @@ export async function saveLocalE2EEIdentity(config, identity) {
     recovery_public_key: identity.recoveryPublicKey || "",
     recovery_private_key: identity.recoveryPrivateKey || "",
   };
-  await Promise.all(
-    Object.entries(mappings).map(([key, value]) => (
-      value
-        ? setDesktopSecret(scopedKey(config, key), value)
-        : deleteDesktopSecret(scopedKey(config, key))
-    )),
-  );
+  if (isDesktopApp()) {
+    await Promise.all(
+      Object.entries(mappings).map(([key, value]) => (
+        value ? setDesktopSecret(scopedKey(config, key), value)
+              : deleteDesktopSecret(scopedKey(config, key))
+      )),
+    );
+  } else {
+    Object.entries(mappings).forEach(([key, value]) => saveWebSecret(config, key, value));
+  }
 }
 
 export async function clearLocalE2EEIdentity(config) {
-  if (!config?.isDesktop || !isDesktopApp()) return;
-  await Promise.all([
-    "device_id",
-    "device_name",
-    "device_public_key",
-    "device_private_key",
-    "recovery_public_key",
-    "recovery_private_key",
-  ].map((key) => deleteDesktopSecret(scopedKey(config, key))));
+  const keys = [
+    "device_id", "device_name", "device_public_key",
+    "device_private_key", "recovery_public_key", "recovery_private_key",
+  ];
+  if (isDesktopApp()) {
+    await Promise.all(keys.map((key) => deleteDesktopSecret(scopedKey(config, key))));
+  } else {
+    keys.forEach((key) => deleteWebSecret(config, key));
+  }
 }
 

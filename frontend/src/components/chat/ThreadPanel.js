@@ -34,7 +34,7 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
   const parentRef = useRef(null);
   const parentHighlightTimeout = useRef(null);
   const isE2EEThread = Boolean(channel?.is_private);
-  const canUseE2EEThread = !isE2EEThread || (isDesktopCapable && e2eeReady);
+  const canUseE2EEThread = !isE2EEThread || e2eeReady;
 
   const loadThread = useCallback(async () => {
     try {

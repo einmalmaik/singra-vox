@@ -110,7 +110,7 @@ export default function ServerSidebar({
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="workspace-panel-solid flex h-full w-[72px] shrink-0 flex-col items-center gap-3 py-4" data-testid="server-sidebar">
+      <div className="workspace-panel-solid flex h-full w-[72px] shrink-0 flex-col items-center gap-3 py-4 overflow-hidden" data-testid="server-sidebar">
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -134,57 +134,66 @@ export default function ServerSidebar({
 
         <div className="my-1 h-[2px] w-8 rounded-full bg-white/10" />
 
-        {servers.map((server) => {
-          const unread = serverUnreadMap?.[server.id]?.count || 0;
-          const mentions = serverUnreadMap?.[server.id]?.mentions || 0;
-          const active = currentServer?.id === server.id && view === "server";
-          const canManageIcon = server.owner_id === user?.id || user?.instance_role === "owner";
-          const canDeleteIcon = server.owner_id === user?.id;
+        {/* Scrollable server list – max 10 icons visible (~60px each), then scrolls */}
+        <div
+          data-testid="server-list-scroll"
+          className="server-list-scroll flex w-full flex-col items-center gap-3 overflow-y-auto"
+          style={{
+            maxHeight: "min(600px, calc(100vh - 160px))",
+          }}
+        >
+          {servers.map((server) => {
+            const unread = serverUnreadMap?.[server.id]?.count || 0;
+            const mentions = serverUnreadMap?.[server.id]?.mentions || 0;
+            const active = currentServer?.id === server.id && view === "server";
+            const canManageIcon = server.owner_id === user?.id || user?.instance_role === "owner";
+            const canDeleteIcon = server.owner_id === user?.id;
 
-          return (
-            <Tooltip key={server.id}>
-              <ContextMenu>
-                <TooltipTrigger asChild>
-                  <ContextMenuTrigger asChild>
-                    <div>
-                      <ServerIcon
-                        active={active}
-                        unread={unread}
-                        mentions={mentions}
-                        iconUrl={server.icon_url}
-                        label={server.name}
-                        onClick={() => onSelectServer?.(server)}
-                      >
-                        {server.name.charAt(0).toUpperCase()}
-                      </ServerIcon>
-                    </div>
-                  </ContextMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="right"><p>{server.name}</p></TooltipContent>
-                <ContextMenuContent className="w-56">
-                  <ContextMenuItem onClick={() => onSelectServer?.(server)}>
-                    {t("server.openServer")}
-                  </ContextMenuItem>
-                  {canManageIcon && (
-                    <ContextMenuItem onClick={() => onManageServer?.(server)}>
-                      <GearSix size={14} className="mr-2" />
-                      {t("server.manageServer")}
+            return (
+              <Tooltip key={server.id}>
+                <ContextMenu>
+                  <TooltipTrigger asChild>
+                    <ContextMenuTrigger asChild>
+                      <div>
+                        <ServerIcon
+                          active={active}
+                          unread={unread}
+                          mentions={mentions}
+                          iconUrl={server.icon_url}
+                          label={server.name}
+                          onClick={() => onSelectServer?.(server)}
+                        >
+                          {server.name.charAt(0).toUpperCase()}
+                        </ServerIcon>
+                      </div>
+                    </ContextMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="right"><p>{server.name}</p></TooltipContent>
+                  <ContextMenuContent className="w-56">
+                    <ContextMenuItem onClick={() => onSelectServer?.(server)}>
+                      {t("server.openServer")}
                     </ContextMenuItem>
-                  )}
-                  {canDeleteIcon && (
-                    <>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem className="text-red-300 focus:text-red-100" onClick={() => onDeleteServer?.(server)}>
-                        <Trash size={14} className="mr-2" />
-                        {t("server.deleteServer")}
+                    {canManageIcon && (
+                      <ContextMenuItem onClick={() => onManageServer?.(server)}>
+                        <GearSix size={14} className="mr-2" />
+                        {t("server.manageServer")}
                       </ContextMenuItem>
-                    </>
-                  )}
-                </ContextMenuContent>
-              </ContextMenu>
-            </Tooltip>
-          );
-        })}
+                    )}
+                    {canDeleteIcon && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem className="text-red-300 focus:text-red-100" onClick={() => onDeleteServer?.(server)}>
+                          <Trash size={14} className="mr-2" />
+                          {t("server.deleteServer")}
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
+              </Tooltip>
+            );
+          })}
+        </div>
 
         {canCreateNewServer && (
           <Dialog open={showCreate} onOpenChange={setShowCreate}>
@@ -229,8 +238,6 @@ export default function ServerSidebar({
             </DialogContent>
           </Dialog>
         )}
-
-        <div className="flex-1" />
       </div>
     </TooltipProvider>
   );

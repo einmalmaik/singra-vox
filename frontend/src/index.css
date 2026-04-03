@@ -130,3 +130,12 @@ code {
     border-left-color: inherit; border-right-color: inherit; border-top-color: inherit; border-bottom-color: inherit;
   }
 }
+
+/* Server sidebar – hide scrollbar but keep scrollable */
+.server-list-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.server-list-scroll::-webkit-scrollbar {
+  display: none;
+}

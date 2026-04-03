@@ -40,19 +40,6 @@ export default function E2EEStatus({
   }
 
   const messageKey = (() => {
-    if (!isDesktopCapable) {
-      switch (scope) {
-        case "dm":
-          return "e2ee.dmDesktopOnly";
-        case "thread":
-          return "e2ee.threadDesktopOnly";
-        case "pins":
-          return "e2ee.pinsDesktopOnly";
-        default:
-          return "e2ee.privateChannelDesktopOnly";
-      }
-    }
-
     if (!ready) {
       switch (scope) {
         case "dm":
@@ -65,7 +52,6 @@ export default function E2EEStatus({
           return "e2ee.privateChannelVerifyDevice";
       }
     }
-
     return "e2ee.badge";
   })();
 
