@@ -39,6 +39,26 @@ services:
       S3_SECRET_KEY: "${S3_SECRET_KEY}"
       S3_BUCKET: "${S3_BUCKET:-singravox-e2ee}"
       S3_FORCE_PATH_STYLE: "${S3_FORCE_PATH_STYLE:-true}"
+      SMTP_HOST: "${SMTP_HOST:-mailpit}"
+      SMTP_PORT: "${SMTP_PORT:-1025}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM_EMAIL: "${SMTP_FROM_EMAIL:-no-reply@singravox.local}"
+      SMTP_FROM_NAME: "${SMTP_FROM_NAME:-Singra Vox}"
+      SMTP_USE_TLS: "${SMTP_USE_TLS:-false}"
+      SMTP_USE_SSL: "${SMTP_USE_SSL:-false}"
+      EMAIL_VERIFICATION_TTL_MINUTES: "${EMAIL_VERIFICATION_TTL_MINUTES:-15}"
+      PASSWORD_RESET_TTL_MINUTES: "${PASSWORD_RESET_TTL_MINUTES:-15}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_EMAIL: "${VAPID_EMAIL:-}"
+    volumes:
+      - uploads_data:/app/storage/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   frontend:
     build:
@@ -78,6 +98,12 @@ services:
     volumes:
       - minio_data:/data
 
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: singravox-mailpit
+    restart: unless-stopped
+    profiles: ["dev"]
+
   caddy:
     image: caddy:2-alpine
     container_name: singravox-caddy
@@ -100,5 +126,6 @@ services:
 volumes:
   mongo_data:
   minio_data:
+  uploads_data:
   caddy_data:
   caddy_config:
