@@ -441,12 +441,12 @@ async def get_device_record(user_id: str, device_id: str) -> Optional[dict]:
 async def require_verified_device(request: Request, user: dict) -> dict:
     device_id = request_device_id(request)
     if not device_id:
-        raise HTTPException(428, "Desktop device header required for end-to-end encryption")
+        raise HTTPException(428, "E2EE device header required for end-to-end encryption")
     device = await get_device_record(user["id"], device_id)
     if not device or device.get("revoked_at"):
         raise HTTPException(428, "Verified desktop device required for end-to-end encryption")
     if not device.get("verified_at"):
-        raise HTTPException(428, "This desktop device is not verified for end-to-end encryption yet")
+        raise HTTPException(428, "This E2EE device is not verified yet")
     return device
 
 
@@ -1443,7 +1443,7 @@ async def register_e2ee_device(inp: E2EEDeviceInput, request: Request):
     user = await current_user(request)
     account = await get_e2ee_account(user["id"])
     if not account:
-        raise HTTPException(409, "Configure end-to-end encryption on a desktop device first")
+        raise HTTPException(409, "Configure end-to-end encryption first (Settings > Privacy)")
 
     existing = await get_device_record(user["id"], inp.device_id)
     created_at = now_utc()
@@ -2698,7 +2698,7 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
         if not inp.is_e2ee or not inp.ciphertext or not inp.nonce or not inp.sender_device_id:
             raise HTTPException(400, "Private channels require encrypted desktop messages")
         if inp.sender_device_id != device["device_id"]:
-            raise HTTPException(400, "Encrypted messages must originate from the active desktop device")
+            raise HTTPException(400, "Encrypted messages must originate from the active E2EE device")
         msg = {
             "id": new_id(),
             "channel_id": channel_id,
@@ -2944,7 +2944,7 @@ async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
         if not inp.is_e2ee or not inp.ciphertext or not inp.nonce or not inp.sender_device_id:
             raise HTTPException(400, "Direct messages require encrypted desktop payloads when both users use end-to-end encryption")
         if inp.sender_device_id != device["device_id"]:
-            raise HTTPException(400, "Encrypted messages must originate from the active desktop device")
+            raise HTTPException(400, "Encrypted messages must originate from the active E2EE device")
 
     msg = {
         "id": new_id(),

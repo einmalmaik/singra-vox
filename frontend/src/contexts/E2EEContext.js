@@ -221,9 +221,7 @@ export function E2EEProvider({ children }) {
   }, [refreshState]);
 
   const clearIdentity = useCallback(async () => {
-    if (config?.isDesktop) {
-      await clearLocalE2EEIdentity(config);
-    }
+    await clearLocalE2EEIdentity(config);
     applyDeviceHeader(null);
     setIdentity(null);
     setState({ enabled: false, account: null, devices: [], current_device: null });
@@ -231,7 +229,7 @@ export function E2EEProvider({ children }) {
 
   const encryptForRecipients = useCallback(async (payload, recipientsResponse) => {
     if (!identity?.deviceId || !identity?.devicePrivateKey || !identity?.devicePublicKey) {
-      throw new Error("A verified desktop device is required to encrypt this message");
+      throw new Error("An E2EE device is required to encrypt this message. Enable E2EE in Settings > Privacy.");
     }
     const messageKeyB64 = await randomBase64(32);
     const encryptedPayload = await encryptStructuredPayload(payload, messageKeyB64);
