@@ -169,7 +169,7 @@ export default function GlobalSettingsOverlay({
   const [avatarEditorZoom, setAvatarEditorZoom] = useState(1);
   const [avatarEditorOffsetX, setAvatarEditorOffsetX] = useState(0);
   const [avatarEditorOffsetY, setAvatarEditorOffsetY] = useState(0);
-  const [status, setStatus] = useState(user?.status || "online");
+  const [status, setStatus] = useState(user?.status || "online"); // kept for status-bar sync only
   const [pttListening, setPttListening] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState("");
   const [savingAccount, setSavingAccount] = useState(false);
@@ -502,7 +502,6 @@ export default function GlobalSettingsOverlay({
         username: normalizedUsername,
         display_name: displayName,
         avatar_url: nextAvatarUrl,
-        status,
       });
       onUserUpdated?.(res.data);
       setUsername(res.data.username || normalizedUsername);
@@ -927,107 +926,87 @@ export default function GlobalSettingsOverlay({
       )}
 
       {activeSection === "account" && (
-        <div className="space-y-6" data-testid="account-settings-panel">
+        <div className="space-y-5" data-testid="account-settings-panel">
+          {/* ── Profile card ─────────────────────────────────────────── */}
           <section className="workspace-card overflow-hidden p-0">
-            <div className="h-28 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.35),transparent_40%),linear-gradient(120deg,rgba(15,23,42,0.95),rgba(9,9,11,0.75))]" />
-            <div className="grid gap-6 p-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:p-6">
-              <div className="space-y-4">
-                <div className="relative mx-auto w-full max-w-[220px]">
-                  <button
-                    type="button"
-                    onClick={openAvatarPicker}
-                    className="group relative block aspect-square w-full overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 text-left shadow-[0_18px_40px_rgba(2,8,23,0.32)] transition hover:border-cyan-400/35 hover:shadow-[0_20px_45px_rgba(34,211,238,0.18)]"
-                  >
-                    {hasAvatarPreview ? (
-                      <img
-                        src={avatarPreview}
-                        alt={accountDisplayName}
-                        className="absolute left-1/2 top-1/2 h-full w-full max-w-none object-cover"
-                        style={{
-                          transform: `translate(calc(-50% + ${avatarOffsetX * 0.45}px), calc(-50% + ${avatarOffsetY * 0.45}px)) scale(${avatarZoom})`,
-                          transformOrigin: "center center",
-                        }}
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400 to-cyan-600 text-6xl font-bold text-zinc-950">
-                        {avatarInitial}
-                      </div>
-                    )}
-                    <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/10 bg-black/35 px-3 py-2 text-center text-xs text-zinc-200 opacity-100 backdrop-blur-md transition group-hover:border-cyan-400/35 group-hover:bg-zinc-950/70">
-                      {avatarPendingUpload ? t("settings.avatarReady") : t("settings.avatarChooseImage")}
-                    </div>
-                  </button>
-                  <input
-                    ref={avatarInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleAvatarSelected}
-                  />
-                </div>
+            {/* Banner */}
+            <div className="h-24 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.35),transparent_40%),linear-gradient(120deg,rgba(15,23,42,0.95),rgba(9,9,11,0.75))]" />
 
-                <div className="rounded-2xl border border-white/8 bg-zinc-950/55 p-4">
-                  <div className="flex items-center gap-2">
-                    <UserCircle size={16} className="text-cyan-300" />
-                    <p className="workspace-section-label">{t("settings.avatarUpload")}</p>
+            {/* Avatar + name row */}
+            <div className="flex items-end gap-4 px-6 -mt-10 pb-4">
+              <button
+                type="button"
+                onClick={openAvatarPicker}
+                data-testid="avatar-upload-btn"
+                className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border-2 border-zinc-900 bg-zinc-900 shadow-lg transition hover:border-cyan-400/50"
+              >
+                {hasAvatarPreview ? (
+                  <img
+                    src={avatarPreview}
+                    alt={accountDisplayName}
+                    className="absolute inset-0 h-full w-full object-cover"
+                    style={{
+                      transform: `translate(${avatarOffsetX * 0.3}px, ${avatarOffsetY * 0.3}px) scale(${avatarZoom})`,
+                      transformOrigin: "center",
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400 to-cyan-600 text-3xl font-bold text-zinc-950">
+                    {avatarInitial}
                   </div>
-                  {avatarFileName ? (
-                    <p className="mt-3 text-xs text-zinc-500">{avatarFileName}</p>
-                  ) : null}
-                  <div className="mt-3 rounded-2xl border border-white/8 bg-zinc-950/55 px-4 py-3 text-xs text-zinc-400">
-                    {avatarPendingUpload ? t("settings.avatarReady") : t("settings.profilePreview")}
-                  </div>
+                )}
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                  <UserCircle size={22} className="text-white" />
+                </div>
+              </button>
+              <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarSelected} />
+
+              <div className="flex-1 pb-1">
+                <h3 className="text-xl font-bold text-white" style={{ fontFamily: "Manrope" }}>
+                  {accountDisplayName}
+                </h3>
+                <p className="text-sm text-zinc-500">{user?.email}</p>
+                {avatarPendingUpload && (
+                  <p className="mt-1 text-xs text-cyan-400">{t("settings.avatarReady")}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Form */}
+            <div className="space-y-5 border-t border-white/8 px-6 py-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="workspace-section-label">{t("auth.username")}</Label>
+                  <Input
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                    className={SETTINGS_INPUT_CLASSNAME}
+                    data-testid="settings-username-input"
+                  />
+                  <p className="text-xs text-zinc-500">{t("settings.usernameHelp")}</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="workspace-section-label">{t("auth.displayName")}</Label>
+                  <Input
+                    value={displayName}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    className={SETTINGS_INPUT_CLASSNAME}
+                    data-testid="settings-displayname-input"
+                  />
                 </div>
               </div>
 
-              <div className="space-y-6">
-                <div>
-                  <p className="workspace-section-label">{t("settings.profile")}</p>
-                  <h3 className="mt-2 text-2xl font-bold text-white" style={{ fontFamily: "Manrope" }}>
-                    {accountDisplayName}
-                  </h3>
-                  <p className="mt-2 text-sm text-zinc-400">{user?.email}</p>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label className="workspace-section-label">{t("auth.username")}</Label>
-                    <Input
-                      value={username}
-                      onChange={(event) => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-                      className={SETTINGS_INPUT_CLASSNAME}
-                    />
-                    <p className="text-xs text-zinc-500">{t("settings.usernameHelp")}</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="workspace-section-label">{t("auth.displayName")}</Label>
-                    <Input
-                      value={displayName}
-                      onChange={(event) => setDisplayName(event.target.value)}
-                      className={SETTINGS_INPUT_CLASSNAME}
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label className="workspace-section-label">{t("settings.status")}</Label>
-                    <Select value={status} onValueChange={setStatus}>
-                      <SelectTrigger className={SETTINGS_INPUT_CLASSNAME}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                      {statusOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                      ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <Button onClick={saveAccount} disabled={savingAccount} className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
-                    <GearSix size={14} className="mr-2" />
-                    {savingAccount ? t("settings.saving") : t("settings.saveProfile")}
-                  </Button>
-                </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  onClick={saveAccount}
+                  disabled={savingAccount}
+                  data-testid="save-profile-btn"
+                  className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300"
+                >
+                  <GearSix size={14} className="mr-2" />
+                  {savingAccount ? t("settings.saving") : t("settings.saveProfile")}
+                </Button>
+                <p className="text-xs text-zinc-600">{t("settings.statusChangeHint", { defaultValue: "Status änderst du direkt im Statusbereich unten links." })}</p>
               </div>
             </div>
           </section>

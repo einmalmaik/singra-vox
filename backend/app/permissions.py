@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, Optional
 
+from fastapi import HTTPException
+
 
 DEFAULT_PERMISSIONS: Dict[str, bool] = {
     "manage_server": False,
@@ -279,7 +281,67 @@ async def get_message_history_cutoff(db, user_id: str, server_id: str, *, channe
     return member.get("joined_at")
 
 
+async def assert_channel_access(db, user_id: str, channel: dict) -> None:
+    """Raise HTTP 403 if *user_id* is not allowed to access *channel*.
+
+    For public channels this is a no-op.  For private channels the user
+    must hold the appropriate permission (``read_messages`` for text
+    channels, ``join_voice`` for voice channels).
+    """
+    if not channel.get("is_private"):
+        return
+    permission = "join_voice" if channel.get("type") == "voice" else "read_messages"
+    if not await has_channel_permission(db, user_id, channel, permission):
+        raise HTTPException(403, "No access to this private channel")
+
+
+async def list_channel_user_ids(db, channel: dict) -> list[str]:
+    """Return all user IDs that are allowed to see *channel*.
+
+    For public channels this is all non-banned server members.
+    For private channels only explicitly allowed users/roles are included,
+    plus the server owner.
+    """
+    channel_id = channel["id"]
+    server_id = channel["server_id"]
+
+    members = await db.server_members.find(
+        {"server_id": server_id, "is_banned": {"$ne": True}},
+        {"_id": 0, "user_id": 1, "roles": 1},
+    ).to_list(500)
+
+    if not channel.get("is_private"):
+        return [m["user_id"] for m in members]
+
+    access_entries = await db.channel_access.find(
+        {"channel_id": channel_id}, {"_id": 0}
+    ).to_list(500)
+
+    if not access_entries:
+        # Private channel with no explicit ACL → all members can see it
+        return [m["user_id"] for m in members]
+
+    allowed: set[str] = {
+        e["target_id"] for e in access_entries if e.get("type") == "user"
+    }
+    allowed_roles: set[str] = {
+        e["target_id"] for e in access_entries if e.get("type") == "role"
+    }
+    for member in members:
+        if allowed_roles.intersection(member.get("roles") or []):
+            allowed.add(member["user_id"])
+
+    server = await db.servers.find_one(
+        {"id": server_id}, {"_id": 0, "owner_id": 1}
+    )
+    if server and server.get("owner_id"):
+        allowed.add(server["owner_id"])
+
+    return list(allowed)
+
+
 async def build_viewer_context(db, user_id: str, server_id: str) -> dict:
+    """Build a full permission snapshot for a user in a server."""
     server, member, default_role, role_docs = await load_server_permission_context(db, user_id, server_id)
     server_permissions = resolve_server_permissions(
         user_id=user_id,

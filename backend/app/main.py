@@ -2754,11 +2754,11 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
             try:
                 await create_notification(
                     mid,
-                    "mention",
-                    f"@{user['display_name']} mentioned you",
-                    "[Encrypted message]" if is_e2ee_channel else inp.content[:100],
-                    f"/channel/{channel_id}",
-                    user["id"],
+                    ntype="mention",
+                    title=f"@{user['display_name']} mentioned you",
+                    body="[Encrypted message]" if is_e2ee_channel else inp.content[:100],
+                    link=f"/channel/{channel_id}",
+                    from_user_id=user["id"],
                 )
             except Exception as e:
                 logger.error(f"Failed to create notification for {mid}: {e}")
@@ -2970,11 +2970,11 @@ async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
     # DM notification
     await create_notification(
         other_user_id,
-        "dm",
-        f"DM from {user['display_name']}",
-        "[Encrypted message]" if use_e2ee or inp.is_encrypted else inp.content[:100],
-        f"/dm/{user['id']}",
-        user["id"],
+        ntype="dm",
+        title=f"DM from {user['display_name']}",
+        body="[Encrypted message]" if use_e2ee or inp.is_encrypted else inp.content[:100],
+        link=f"/dm/{user['id']}",
+        from_user_id=user["id"],
     )
     return msg
 
@@ -3158,13 +3158,33 @@ app.include_router(users_r)
 async def health():
     return {"status": "ok", "service": "Singra Vox"}
 
-# Phase 2 routes
-from routes_phase2 import phase2, create_phase2_indexes
-app.include_router(phase2)
+# ─── New modular route imports (replacing legacy phase2 / phase3 files) ──────
+from app.routes.threads import router as threads_router
+from app.routes.search import router as search_router
+from app.routes.unread import router as unread_router
+from app.routes.overrides import router as overrides_router
+from app.routes.groups import router as groups_router
+from app.routes.gdpr import router as gdpr_router
+from app.routes.pins import router as pins_router
+from app.routes.notifications import router as notifications_router
+from app.routes.emojis import router as emojis_router
+from app.routes.webhooks import router as webhooks_router
+from app.routes.bots import router as bots_router
+from app.routes.files import router as files_router
+from app.services.notifications import send_notification as create_notification
 
-# Phase 3 routes
-from routes_phase3 import phase3, create_phase3_indexes, _notify as create_notification
-app.include_router(phase3)
+app.include_router(threads_router)
+app.include_router(search_router)
+app.include_router(unread_router)
+app.include_router(overrides_router)
+app.include_router(groups_router)
+app.include_router(gdpr_router)
+app.include_router(pins_router)
+app.include_router(notifications_router)
+app.include_router(emojis_router)
+app.include_router(webhooks_router)
+app.include_router(bots_router)
+app.include_router(files_router)
 
 
 async def migrate_legacy_instance_state():
@@ -3341,8 +3361,27 @@ async def startup():
     await db.e2ee_media_keys.create_index([("channel_id", 1), ("created_at", -1)])
     await db.push_subscriptions.create_index([("user_id", 1), ("subscription.endpoint", 1)], unique=True)
     await db.status_history.create_index([("user_id", 1), ("created_at", -1)])
-    await create_phase2_indexes()
-    await create_phase3_indexes()
+    # ── Phase-2 indexes (read_states, revisions, overrides, groups, keys) ──
+    await db.read_states.create_index([("user_id", 1), ("channel_id", 1)], unique=True)
+    await db.message_revisions.create_index("message_id")
+    await db.channel_overrides.create_index([("channel_id", 1), ("target_type", 1), ("target_id", 1)])
+    await db.channel_access.create_index("channel_id")
+    await db.group_conversations.create_index("id", unique=True)
+    await db.group_messages.create_index([("group_id", 1), ("created_at", -1)])
+    await db.key_bundles.create_index("user_id", unique=True)
+    # ── Phase-3 indexes (notifications, emojis, webhooks, bots) ────────────
+    await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+    await db.notifications.create_index("id", unique=True)
+    await db.server_emojis.create_index([("server_id", 1), ("name", 1)], unique=True)
+    await db.server_emojis.create_index("id", unique=True)
+    await db.webhooks.create_index("id", unique=True)
+    await db.webhooks.create_index("token", unique=True)
+    await db.webhook_logs.create_index([("webhook_id", 1), ("created_at", -1)])
+    await db.bot_tokens.create_index("id", unique=True)
+    await db.bot_tokens.create_index("token", unique=True)
+    # ── Files index (local-filesystem storage) ─────────────────────────────
+    await db.files.create_index("id", unique=True)
+    await db.files.create_index([("uploaded_by", 1), ("created_at", -1)])
     await ensure_bucket()
 
     await migrate_legacy_instance_state()
