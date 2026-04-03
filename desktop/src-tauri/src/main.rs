@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 mod native_capture;
 
 use serde::Serialize;
@@ -666,10 +667,15 @@ fn main() {
             clear_ptt_listener,
             check_update_command,
             install_update_command,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::list_capture_sources,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::start_desktop_capture,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::stop_desktop_capture,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::get_desktop_capture_frame,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::get_desktop_capture_session,
         ])
         .run(tauri::generate_context!())

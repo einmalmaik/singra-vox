@@ -15,7 +15,11 @@ tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+
+# Screen/audio capture – only on platforms that support it
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 crabgrab = { version = "0.4.0", features = ["bitmap"] }
+rdev = { version = "0.5.3", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 rdev = "0.5.3"

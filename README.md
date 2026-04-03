@@ -1,175 +1,146 @@
 # Singra Vox
 
-**Privater, selbst-gehosteter Chat mit Ende-zu-Ende-Verschlüsselung.**
-Wie Discord oder TeamSpeak – nur unter deiner Kontrolle. Keine Cloud. Keine Telemetrie. Deine Daten gehören dir.
+Eine selbst-gehostete, verschlüsselte Chat-Plattform. Wie Discord – nur unter deiner Kontrolle.
+
+- **Ende-zu-Ende-Verschlüsselung** für Nachrichten und Dateien in privaten Kanälen
+- **Voice & Video** über LiveKit (selbst-gehostet)
+- **Desktop-App** für Windows, macOS und Linux (Tauri)
+- **Kein Cloud-Zwang** – läuft komplett auf deinem Server
 
 ---
 
-## Installation (1 Befehl)
+## Schnellstart
 
 ```bash
+git clone https://github.com/DEIN_USER/singra-vox.git
+cd singra-vox
 bash install.sh
 ```
 
-Das war's. Der Installer:
-- Installiert Docker automatisch (falls nicht vorhanden)
-- Fragt 4 Dinge: Name, Admin-E-Mail, Passwort, Modus
-- Konfiguriert alles selbstständig
-- Startet alle Dienste in Docker
-- Erstellt deinen Admin-Account
+Der Installer fragt 5 Dinge und richtet alles ein:
+1. **Modus** – HTTP (Test) oder HTTPS mit eigener Domain
+2. **Server-Name** – z.B. "Mein Singra Vox"
+3. **Admin-E-Mail**
+4. **Admin-Passwort**
+5. **Domain** *(nur bei HTTPS-Modus)*
+
+Danach öffnest du die App im Browser und loggst dich ein.
 
 ### Voraussetzungen
-- Linux (Ubuntu 22.04+, Debian 12, Rocky Linux 9 empfohlen)
-- Min. 1 GB RAM, 10 GB Speicher
-- Internetverbindung (für Docker-Images)
+- Linux (Ubuntu 22.04+, Debian 12, Rocky Linux 9)
+- Min. 1 GB RAM, 10 GB Freier Speicher
+- Internetverbindung beim ersten Start (Docker-Images)
 
-### Modi
-
-**Schnellstart (Modus 1)** — für Tests oder privates Netzwerk
-```
-http://DEINE-IP:8080
-```
-- Kein SSL-Zertifikat nötig
-- Direkt über IP+Port erreichbar
-- Funktioniert sofort ohne Domain
-
-**Produktiv (Modus 2)** — für öffentliche Server
-```
-https://chat.beispiel.de
-```
-- Automatisches SSL-Zertifikat (Let's Encrypt)
-- Eigene Domain erforderlich
-- Ports 80 und 443 müssen offen sein
+Docker wird automatisch installiert, falls nicht vorhanden.
 
 ---
 
-## Nach der Installation
+## Desktop-App
 
-1. App im Browser öffnen
-2. Mit deinem Admin-Account einloggen
-3. Ersten Server erstellen → Kanäle anlegen
-4. Freunde per Einladungs-Link einladen
+Für Windows, macOS und Linux unter [Releases](../../releases) herunterladbar.
+
+Die App verbindet sich zu deinem selbst-gehosteten Server. Beim ersten Start gibst du die Server-URL ein (z.B. `https://chat.beispiel.de`).
+
+**Aktualisierungen** werden automatisch beim App-Start erkannt und können mit einem Klick installiert werden – ohne Datenverlust oder erneutes Einloggen.
+
+---
+
+## Updates (Server)
+
+```bash
+bash install.sh --update
+```
+
+Bestehende Konfiguration und Daten bleiben erhalten. Aktive Sessions werden nicht unterbrochen.
+
+---
+
+## Architektur
+
+```
+Browser / Desktop-App
+        ↓  HTTPS
+    nginx / Caddy  ──→  Frontend (React, Port 80)
+        ↓  /api/
+    FastAPI Backend (Port 8001)
+        ├── MongoDB         (Daten)
+        ├── MinIO           (verschlüsselte Dateien)
+        ├── LiveKit         (Voice/Video)
+        └── Mailpit / SMTP  (E-Mail-Verifikation)
+```
+
+Alle Services laufen in Docker-Containern und werden von `docker compose` verwaltet.
+
+Technischer Überblick: [`docs/architecture.md`](docs/architecture.md)
+
+---
+
+## Firewall-Ports
+
+| Port     | Protokoll | Zweck                            |
+|----------|-----------|----------------------------------|
+| 80       | TCP       | HTTP (Weiterleitung auf HTTPS)   |
+| 443      | TCP/UDP   | HTTPS + HTTP/3                   |
+| 8080     | TCP       | Quickstart-Modus (HTTP)          |
+| 7880     | TCP       | LiveKit Voice-Signaling          |
+| 7882     | UDP       | LiveKit Voice-Daten (RTP/SRTP)   |
 
 ---
 
 ## Wichtige Befehle
 
 ```bash
-# Ins Installations-Verzeichnis wechseln
 cd /opt/singravox
 
-# Live-Logs anzeigen
-docker compose logs -f
-
-# Neu starten
-docker compose restart
-
-# Update (neuen Code pullen + neu bauen)
-cd /pfad/zu/singravox && git pull
-bash install.sh  # nochmal ausführen
-
-# Stoppen
-docker compose down
-
-# Alles löschen (inkl. Daten!)
-docker compose down -v
+docker compose logs -f          # Live-Logs
+docker compose restart backend  # Backend neu starten
+docker compose down             # Stoppen
+docker compose up -d            # Starten
+bash install.sh --update        # Update
 ```
 
 ---
 
-## Dienste
+## Konfiguration
 
-| Dienst       | Beschreibung                     | Port (intern) |
-|-------------|----------------------------------|---------------|
-| Backend      | FastAPI REST + WebSocket API     | 8001          |
-| Frontend     | React Web-App                    | 80            |
-| MongoDB      | Datenbank                        | 27017         |
-| LiveKit      | Voice/Video Streaming            | 7880          |
-| MinIO        | Verschlüsselte Datei-Speicherung | 9000          |
-| Mailpit      | E-Mail-Postfach (Dev-Modus)      | 1025/8025     |
-| nginx/Caddy  | Reverse Proxy                    | 80 / 443      |
-
----
-
-## Konfiguration anpassen
-
-Die Konfiguration liegt in `/opt/singravox/.env`. Nach Änderungen:
+Alle Einstellungen in `/opt/singravox/.env`. Nach Änderungen:
 
 ```bash
-cd /opt/singravox
-docker compose restart backend
+cd /opt/singravox && docker compose restart backend
 ```
 
-### Wichtige Variablen
+Wichtige Variablen:
 
-```env
-# E-Mail (SMTP)
-SMTP_HOST=smtp.gmail.com      # SMTP-Server
-SMTP_PORT=587                  # Port
-SMTP_USERNAME=dein@gmail.com   # Benutzername
-SMTP_PASSWORD=app-passwort     # Passwort
-SMTP_USE_TLS=true
-
-# Voice (LiveKit)
-LIVEKIT_PUBLIC_URL=wss://rtc.beispiel.de  # Öffentliche Voice-URL
-
-# Speicher (S3)
-S3_ENDPOINT_URL=http://minio:9000   # Interner MinIO
-# Oder: https://s3.amazonaws.com für AWS
-```
+| Variable | Bedeutung |
+|----------|-----------|
+| `SMTP_HOST` | SMTP-Server für E-Mail-Verifikation |
+| `LIVEKIT_PUBLIC_URL` | Öffentliche URL für Voice-Verbindungen |
+| `S3_ENDPOINT_URL` | S3-kompatibler Storage (Standard: internes MinIO) |
+| `JWT_SECRET` | Wird beim Install automatisch generiert – nicht ändern! |
 
 ---
 
-## Firewall-Ports öffnen
+## Dokumentation
 
-```bash
-# Schnellstart
-ufw allow 8080/tcp   # Web-App
-ufw allow 7880/tcp   # LiveKit (Voice)
-ufw allow 7882/udp   # LiveKit UDP (Voice-Qualität)
-
-# Produktiv
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 443/udp    # HTTP/3
-ufw allow 7880/tcp
-ufw allow 7882/udp
-```
+| Datei | Inhalt |
+|-------|--------|
+| [`docs/architecture.md`](docs/architecture.md) | Code-Struktur, Services, Datenmodelle |
+| [`docs/deployment-linux.md`](docs/deployment-linux.md) | VPS-Setup, Firewall, Domain |
+| [`docs/docker-setup.md`](docs/docker-setup.md) | Docker-Services, Volumes, Netzwerk |
+| [`docs/tauri-guide.md`](docs/tauri-guide.md) | Desktop-App bauen und veröffentlichen |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | Release-Prozess, Signing, GitHub Actions |
 
 ---
 
-## Hetzner / Netcup / Contabo
+## Mitwirken
 
-Getestet auf:
-- **Hetzner** CX22 (2 vCPU, 4 GB RAM) — empfohlen für 50+ Benutzer
-- **Netcup** VPS 500 — gut für Testinstanzen
-- **Contabo** VPS S — günstige Option
-
-**Hetzner Quickstart:**
-1. Cloud-Console öffnen → Neuen Server erstellen (Ubuntu 22.04)
-2. SSH-Verbindung aufbauen
-3. Code klonen:
-   ```bash
-   git clone https://github.com/DEIN-USER/singra-vox.git
-   cd singra-vox
-   bash install.sh
-   ```
-4. Modus 2 wählen → Domain eingeben → Fertig!
+Pull Requests sind willkommen. Bitte:
+- Neue Features mit Tests absichern (pytest für Backend, Jest für Frontend)
+- Permissions über `backend/app/permissions.py` prüfen
+- Kein direktes Commit auf `main` – Feature-Branch + PR
 
 ---
 
-## E2EE (Ende-zu-Ende-Verschlüsselung)
+## Lizenz
 
-Singra Vox verschlüsselt Nachrichten in privaten Kanälen **komplett auf deinem Gerät**.
-Der Server sieht nur verschlüsselten Ciphertext — niemals den Klartext.
-
-- Schlüssel werden lokal im Browser generiert
-- Dateien werden vor dem Upload verschlüsselt und in MinIO gespeichert
-- Voice-Kanäle nutzen SFrame E2EE via LiveKit
-
----
-
-## Support & Community
-
-- GitHub Issues für Bugs und Feature-Requests
-- Dokumentation: `/docs/` Ordner
+MIT – siehe `LICENSE`
