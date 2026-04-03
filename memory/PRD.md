@@ -17,7 +17,7 @@ backend/
       utils.py             # now_utc(), new_id(), sanitize_user()
       constants.py         # E2EE_DEVICE_HEADER, MAX_UPLOAD_BYTES, etc.
     routes/
-      files.py             # NEU: Lokale Filesystem-Speicherung (UUID-Pfade)
+      files.py             # Lokale Filesystem-Speicherung (UUID-Pfade)
       threads.py           # Thread-Replies
       search.py            # Nachrichten-Suche (ohne E2EE-Kanäle)
       unread.py            # Ungelesene Nachrichten + Read-States
@@ -32,26 +32,30 @@ backend/
     services/
       __init__.py
       notifications.py     # Zentraler Notification-Service (send_notification())
-    permissions.py         # Zentrale Berechtigungs-Engine:
-                           #   has_channel_permission(), has_server_permission()
-                           #   assert_channel_access(), list_channel_user_ids()
+    permissions.py         # Zentrale Berechtigungs-Engine
     auth_service.py        # JWT, Argon2/bcrypt, Sessions
-    blob_storage.py        # S3/MinIO (optional, für E2EE-Anhänge)
+    blob_storage.py        # S3/MinIO (für E2EE-Anhänge)
     emailing.py            # SMTP
     pagination.py          # Cursor-Pagination
     rate_limits.py         # Login-Rate-Limiting
     voice_access.py        # LiveKit Voice-Zugangsprüfung
     ws.py                  # WebSocket-Manager
     main.py                # App-Factory: FastAPI-App + Router-Registration
-  server.py                # Einstiegspunkt (from app.main import app)
+  server.py                # Einstiegspunkt
   storage/
-    uploads/               # Lokale Datei-Uploads (UUID-Dateinamen, kein Klarname im Pfad)
+    uploads/               # Lokale Datei-Uploads (UUID-Dateinamen)
+    minio-data/            # MinIO S3 Datenspeicher (lokal)
 ```
 
 ### Frontend  `frontend/src/`
 ```
 components/
-  chat/        # ChatArea, ChannelSidebar, ServerSidebar, VoiceMediaStage
+  chat/
+    ChatArea.js            # Haupt-Chat (Nachrichten, Anhänge, E2EE)
+    AttachmentRenderer.js  # NEU: Inline-Bild + Download-Button Renderer
+    ChannelSidebar.js
+    ServerSidebar.js
+    VoiceMediaStage.js
   security/    # E2EEStatus
   settings/    # GlobalSettingsOverlay (Account, Voice, Privacy & Security)
   ui/          # Shadcn-Komponenten
@@ -60,6 +64,16 @@ contexts/
 lib/
   e2ee/        # crypto.js, deviceStorage.js (localStorage-Fallback für Web)
   api.js, voiceEngine.js, screenSharePresets.js
+```
+
+### Services (lokal via Supervisor)
+```
+/etc/supervisor/conf.d/
+  livekit.conf   # LiveKit Port 7880
+  minio.conf     # MinIO Port 9000 (API) + 9001 (Console)
+  mailpit.conf   # Mailpit Port 1025 (SMTP) + 8025 (Web-UI)
+  frontend.conf
+  backend.conf
 ```
 
 ---
@@ -86,7 +100,6 @@ lib/
 - app/services/notifications.py (zentraler Notification-Service)
 - permissions.py: +assert_channel_access(), +list_channel_user_ids()
 - Kein doppelter MongoDB-Client mehr (3×→1×)
-- Keine duplizierten Hilfsfunktionen mehr
 
 ### 2026-04-03 – Lokale Datei-Speicherung
 - routes/files.py: POST /api/upload → Filesystem (UUID-Pfad, kein Originalname im Pfad)
@@ -95,10 +108,26 @@ lib/
 
 ### 2026-04-03 – Settings UI Redesign
 - Account-Sektion: kompaktes 80px-Avatar-Widget statt 220px-Vorschau
-- Status-Selector entfernt (Status wird im Statusbereich unten links geändert)
-- Sauberes Grid-Layout, responsive für alle Geräte
+- Status-Selector entfernt
 
-**Test-Status (Iteration 9): Backend 100% (20/20), Frontend 85%**
+### 2026-04-03 – SMTP, MinIO, Inline-Bilder, LiveKit URL (JETZT)
+- **SMTP**: Mailpit via Supervisor (Port 1025/8025), `SMTP_HOST=localhost` in .env
+  - Registrierung erfordert zwingend E-Mail-Verifikation
+  - POST /api/auth/register → E-Mail → POST /api/auth/verify-email (6-stelliger Code)
+- **MinIO/S3**: Läuft via Supervisor auf Port 9000
+  - Bucket `singravox-e2ee` wird automatisch beim Backend-Start erstellt
+  - E2EE-Blobs werden in MinIO gespeichert via `blob_storage.py`
+  - `S3_ENDPOINT_URL=http://localhost:9000`, `S3_ACCESS_KEY=singravox`
+- **AttachmentRenderer.js**: Neue Komponente in `components/chat/`
+  - Non-E2EE-Bilder: `<img>` direkt via `/api/files/`
+  - E2EE-Bilder: automatische Entschlüsselung + Blob-URL-Rendering
+  - Nicht-Bilder: Download-Button
+- **LIVEKIT_PUBLIC_URL**: Neue .env-Variable für die öffentlich erreichbare URL
+  - Clients (Browser) nutzen `LIVEKIT_PUBLIC_URL`, Backend nutzt `LIVEKIT_URL`
+  - In docker-compose.yml und docker-compose.prod.yml konfiguriert
+- **install.sh**: Aktualisiert mit SMTP, S3, LIVEKIT_PUBLIC_URL, MinIO-Auto-Start
+
+**Test-Status (Iteration 10): Backend 89% (8/9, 1 LOW-prio skipped), Frontend 100%**
 
 ---
 
@@ -113,20 +142,18 @@ lib/
 
 ## Priorisierter Backlog
 
-### P0 – Produktions-Blocker
-- [ ] SMTP konfigurieren (Email-Verifikation für neue User)
-- [ ] S3/MinIO für E2EE-Dateianhänge (verschlüsselte Bilder/Dateien)
-- [ ] LiveKit externe URL (ws://localhost:7880 nicht von außen erreichbar)
-
 ### P1 – Wichtig
-- [ ] Frontend: Inline-Bildvorschau in Kanälen für /api/files/-Anhänge
+- [ ] install.sh: docker-compose.prod.yml testen + TURN/COTURN konfigurieren
 - [ ] Tauri Desktop-App Build-Pipeline
+- [ ] Roles & Permissions vollständig über permissions.py abdecken (alle Edge Cases)
 - [ ] TURN-Server (COTURN) für NAT-Traversal bei Voice
 
 ### P2 – Backlog
 - [ ] Redis für WebSocket-Skalierung (Mehrere Backend-Instanzen)
 - [ ] MLS Ratchet Migration (E2EE v2)
 - [ ] macOS/Windows Tauri-Pakete
+- [ ] MinIO zu externer S3-kompatiblen Storage migrieren (AWS S3, Backblaze)
+- [ ] Voice Token: auth check vor Pydantic-Validierung (422→401 für unauthenticated)
 
 ---
 

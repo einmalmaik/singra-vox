@@ -2474,7 +2474,7 @@ voice_r = APIRouter(prefix="/api/voice", tags=["Voice"])
 
 
 @voice_r.post("/token")
-async def create_voice_token(inp: VoiceTokenInput, request: Request):
+async def create_voice_token(request: Request, inp: VoiceTokenInput):
     user = await current_user(request)
     channel = await db.channels.find_one(
         {"id": inp.channel_id, "server_id": inp.server_id, "type": "voice"},
