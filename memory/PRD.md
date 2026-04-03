@@ -176,7 +176,7 @@ lib/
 ### 2026-04-03 – Vollständiges Permissions-System (Discord-Modell)
 - **`permissions.py`** erweitert: 3 neue assert-Helper, 3 neue Permissions (`view_channels`, `pin_messages`, `manage_messages`), alle Docs auf Deutsch
 - **Alle 6 Route-Lücken geschlossen**: threads (send_messages+attach_files), overrides (manage_channels), emojis (membership), unread (read_messages), files (alle Kanal-Dateien)
-- **Test-Status (Iteration 12): 15/15 (100%)** – Owner-Bypass ✅, Member-Isolation ✅, Rollen-Overrides ✅
+- **Test-Status (Iteration 12-14): 40/40 (100%)** – Owner-Bypass ✅, Muted-Rolle ✅, Grant-schlägt-Deny ✅, Privilege-Escalation blockiert ✅, JWT-Fälschung ✅, Body-Injection ignoriert ✅, Channel-Overrides ✅, Upload attach_files-Schutz ✅
 
 ---
 

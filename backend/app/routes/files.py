@@ -105,6 +105,15 @@ async def upload_file(body: UploadJsonBody, request: Request) -> dict:
     """
     user = await _get_current_user(request)
 
+    # Kanal-Permission prüfen wenn ein Channel angegeben wurde
+    if body.channel_id:
+        channel = await db.channels.find_one({"id": body.channel_id}, {"_id": 0})
+        if channel:
+            await assert_channel_permission(
+                db, user["id"], channel, "attach_files",
+                "Keine Berechtigung, Dateien in diesem Kanal hochzuladen"
+            )
+
     raw_bytes = base64.b64decode(body.data)
     if len(raw_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "File exceeds the maximum allowed size")
