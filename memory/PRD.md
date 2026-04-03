@@ -147,7 +147,31 @@ lib/
   - nginx als Reverse Proxy (Port 8080 konfigurierbar)
 - **README.md** neu geschrieben: vollständige Anleitung ohne Vorkenntnisse, Hetzner/Netcup/Contabo Sektion, Firewall-Ports, Services-Tabelle
 
-**Test-Status (Iteration 11): Backend 100%, install.sh Syntax 100%**
+### 2026-04-03 – Tauri Desktop-App Updater + Release-Pipeline
+- **Tauri Updater** integriert in `desktop/src-tauri/`:
+  - `Cargo.toml`: `tauri-plugin-updater` + `tauri-plugin-process` hinzugefügt
+  - `main.rs`: automatische Update-Prüfung beim App-Start (Background-Task), Befehle `check_update_command` + `install_update_command`
+  - Session-Token im OS-Keychain → **User bleibt nach Update eingeloggt**
+- **tauri.conf.json** aktualisiert:
+  - Targets: alle 3 Plattformen (Windows .msi/.exe, macOS .dmg, Linux .AppImage/.deb)
+  - Updater-Endpoint: GitHub Releases (latest.json)
+  - Build-Command: yarn statt npm
+- **UpdateNotification.js**: neue React-Komponente mit Download-Progress-Bar
+  - Erscheint automatisch wenn neues Update auf GitHub veröffentlicht wird
+  - "Jetzt aktualisieren" → Download → Auto-Restart
+- **desktop.js**: `invokeTauri()` und `listenTauri()` Helpers hinzugefügt
+- **GitHub Actions `release.yml`**: 
+  - Trigger: `v*.*.*` Tag pushen
+  - Matrix-Build: Windows, macOS Intel, macOS ARM, Linux
+  - Docker-Images pushen (Backend + Web)
+  - Tauri signierte Release-Assets erstellen
+  - GitHub Release automatisch veröffentlichen
+- **`install.sh --update`**: Bestehende Installation aktualisieren ohne .env zu überschreiben
+  - Rolling Restart: Backend → Frontend (keine Downtime)
+  - Sessions bleiben aktiv
+- **`docs/RELEASING.md`**: Schritt-für-Schritt Anleitung für neue Releases
+
+**Test-Status: Syntax OK, Lint OK, Frontend compiliert erfolgreich**
 
 ---
 

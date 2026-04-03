@@ -600,8 +600,93 @@ configure_smtp() {
   fi
 }
 
+# ── Update Mode ───────────────────────────────────────────────────────────────
+run_update() {
+  banner
+  header "Singra Vox aktualisieren"
+
+  if [[ ! -d "$DATA_DIR" ]]; then
+    error "Keine bestehende Installation gefunden in $DATA_DIR"
+    error "Starte zuerst die Erstinstallation: bash install.sh"
+    exit 1
+  fi
+
+  if [[ ! -f "$DATA_DIR/.env" ]]; then
+    error "Keine .env-Datei gefunden. Bitte erneut installieren."
+    exit 1
+  fi
+
+  info "Bestehende Installation gefunden: $DATA_DIR"
+  info "Konfiguration (.env) wird beibehalten – alle Einstellungen bleiben erhalten."
+  echo ""
+
+  # Detect compose binary
+  if docker compose version &>/dev/null 2>&1; then
+    COMPOSE_BIN="docker compose"
+  elif command -v docker-compose &>/dev/null; then
+    COMPOSE_BIN="docker-compose"
+  else
+    error "Docker Compose nicht gefunden."
+    exit 1
+  fi
+
+  # Determine which compose file is in use
+  local compose_file="docker-compose.yml"
+  if [[ -f "$DATA_DIR/Caddyfile" ]]; then
+    info "Produktions-Setup erkannt (Caddy/HTTPS)"
+    compose_file="docker-compose.yml"
+  else
+    info "Quickstart-Setup erkannt (HTTP)"
+  fi
+
+  # Pull latest source (if git repo)
+  if [[ -d "$REPO_DIR/.git" ]]; then
+    info "Lade neuesten Code von GitHub…"
+    cd "$REPO_DIR"
+    git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD)" 2>/dev/null \
+      || warn "git pull fehlgeschlagen. Fahre mit lokalem Code fort."
+    success "Code aktuell"
+  fi
+
+  # Re-prepare build context with updated source
+  prepare_build_context
+
+  # Rebuild images
+  info "Baue neue Docker-Images…"
+  cd "$DATA_DIR"
+  $COMPOSE_BIN build --quiet 2>&1 | tail -3 || true
+  success "Images gebaut"
+
+  # Rolling restart (backend first, then frontend)
+  info "Starte Dienste neu…"
+  $COMPOSE_BIN up -d --no-deps backend 2>&1 | tail -3 || true
+  sleep 3
+  $COMPOSE_BIN up -d --no-deps frontend 2>&1 | tail -3 || true
+
+  # Ensure all services running
+  $COMPOSE_BIN up -d 2>&1 | tail -5
+
+  echo ""
+  success "Update abgeschlossen! Alle bestehenden Sessions bleiben aktiv."
+  echo ""
+  local frontend_url
+  frontend_url=$(grep "^FRONTEND_URL=" "$DATA_DIR/.env" | cut -d'=' -f2)
+  if [[ -n "$frontend_url" ]]; then
+    echo -e "  App: ${BOLD}$frontend_url${RESET}"
+  fi
+  echo ""
+  divider
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 main() {
+  # ── Update-Flag erkennen ─────────────────────────────────────────────────────
+  for arg in "$@"; do
+    if [[ "$arg" == "--update" || "$arg" == "update" ]]; then
+      run_update
+      return
+    fi
+  done
   banner
 
   # ── OS Check ────────────────────────────────────────────────────────────────
@@ -798,6 +883,10 @@ main() {
   echo "  1. App öffnen und einloggen"
   echo "  2. Ersten Server erstellen"
   echo "  3. Freunde per Einladungs-Link einladen"
+  echo ""
+  echo -e "  ${BOLD}Updates:${RESET}"
+  echo "  bash install.sh --update   # Auf neuste Version aktualisieren"
+  echo "  (Deine Konfiguration + Daten bleiben dabei vollständig erhalten)"
   echo ""
   echo -e "  ${CYAN}Befehle:${RESET}"
   echo "  cd $DATA_DIR"

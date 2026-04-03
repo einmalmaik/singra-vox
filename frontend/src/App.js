@@ -15,6 +15,7 @@ import OnboardingPage from "@/pages/OnboardingPage";
 import InvitePage from "@/pages/InvitePage";
 import MainLayout from "@/pages/MainLayout";
 import DesktopInviteBridge from "@/components/invites/DesktopInviteBridge";
+import { UpdateNotification } from "@/components/desktop/UpdateNotification";
 import "@/App.css";
 
 function LoadingScreen({ label }) {
@@ -108,6 +109,7 @@ function AppShell() {
         }}
       />
       <DesktopInviteBridge />
+      <UpdateNotification />
       <AppRoutes />
     </>
   );

@@ -4,7 +4,7 @@ mod native_capture;
 
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 #[cfg(target_os = "windows")]
 use rdev::{listen, Event, EventType, Key};
@@ -535,6 +535,102 @@ fn clear_ptt_listener(state: State<'_, DesktopState>) -> Result<PttStatus, Strin
     }
 }
 
+// ── Update-Check ──────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    available: bool,
+    version: Option<String>,
+    current_version: String,
+    body: Option<String>,
+}
+
+/// Wird beim App-Start im Hintergrund aufgerufen.
+/// Findet ein Update → sendet "update-available" Event an das Frontend.
+async fn check_for_update(app: tauri::AppHandle) {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let _ = app.emit(
+                "update-available",
+                UpdateInfo {
+                    available: true,
+                    version: Some(update.version.clone()),
+                    current_version: update.current_version.clone(),
+                    body: update.body.clone(),
+                },
+            );
+        }
+        Ok(None) => {
+            // Kein Update verfügbar – kein Event nötig
+        }
+        Err(_) => {
+            // Netzwerkfehler – still ignorieren (kein Internet etc.)
+        }
+    }
+}
+
+/// Tauri-Befehl: Update manuell prüfen (aus dem Frontend aufrufbar)
+#[tauri::command]
+async fn check_update_command(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let current_version = app.package_info().version.to_string();
+    let updater = app.updater().map_err(|e| e.to_string())?;
+
+    match updater.check().await.map_err(|e| e.to_string())? {
+        Some(update) => Ok(UpdateInfo {
+            available: true,
+            version: Some(update.version.clone()),
+            current_version,
+            body: update.body.clone(),
+        }),
+        None => Ok(UpdateInfo {
+            available: false,
+            version: None,
+            current_version,
+            body: None,
+        }),
+    }
+}
+
+/// Tauri-Befehl: Update herunterladen + installieren.
+/// Die App startet sich nach der Installation automatisch neu.
+#[tauri::command]
+async fn install_update_command(app: tauri::AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+
+    if let Some(update) = updater.check().await.map_err(|e| e.to_string())? {
+        let _ = app.emit("update-download-started", ());
+
+        update
+            .download_and_install(
+                |chunk_length, content_length| {
+                    let _ = app.emit(
+                        "update-download-progress",
+                        serde_json::json!({
+                            "chunkLength": chunk_length,
+                            "contentLength": content_length
+                        }),
+                    );
+                },
+                || {
+                    let _ = app.emit("update-install-started", ());
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Nach dem Install neu starten
+        tauri_plugin_process::restart(&app.env());
+    }
+
+    Ok(())
+}
+
 fn main() {
     let desktop_state = DesktopState::default();
     let capture_state = native_capture::DesktopCaptureStore::default();
@@ -544,12 +640,21 @@ fn main() {
     tauri::Builder::default()
         .manage(desktop_state)
         .manage(capture_state)
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             #[cfg(target_os = "windows")]
             spawn_ptt_listener(app.handle().clone(), ptt_state.clone());
+
+            // Prüfe beim Start im Hintergrund auf Updates
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                check_for_update(app_handle).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -559,6 +664,8 @@ fn main() {
             get_desktop_runtime_info,
             configure_ptt_listener,
             clear_ptt_listener,
+            check_update_command,
+            install_update_command,
             native_capture::list_capture_sources,
             native_capture::start_desktop_capture,
             native_capture::stop_desktop_capture,

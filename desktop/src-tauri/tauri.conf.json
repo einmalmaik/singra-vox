@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/tauri-v2/crates/tauri-cli/schema.json",
   "productName": "Singra Vox",
-  "version": "0.1.0",
-  "identifier": "com.singravox.desktop",
+  "version": "0.2.0",
+  "identifier": "io.singravox.app",
   "build": {
-    "beforeBuildCommand": "npm --prefix ../frontend run build",
-    "beforeDevCommand": "npm --prefix ../frontend run start",
+    "beforeBuildCommand": "yarn --cwd ../frontend build",
+    "beforeDevCommand": "yarn --cwd ../frontend start",
     "devUrl": "http://localhost:3000",
     "frontendDist": "../../frontend/build"
   },
@@ -18,7 +18,8 @@
         "minWidth": 800,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "decorations": true
       }
     ],
     "security": {
@@ -27,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": "all",
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"
@@ -37,9 +38,17 @@
         "depends": ["libwebkit2gtk-4.1-0", "libayatana-appindicator3-1"]
       }
     },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": null
+    },
     "windows": {
       "nsis": {
-        "displayLanguageSelector": true
+        "displayLanguageSelector": true,
+        "installMode": "perMachine"
+      },
+      "wix": {
+        "language": "de-DE"
       }
     }
   },
@@ -48,6 +57,14 @@
       "desktop": {
         "schemes": ["singravox"]
       }
+    },
+    "updater": {
+      "pubkey": "TAURI_UPDATER_PUBKEY_PLACEHOLDER",
+      "endpoints": [
+        "https://github.com/GITHUB_OWNER/singra-vox/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "active": true
     }
   }
 }

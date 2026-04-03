@@ -242,3 +242,19 @@ export async function getDesktopCaptureSession() {
   if (!invoke) return null;
   return invoke("get_desktop_capture_session");
 }
+
+// ── Update-Helpers ───────────────────────────────────────────────────────────
+
+/** Ruft einen Tauri-Befehl auf (invoke shorthand für Komponenten) */
+export async function invokeTauri(command, args = {}) {
+  const invoke = await getInvoke();
+  if (!invoke) throw new Error("Not a desktop app");
+  return invoke(command, args);
+}
+
+/** Lauscht auf ein Tauri-Event (listen shorthand für Komponenten) */
+export async function listenTauri(event, handler) {
+  const eventApi = await getEventApi();
+  if (!eventApi?.listen) return () => {};
+  return eventApi.listen(event, handler);
+}
