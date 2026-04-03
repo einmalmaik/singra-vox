@@ -227,10 +227,8 @@ class TestMemberCannotDeleteServer:
 class TestMutedRoleBlocksSendMessages:
     """Test 11: Role 'Muted' with send_messages=false → 403 when sending
     
-    KNOWN LIMITATION: resolve_server_permissions() only applies additive grants.
-    A role with send_messages=False has NO effect because @everyone default is True.
-    The permission engine cannot REVOKE @everyone defaults via role assignment.
-    This test documents the EXPECTED behavior and the ACTUAL behavior (BUG).
+    BUG FIXED: resolve_server_permissions() now correctly applies deny-logic.
+    Denials from roles override @everyone defaults unless another role grants the permission.
     """
 
     def test_muted_role_blocks_send(self, admin_token, testuser_token):
@@ -255,19 +253,15 @@ class TestMutedRoleBlocksSendMessages:
                      json={"roles": []}, headers=h(admin_token))
         requests.delete(f"{BASE_URL}/api/servers/{SERVER_ID}/roles/{role_id}", headers=h(admin_token))
 
-        # BUG: role with send_messages=False doesn't block because roles are additive only
-        # Currently returns 200 (BYPASS) - expected 403
         assert r3.status_code == 403, \
             f"CRITICAL BUG: Role with send_messages=False doesn't block sending! " \
-            f"Got {r3.status_code} instead of 403. " \
-            f"resolve_server_permissions() only applies additive grants - roles can't revoke @everyone defaults."
+            f"Got {r3.status_code} instead of 403."
 
 
 class TestNoFilesRoleBlocksUpload:
     """Test 12: Role 'NoFiles' with attach_files=false → 403 on file upload
     
-    KNOWN BUG: Same as Test 11 - roles cannot revoke @everyone defaults.
-    attach_files=False in a role has no effect.
+    BUG FIXED: Same as Test 11 - roles can now deny permissions.
     """
 
     def test_nofiles_role_blocks_upload(self, admin_token, testuser_token):
@@ -293,7 +287,7 @@ class TestNoFilesRoleBlocksUpload:
 
         assert r3.status_code == 403, \
             f"CRITICAL BUG: Role with attach_files=False doesn't block upload! " \
-            f"Got {r3.status_code} instead of 403. Roles can only grant, not revoke permissions."
+            f"Got {r3.status_code} instead of 403."
 
 
 class TestModRoleAllowsCreateChannel:
@@ -683,3 +677,122 @@ class TestBodyInjectionAttacks:
         data = r.json()
         assert data.get("is_admin") is not True, f"is_admin injection succeeded!"
         print("PASS: admin injection in register ignored")
+
+
+
+# ─── NEW SCENARIOS FROM REVIEW REQUEST ───────────────────────────────────────
+
+class TestGrantBeatsDeny:
+    """Test: Muted(send_messages=False) + VIP(send_messages=True) → 200 (Grant beats Deny)"""
+
+    def test_grant_beats_deny(self, admin_token, testuser_token):
+        # Create Muted role (deny)
+        r1 = requests.post(f"{BASE_URL}/api/servers/{SERVER_ID}/roles",
+                           json={"name": "Muted_GBD", "permissions": {"send_messages": False}},
+                           headers=h(admin_token))
+        assert r1.status_code in (200, 201)
+        muted_id = r1.json()["id"]
+
+        # Create VIP role (grant)
+        r2 = requests.post(f"{BASE_URL}/api/servers/{SERVER_ID}/roles",
+                           json={"name": "VIP_GBD", "permissions": {"send_messages": True}},
+                           headers=h(admin_token))
+        assert r2.status_code in (200, 201)
+        vip_id = r2.json()["id"]
+
+        # Assign both roles
+        r3 = requests.put(f"{BASE_URL}/api/servers/{SERVER_ID}/members/{TESTUSER_ID}",
+                          json={"roles": [muted_id, vip_id]}, headers=h(admin_token))
+        assert r3.status_code == 200
+
+        # Try to send
+        r4 = requests.post(f"{BASE_URL}/api/channels/{CHANNEL_ID}/messages",
+                           json={"content": "VIP beats muted", "type": "text"}, headers=h(testuser_token))
+
+        # Cleanup
+        requests.put(f"{BASE_URL}/api/servers/{SERVER_ID}/members/{TESTUSER_ID}",
+                     json={"roles": []}, headers=h(admin_token))
+        requests.delete(f"{BASE_URL}/api/servers/{SERVER_ID}/roles/{muted_id}", headers=h(admin_token))
+        requests.delete(f"{BASE_URL}/api/servers/{SERVER_ID}/roles/{vip_id}", headers=h(admin_token))
+
+        assert r4.status_code == 200, f"Grant+Deny: Expected 200 (grant beats deny), got {r4.status_code}: {r4.text}"
+        print("PASS: Muted+VIP → grant beats deny → 200")
+
+
+class TestRoleRemovalRestoresPermission:
+    """Test 15: After Muted role removal testuser can send again → 200"""
+
+    def test_role_removal_restores_permission(self, admin_token, testuser_token):
+        # Create and assign Muted role
+        r1 = requests.post(f"{BASE_URL}/api/servers/{SERVER_ID}/roles",
+                           json={"name": "Muted_RR", "permissions": {"send_messages": False}},
+                           headers=h(admin_token))
+        assert r1.status_code in (200, 201)
+        muted_id = r1.json()["id"]
+
+        requests.put(f"{BASE_URL}/api/servers/{SERVER_ID}/members/{TESTUSER_ID}",
+                     json={"roles": [muted_id]}, headers=h(admin_token))
+
+        # Verify blocked
+        r_block = requests.post(f"{BASE_URL}/api/channels/{CHANNEL_ID}/messages",
+                                json={"content": "Should be blocked", "type": "text"}, headers=h(testuser_token))
+        assert r_block.status_code == 403, f"Role should block send, got {r_block.status_code}"
+
+        # Remove role
+        requests.put(f"{BASE_URL}/api/servers/{SERVER_ID}/members/{TESTUSER_ID}",
+                     json={"roles": []}, headers=h(admin_token))
+
+        # Now should work
+        r_after = requests.post(f"{BASE_URL}/api/channels/{CHANNEL_ID}/messages",
+                                json={"content": "After role removal", "type": "text"}, headers=h(testuser_token))
+
+        # Cleanup role
+        requests.delete(f"{BASE_URL}/api/servers/{SERVER_ID}/roles/{muted_id}", headers=h(admin_token))
+
+        assert r_after.status_code == 200, f"Expected 200 after role removal, got {r_after.status_code}: {r_after.text}"
+        print("PASS: After role removal → can send → 200")
+
+
+class TestViewerContextForTestuser:
+    """Test 16: GET /api/servers/{id}/viewer-context → manage_channels=false for testuser"""
+
+    def test_viewer_context_manage_channels_false(self, testuser_token):
+        r = requests.get(f"{BASE_URL}/api/servers/{SERVER_ID}/viewer-context", headers=h(testuser_token))
+        assert r.status_code == 200
+        sp = r.json().get("server_permissions", {})
+        assert sp.get("manage_channels") is False, f"manage_channels should be False, got {sp.get('manage_channels')}"
+        print("PASS: viewer-context manage_channels=false for testuser")
+
+
+class TestChannelAccessEndpoint:
+    """Test 18: GET /api/channels/{id}/access without manage_channels → 403"""
+
+    def test_channel_access_requires_manage_channels(self, testuser_token):
+        r = requests.get(f"{BASE_URL}/api/channels/{CHANNEL_ID}/access", headers=h(testuser_token))
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
+        print("PASS: GET /api/channels/{id}/access requires manage_channels → 403")
+
+
+class TestEmojiListMembership:
+    """Test 19: GET /api/emojis/{server_id}/list without membership → 403"""
+
+    def test_emoji_list_requires_membership(self, testuser_token, outsider):
+        # outsider is NOT a member of the main server - try to list emojis from main server
+        r2 = requests.get(f"{BASE_URL}/api/servers/{SERVER_ID}/emojis", headers=h(outsider["token"]))
+        assert r2.status_code == 403, f"Expected 403 for non-member emoji list, got {r2.status_code}: {r2.text}"
+        print("PASS: emoji list without membership → 403")
+
+
+class TestMassAbuse50Requests:
+    """Test 20: 50 rapid requests on 403 endpoint → rate-limit, no bypass"""
+
+    def test_mass_abuse_no_bypass(self, testuser_token):
+        results = []
+        for _ in range(50):
+            r = requests.delete(f"{BASE_URL}/api/servers/{SERVER_ID}", headers=h(testuser_token))
+            results.append(r.status_code)
+        # All should be 403 (permission denied) or 429 (rate limited) - no 200/201
+        bypasses = [s for s in results if s not in (403, 429)]
+        assert not bypasses, f"Permission bypass or unexpected response: {bypasses} in {results}"
+        has_rate_limit = any(s == 429 for s in results)
+        print(f"PASS: 50 rapid requests → all blocked. Rate-limited: {has_rate_limit}. Statuses: {set(results)}")

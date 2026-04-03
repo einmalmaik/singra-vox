@@ -58,16 +58,39 @@ def resolve_server_permissions(
     if not member or member.get("is_banned"):
         return {**NO_MEMBER_PERMISSIONS}
 
+    # Server-Owner hat immer alle Rechte, unabhängig von Rollen
     if server_owner_id and server_owner_id == user_id:
         return {**ALL_PERMISSIONS}
 
-    resolved_permissions = _clone_permissions(default_role_permissions)
-    for role_permission_set in role_permissions or []:
-        for permission, allowed in (role_permission_set or {}).items():
-            if permission in resolved_permissions and allowed:
-                resolved_permissions[permission] = True
+    # Schritt 1: Basis = @everyone-Berechtigungen
+    resolved = _clone_permissions(default_role_permissions)
 
-    return resolved_permissions
+    # Schritt 2: Alle custom Rollen auswerten
+    # Algorithmus (Discord-Prinzip mit praktischen Erweiterungen):
+    #   - GRANT (True) von IRGENDEINER Rolle    → Berechtigung = True  (additive)
+    #   - DENY  (False) von Rollen ohne Grant   → überschreibt @everyone → False
+    #   - Keine Rolle setzt Wert                → @everyone-Wert bleibt
+    grants: set = set()
+    denials: set = set()
+
+    for role_perm_set in role_permissions or []:
+        for permission, allowed in (role_perm_set or {}).items():
+            if permission not in resolved:
+                continue
+            if allowed is True:
+                grants.add(permission)
+            elif allowed is False:
+                denials.add(permission)
+
+    # Grants haben Vorrang über alles (additive)
+    for p in grants:
+        resolved[p] = True
+
+    # Denials überschreiben @everyone, aber nur wenn kein anderes Grant vorliegt
+    for p in denials - grants:
+        resolved[p] = False
+
+    return resolved
 
 
 def _normalize_override_permissions(permissions: Optional[dict]) -> dict:
