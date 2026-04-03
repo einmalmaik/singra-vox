@@ -108,6 +108,7 @@ export default function ChannelSidebar({
   onRefreshServers,
   serverSettingsRequest,
 }) {
+  console.log('ChannelSidebar rendering:', channels?.length, 'channels', members?.length, 'members');
   const { t } = useTranslation();
   const { config } = useRuntime();
   const { ready: e2eeReady, isDesktopCapable } = useE2EE();
@@ -978,18 +979,18 @@ export default function ChannelSidebar({
             </ContextMenuTrigger>
           )}
         </SortableChannelItem>
-        {capabilities.canManageChannels && (
-          <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
-            {channel.type === "category" ? (
-            <>
-              <ContextMenuItem onClick={() => openCreateDialog("text", channel.id)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
-              <ContextMenuItem onClick={() => openCreateDialog("voice", channel.id)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
-              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameCategoryAction")}</ContextMenuItem>
-              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteCategoryAction")}</ContextMenuItem>
-            </>
-          ) : (
-            <>
-              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameChannelAction")}</ContextMenuItem>
+        <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
+          {capabilities.canManageChannels ? (
+            channel.type === "category" ? (
+              <>
+                <ContextMenuItem onClick={() => openCreateDialog("text", channel.id)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+                <ContextMenuItem onClick={() => openCreateDialog("voice", channel.id)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
+                <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameCategoryAction")}</ContextMenuItem>
+                <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteCategoryAction")}</ContextMenuItem>
+              </>
+            ) : (
+              <>
+                <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameChannelAction")}</ContextMenuItem>
                 {channel.parent_id && (
                   <ContextMenuItem onClick={() => { void moveChannelToRoot(channel.id); }}>
                     {t("serverSettings.moveToRoot")}
@@ -998,9 +999,13 @@ export default function ChannelSidebar({
                 <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteChannelAction")}</ContextMenuItem>
                 <ContextMenuItem onClick={() => setServerSettingsOpen(true)}>{t("serverSettings.editChannel")}</ContextMenuItem>
               </>
-            )}
-          </ContextMenuContent>
-        )}
+            )
+          ) : (
+            <ContextMenuItem disabled className="text-[#71717A] focus:text-[#71717A] focus:bg-transparent cursor-default">
+              {t("common.noActionsAvailable", { defaultValue: "No actions available" })}
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
       </ContextMenu>
     );
   };
@@ -1228,13 +1233,19 @@ export default function ChannelSidebar({
                 {server?.name}
               </h3>
             </ContextMenuTrigger>
-            {capabilities.canManageChannels && (
-              <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
-                <ContextMenuItem onClick={() => openCreateDialog("category", null)}>{t("serverSettings.createCategory")}</ContextMenuItem>
-                <ContextMenuItem onClick={() => openCreateDialog("text", null)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
-                <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
-              </ContextMenuContent>
-            )}
+            <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
+              {capabilities.canManageChannels ? (
+                <>
+                  <ContextMenuItem onClick={() => openCreateDialog("category", null)}>{t("serverSettings.createCategory")}</ContextMenuItem>
+                  <ContextMenuItem onClick={() => openCreateDialog("text", null)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+                  <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
+                </>
+              ) : (
+                <ContextMenuItem disabled className="text-[#71717A] focus:text-[#71717A] focus:bg-transparent cursor-default">
+                  {t("common.noActionsAvailable", { defaultValue: "No actions available" })}
+                </ContextMenuItem>
+              )}
+            </ContextMenuContent>
           </ContextMenu>
           {capabilities.canOpenServerSettings && (
             <button
@@ -1367,13 +1378,19 @@ export default function ChannelSidebar({
                   )}
                 </div>
               </ContextMenuTrigger>
-              {capabilities.canManageChannels && (
-                <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
-                  <ContextMenuItem onClick={() => openCreateDialog("category", null)}>{t("serverSettings.createCategory")}</ContextMenuItem>
-                  <ContextMenuItem onClick={() => openCreateDialog("text", null)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
-                  <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
-                </ContextMenuContent>
-              )}
+              <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
+                {capabilities.canManageChannels ? (
+                  <>
+                    <ContextMenuItem onClick={() => openCreateDialog("category", null)}>{t("serverSettings.createCategory")}</ContextMenuItem>
+                    <ContextMenuItem onClick={() => openCreateDialog("text", null)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
+                    <ContextMenuItem onClick={() => openCreateDialog("voice", null)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
+                  </>
+                ) : (
+                  <ContextMenuItem disabled className="text-[#71717A] focus:text-[#71717A] focus:bg-transparent cursor-default">
+                    {t("common.noActionsAvailable", { defaultValue: "No actions available" })}
+                  </ContextMenuItem>
+                )}
+              </ContextMenuContent>
             </ContextMenu>
 
             <DragOverlay>
