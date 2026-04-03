@@ -3339,7 +3339,7 @@ async def startup():
     await db.e2ee_blobs.create_index("id", unique=True)
     await db.e2ee_blobs.create_index([("scope_kind", 1), ("scope_id", 1), ("created_at", -1)])
     await db.e2ee_media_keys.create_index([("channel_id", 1), ("created_at", -1)])
-    await db.push_subscriptions.create_index([("user_id", 1), ("endpoint", 1)], unique=True)
+    await db.push_subscriptions.create_index([("user_id", 1), ("subscription.endpoint", 1)], unique=True)
     await db.status_history.create_index([("user_id", 1), ("created_at", -1)])
     await create_phase2_indexes()
     await create_phase3_indexes()

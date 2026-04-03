@@ -48,7 +48,19 @@ def _bucket_name() -> str:
     return _storage_config()["bucket"]
 
 
+def _has_s3_credentials() -> bool:
+    cfg = _storage_config()
+    return bool(cfg.get("endpoint_url") or (cfg.get("aws_access_key_id") and cfg.get("aws_secret_access_key")))
+
+
 def _ensure_bucket_sync() -> None:
+    if not _has_s3_credentials():
+        import logging
+        logging.getLogger(__name__).warning(
+            "S3 credentials not configured – encrypted blob storage disabled. "
+            "Set S3_ENDPOINT_URL + S3_ACCESS_KEY + S3_SECRET_KEY to enable."
+        )
+        return
     client = _build_client()
     bucket = _bucket_name()
     try:
@@ -57,9 +69,6 @@ def _ensure_bucket_sync() -> None:
     except ClientError:
         pass
 
-    # Local MinIO accepts CreateBucket without a region constraint. AWS S3 in
-    # us-east-1 behaves the same, while other regions require the explicit
-    # location block.
     cfg = _storage_config()
     create_kwargs = {"Bucket": bucket}
     if cfg["region_name"] and cfg["region_name"] != "us-east-1":
@@ -74,6 +83,8 @@ async def ensure_bucket() -> None:
 
 
 def _put_blob_sync(*, object_key: str, data: bytes, content_type: Optional[str]) -> None:
+    if not _has_s3_credentials():
+        raise RuntimeError("Encrypted blob storage is not configured (S3 credentials missing)")
     client = _build_client()
     extra_args = {}
     if content_type:
@@ -91,6 +102,8 @@ async def put_blob(*, object_key: str, data: bytes, content_type: Optional[str] 
 
 
 def _get_blob_sync(*, object_key: str) -> bytes:
+    if not _has_s3_credentials():
+        raise RuntimeError("Encrypted blob storage is not configured (S3 credentials missing)")
     client = _build_client()
     response = client.get_object(Bucket=_bucket_name(), Key=object_key)
     return response["Body"].read()

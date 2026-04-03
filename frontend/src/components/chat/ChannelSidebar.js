@@ -108,7 +108,6 @@ export default function ChannelSidebar({
   onRefreshServers,
   serverSettingsRequest,
 }) {
-  console.log('ChannelSidebar rendering:', channels?.length, 'channels', members?.length, 'members');
   const { t } = useTranslation();
   const { config } = useRuntime();
   const { ready: e2eeReady, isDesktopCapable } = useE2EE();
