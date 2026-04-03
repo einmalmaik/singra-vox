@@ -45,6 +45,7 @@ from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc, new_id
 from app.core.constants import MAX_UPLOAD_BYTES, INLINE_MIME_PREFIXES
+from app.permissions import has_channel_permission, assert_channel_permission
 
 log = logging.getLogger(__name__)
 
@@ -192,18 +193,16 @@ async def get_file(file_id: str, request: Request) -> StreamingResponse:
     if not record:
         raise HTTPException(404, "File not found")
 
-    # Permission check for private channel attachments
+    # Permission check: channel attachments require read_messages on the channel
     if not record.get("is_public") and record.get("channel_id"):
         channel = await db.channels.find_one(
             {"id": record["channel_id"]}, {"_id": 0}
         )
-        if channel and channel.get("is_private"):
-            from app.permissions import has_channel_permission
-            perms_ok = await has_channel_permission(
-                db, user["id"], channel, "read_messages"
+        if channel:
+            await assert_channel_permission(
+                db, user["id"], channel, "read_messages",
+                "Keine Berechtigung, Dateien aus diesem Kanal abzurufen"
             )
-            if not perms_ok:
-                raise HTTPException(403, "You do not have access to this file")
 
     path = _storage_path(file_id, record["created_at"])
     if not path.exists():

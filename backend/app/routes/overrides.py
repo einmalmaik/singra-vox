@@ -21,7 +21,11 @@ from pydantic import BaseModel
 from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc, new_id
-from app.permissions import has_server_permission
+from app.permissions import (
+    assert_channel_permission,
+    assert_server_permission,
+    has_server_permission,
+)
 
 router = APIRouter(prefix="/api", tags=["overrides"])
 
@@ -45,8 +49,15 @@ class OverrideInput(BaseModel):
 
 @router.get("/channels/{channel_id}/overrides")
 async def list_overrides(channel_id: str, request: Request) -> list:
-    """List all permission overrides for a channel."""
-    await _current_user(request)
+    """List all permission overrides for a channel (requires manage_channels)."""
+    user = await _current_user(request)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    await assert_server_permission(
+        db, user["id"], channel["server_id"], "manage_channels",
+        "Keine Berechtigung, Kanal-Einstellungen zu lesen"
+    )
     return await db.channel_overrides.find(
         {"channel_id": channel_id}, {"_id": 0}
     ).to_list(50)
@@ -94,8 +105,15 @@ async def delete_override(
 
 @router.get("/channels/{channel_id}/access")
 async def get_access_list(channel_id: str, request: Request) -> list:
-    """Return the access-control list for a private channel."""
-    await _current_user(request)
+    """Return the access-control list for a private channel (requires manage_channels)."""
+    user = await _current_user(request)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    await assert_server_permission(
+        db, user["id"], channel["server_id"], "manage_channels",
+        "Keine Berechtigung, Kanal-Zugriffsliste zu lesen"
+    )
     return await db.channel_access.find(
         {"channel_id": channel_id}, {"_id": 0}
     ).to_list(200)
@@ -127,9 +145,14 @@ async def set_access_list(channel_id: str, request: Request) -> dict:
 
 @router.post("/servers/{server_id}/channels/temp")
 async def create_temporary_channel(server_id: str, request: Request) -> dict:
-    """Create a short-lived temporary channel (e.g. a quick event room)."""
+    """Create a short-lived temporary channel (requires manage_channels)."""
     user = await _current_user(request)
     body = await request.json()
+
+    await assert_server_permission(
+        db, user["id"], server_id, "manage_channels",
+        "Keine Berechtigung, Kanäle zu erstellen"
+    )
 
     position = await db.channels.count_documents({"server_id": server_id})
     channel = {

@@ -6,28 +6,34 @@ from fastapi import HTTPException
 
 
 DEFAULT_PERMISSIONS: Dict[str, bool] = {
-    "manage_server": False,
-    "manage_channels": False,
-    "manage_roles": False,
-    "manage_members": False,
-    "kick_members": False,
-    "ban_members": False,
-    "send_messages": True,
-    "read_messages": True,
-    "read_message_history": True,
-    "manage_messages": False,
-    "attach_files": True,
-    "mention_everyone": False,
-    "join_voice": True,
-    "speak": True,
-    "stream": True,
-    "mute_members": False,
-    "deafen_members": False,
-    "priority_speaker": False,
-    "create_invites": True,
-    "pin_messages": False,
-    "manage_emojis": False,
-    "manage_webhooks": False,
+    # ── Server-Verwaltung ──────────────────────────────────────────────────────
+    "manage_server": False,        # Server-Name, Icon, Einstellungen ändern
+    "manage_channels": False,      # Kanäle erstellen, löschen, umbenennen
+    "manage_roles": False,         # Rollen erstellen, bearbeiten, löschen
+    "manage_members": False,       # Spitznamen anderer ändern
+    "kick_members": False,         # Mitglieder vom Server entfernen
+    "ban_members": False,          # Mitglieder dauerhaft sperren
+    "manage_webhooks": False,      # Webhooks verwalten
+    "manage_emojis": False,        # Custom-Emojis verwalten
+    "create_invites": True,        # Einladungs-Links erstellen
+
+    # ── Kanal / Nachrichten ────────────────────────────────────────────────────
+    "view_channels": True,         # Kanäle sehen (Sidebar)
+    "read_messages": True,         # Nachrichten + Datei-Anhänge lesen / sehen
+    "read_message_history": True,  # Ältere Nachrichten lesen
+    "send_messages": True,         # Text-Nachrichten senden
+    "attach_files": True,          # Dateien + Bilder hochladen und senden
+    "mention_everyone": False,     # @everyone / @here verwenden
+    "manage_messages": False,      # Nachrichten anderer löschen / bearbeiten
+    "pin_messages": False,         # Nachrichten anpinnen / auslösen
+
+    # ── Voice / Video ──────────────────────────────────────────────────────────
+    "join_voice": True,            # Voice-Kanälen beitreten
+    "speak": True,                 # Mikrofon nutzen
+    "stream": True,                # Kamera / Bildschirm teilen
+    "mute_members": False,         # Andere stumm schalten
+    "deafen_members": False,       # Andere taubstumm schalten
+    "priority_speaker": False,     # Prioritätssprecher-Status
 }
 ALL_PERMISSIONS: Dict[str, bool] = {permission: True for permission in DEFAULT_PERMISSIONS}
 NO_MEMBER_PERMISSIONS: Dict[str, bool] = {permission: False for permission in DEFAULT_PERMISSIONS}
@@ -338,6 +344,50 @@ async def list_channel_user_ids(db, channel: dict) -> list[str]:
         allowed.add(server["owner_id"])
 
     return list(allowed)
+
+
+# ── Convenience assert-helpers ────────────────────────────────────────────────
+# Every route should call these instead of inlining the HTTPException logic.
+# Error messages intentionally include the required permission name so frontend
+# code and API consumers can display a meaningful message.
+
+async def assert_server_permission(
+    db,
+    user_id: str,
+    server_id: str,
+    permission: str,
+    detail: Optional[str] = None,
+) -> None:
+    """Raise HTTP 403 when *user_id* lacks *permission* in *server_id*."""
+    if not await has_server_permission(db, user_id, server_id, permission):
+        raise HTTPException(
+            403, detail or f"Berechtigung fehlt: {permission}"
+        )
+
+
+async def assert_channel_permission(
+    db,
+    user_id: str,
+    channel: dict,
+    permission: str,
+    detail: Optional[str] = None,
+) -> None:
+    """Raise HTTP 403 when *user_id* lacks *permission* in *channel*."""
+    if not await has_channel_permission(db, user_id, channel, permission):
+        raise HTTPException(
+            403, detail or f"Berechtigung fehlt: {permission}"
+        )
+
+
+async def assert_server_member(db, user_id: str, server_id: str) -> dict:
+    """Return the member document or raise HTTP 403 if not a member."""
+    member = await db.server_members.find_one(
+        {"user_id": user_id, "server_id": server_id, "is_banned": {"$ne": True}},
+        {"_id": 0},
+    )
+    if not member:
+        raise HTTPException(403, "Kein Mitglied dieses Servers")
+    return member
 
 
 async def build_viewer_context(db, user_id: str, server_id: str) -> dict:

@@ -10,12 +10,16 @@ Routes
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc
-from app.permissions import get_message_history_cutoff, has_channel_permission
+from app.permissions import (
+    get_message_history_cutoff,
+    assert_channel_permission,
+    has_channel_permission,
+)
 
 router = APIRouter(prefix="/api", tags=["unread"])
 
@@ -108,6 +112,13 @@ async def get_unread(request: Request) -> dict:
 async def mark_channel_read(channel_id: str, request: Request) -> dict:
     """Mark all messages in a channel as read for the current user."""
     user = await _current_user(request)
+    channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+    await assert_channel_permission(
+        db, user["id"], channel, "read_messages",
+        "Keine Leseberechtigung für diesen Kanal"
+    )
     await db.read_states.update_one(
         {"user_id": user["id"], "channel_id": channel_id},
         {"$set": {"last_read_at": now_utc()}},

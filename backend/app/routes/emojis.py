@@ -21,7 +21,10 @@ from fastapi.responses import Response
 from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc, new_id
-from app.permissions import has_server_permission
+from app.permissions import (
+    assert_server_member,
+    has_server_permission,
+)
 
 router = APIRouter(prefix="/api", tags=["emojis"])
 
@@ -84,8 +87,9 @@ async def upload_emoji(server_id: str, request: Request) -> dict:
 
 @router.get("/servers/{server_id}/emojis")
 async def list_server_emojis(server_id: str, request: Request) -> list:
-    """List all custom emojis for a server (metadata only, no image data)."""
-    await _current_user(request)
+    """List all custom emojis for a server. Requires server membership."""
+    user = await _current_user(request)
+    await assert_server_member(db, user["id"], server_id)
     emojis = await db.server_emojis.find(
         {"server_id": server_id}, {"_id": 0, "data": 0}
     ).to_list(100)

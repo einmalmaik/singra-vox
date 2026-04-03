@@ -128,7 +128,8 @@ async def delete_account(request: Request) -> dict:
         await db[coll].delete_many({"user_id": uid})
 
     # 6. Delete uploaded files (metadata + disk)
-    import pathlib, os
+    import pathlib
+    import os
     upload_root = pathlib.Path(os.environ.get("UPLOAD_ROOT", "/app/backend/storage/uploads"))
     file_records = await db.files.find({"uploaded_by": uid}, {"_id": 0}).to_list(500)
     for rec in file_records:

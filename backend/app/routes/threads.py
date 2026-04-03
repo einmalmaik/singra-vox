@@ -20,6 +20,7 @@ from app.core.constants import E2EE_DEVICE_HEADER
 from app.pagination import clamp_page_limit
 from app.permissions import (
     assert_channel_access,
+    assert_channel_permission,
     has_channel_permission,
     get_message_history_cutoff,
 )
@@ -102,6 +103,15 @@ async def reply_in_thread(channel_id: str, message_id: str, request: Request) ->
         raise HTTPException(404, "Channel not found")
 
     await assert_channel_access(db, user["id"], channel)
+    await assert_channel_permission(
+        db, user["id"], channel, "send_messages",
+        "Keine Berechtigung, Nachrichten in diesem Kanal zu senden"
+    )
+    if body.get("attachments"):
+        await assert_channel_permission(
+            db, user["id"], channel, "attach_files",
+            "Keine Berechtigung, Dateien in diesem Kanal hochzuladen"
+        )
 
     is_e2ee = bool(channel.get("is_private"))
     content = body.get("content", "").strip()
@@ -161,7 +171,19 @@ async def reply_in_thread(channel_id: str, message_id: str, request: Request) ->
 @router.get("/messages/{message_id}/revisions")
 async def get_revisions(message_id: str, request: Request) -> list:
     """Return edit history for a message."""
-    await _current_user(request)
+    user = await _current_user(request)
+
+    parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not parent:
+        raise HTTPException(404, "Message not found")
+
+    channel = await db.channels.find_one({"id": parent.get("channel_id", "")}, {"_id": 0})
+    if channel:
+        await assert_channel_permission(
+            db, user["id"], channel, "read_messages",
+            "Keine Leseberechtigung für diesen Kanal"
+        )
+
     return await db.message_revisions.find(
         {"message_id": message_id}, {"_id": 0}
     ).sort("edited_at", -1).to_list(50)
