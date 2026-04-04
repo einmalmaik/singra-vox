@@ -247,7 +247,13 @@ export function E2EEProvider({ children }) {
       }
     }, 2000);
 
-    return () => clearTimeout(timer);
+    // WICHTIG: Ref zurücksetzen wenn der Effect neu läuft (z.B. wenn initializeE2EE
+    // sich durch Config-Laden ändert) – sonst bleibt autoInitRef.current=true und
+    // der Timer wird gelöscht ohne neu zu starten.
+    return () => {
+      clearTimeout(timer);
+      autoInitRef.current = false;
+    };
   }, [loading, user, state.enabled, identity, initializeE2EE]);
 
   // Auto-Restore E2EE auf neuem Gerät (E2EE aktiv, aber keine lokale Identity)
@@ -479,6 +485,11 @@ export function E2EEProvider({ children }) {
   ]);
 
   return <E2EEContext.Provider value={value}>{children}</E2EEContext.Provider>;
+}
+
+// Hilfsfunktion für E2EE-Passphrase-Export (liest aus localStorage)
+export function getE2EEAutoPassphrase() {
+  return getStoredAutoPassphrase();
 }
 
 export function useE2EE() {

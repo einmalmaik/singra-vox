@@ -34,15 +34,28 @@ export default function VoiceMediaStage({
 
     const videoElement = videoRef.current;
 
+    // Attach-Versuch mit Retry falls der Track noch nicht verfügbar ist
+    let detach = null;
+    let retryTimer = null;
+
+    const tryAttach = () => {
+      detach = voiceEngineRef.current?.attachParticipantMediaElement(
+        participantId,
+        source,
+        videoElement,
+      );
+      if (!detach && !retryTimer) {
+        // Track noch nicht verfügbar – in 500ms nochmal versuchen
+        retryTimer = setTimeout(tryAttach, 500);
+      }
+    };
+
+    tryAttach();
+
     // The media element stays owned by React while the LiveKit track is
     // attached and detached on demand. This keeps stage switches predictable.
-    const detach = voiceEngineRef.current.attachParticipantMediaElement(
-      participantId,
-      source,
-      videoElement,
-    );
-
     return () => {
+      clearTimeout(retryTimer);
       videoElement?.pause?.();
       detach?.();
     };

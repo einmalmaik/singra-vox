@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowsDownUp, ChatCircleDots, List, Paperclip, ShieldCheck, UsersThree, X } from "@phosphor-icons/react";
+import { ArrowsDownUp, ChatCircleDots, List, MagnifyingGlass, Paperclip, Plus, ShieldCheck, UsersThree, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
@@ -117,6 +117,30 @@ function mergeMessages(previousMessages, nextMessage) {
   ));
 }
 
+// Spielt einen kurzen Ton über die Web Audio API
+function playVoiceTone(audioCtxRef, type) {
+  try {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    const ctx = audioCtxRef.current;
+    if (ctx.state === "suspended") ctx.resume();
+    const freqs = type === "join" ? [880, 1047] : [1047, 659];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.12;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.08, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.start(t); osc.stop(t + 0.18);
+    });
+  } catch { /* Kein Sound ohne Nutzerinteraktion */ }
+}
+
 export default function MainLayout() {
   const { t } = useTranslation();
   const { user, token, logout, setUser, clearAuthState } = useAuth();
@@ -133,6 +157,7 @@ export default function MainLayout() {
   const reconnectAttempt = useRef(0);
   const heartbeatTimer = useRef(null);
   const sessionInvalidatedRef = useRef(false);
+  const audioCtxRef = useRef(null);
   const voiceRef = useRef(null);
   const currentServerRef = useRef(null);
   const currentChannelRef = useRef(null);
@@ -174,6 +199,10 @@ export default function MainLayout() {
   const [unreadMap, setUnreadMap] = useState({});
   const [serverUnreadMap, setServerUnreadMap] = useState({});
   const [dmUnread, setDmUnread] = useState(0);
+  const [dmSearchOpen, setDmSearchOpen] = useState(false);
+  const [dmSearchQuery, setDmSearchQuery] = useState("");
+  const [dmSearchResults, setDmSearchResults] = useState([]);
+  const [dmSearchLoading, setDmSearchLoading] = useState(false);
 
   useEffect(() => {
     currentServerRef.current = currentServer;
@@ -441,6 +470,9 @@ export default function MainLayout() {
     if (!dmUser) {
       return;
     }
+    setDmSearchOpen(false);
+    setDmSearchQuery("");
+    setDmSearchResults([]);
     setView("dm");
     setCurrentDmUser(dmUser);
     const cachedMessages = getCachedDmMessages(user?.id, dmUser.id);
@@ -485,6 +517,26 @@ export default function MainLayout() {
     setShowMembers(false);
     void loadDmConversations();
   }, [loadDmConversations]);
+
+  // DM Benutzersuche mit Debounce
+  useEffect(() => {
+    if (!dmSearchOpen || dmSearchQuery.length < 2) {
+      setDmSearchResults([]);
+      return;
+    }
+    setDmSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.get(`/users/search?q=${encodeURIComponent(dmSearchQuery)}`);
+        setDmSearchResults((res.data || []).filter((u) => u.id !== user?.id));
+      } catch {
+        setDmSearchResults([]);
+      } finally {
+        setDmSearchLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [dmSearchQuery, dmSearchOpen, user?.id]);
 
   const handleRemovedFromServer = useCallback(async (serverId, reasonLabel) => {
     if (voiceRef.current) {
@@ -696,10 +748,14 @@ export default function MainLayout() {
 
       case "voice_join":
         setChannels((previous) => upsertVoiceState(previous, data.channel_id, data.state));
+        // Beitrittston nur für andere Nutzer (nicht für den eigenen Join)
+        if (data.state?.user_id !== user?.id) playVoiceTone(audioCtxRef, "join");
         break;
 
       case "voice_leave":
         setChannels((previous) => removeVoiceUser(previous, data.user_id, data.channel_id));
+        // Abgangston nur für andere Nutzer (nicht für den eigenen Leave)
+        if (data.user_id !== user?.id) playVoiceTone(audioCtxRef, "leave");
         break;
 
       case "voice_state_update":
@@ -1105,7 +1161,7 @@ export default function MainLayout() {
       ) : view === "dm" ? (
         <>
           <div className="workspace-panel w-[280px] flex flex-col overflow-hidden" data-testid="dm-sidebar">
-            {/* Header mit Sortierbutton */}
+            {/* Header mit Sortierbutton und neuem DM-Button */}
             <div className="h-12 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0 gap-2">
               <h3 className="text-sm font-bold text-white flex-1" style={{ fontFamily: "Manrope" }}>{t("server.directMessages")}</h3>
               <button
@@ -1117,7 +1173,63 @@ export default function MainLayout() {
                 <ArrowsDownUp size={14} />
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-cyan-500" style={{ display: dmSortMode !== "recent" ? "block" : "none" }} />
               </button>
+              <button
+                onClick={() => { setDmSearchOpen((o) => !o); setDmSearchQuery(""); setDmSearchResults([]); }}
+                title="Neue Direktnachricht"
+                className={`p-1.5 rounded-lg transition-colors ${dmSearchOpen ? "bg-cyan-500/15 text-cyan-400" : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"}`}
+                data-testid="dm-new-btn"
+              >
+                <Plus size={14} />
+              </button>
             </div>
+
+            {/* Benutzersuche */}
+            {dmSearchOpen && (
+              <div className="px-3 pt-2 pb-1 border-b workspace-divider bg-zinc-900/15 shrink-0">
+                <div className="relative">
+                  <MagnifyingGlass size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
+                  <input
+                    autoFocus
+                    type="text"
+                    value={dmSearchQuery}
+                    onChange={(e) => setDmSearchQuery(e.target.value)}
+                    placeholder="Nutzer suchen…"
+                    className="w-full rounded-xl bg-zinc-900/70 border border-white/8 pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-zinc-600 outline-none focus:border-cyan-400/50 focus:ring-1 focus:ring-cyan-400/20"
+                    data-testid="dm-search-input"
+                  />
+                </div>
+                {dmSearchLoading && (
+                  <p className="text-xs text-zinc-600 mt-1 px-1">Suche…</p>
+                )}
+                {!dmSearchLoading && dmSearchQuery.length >= 2 && dmSearchResults.length === 0 && (
+                  <p className="text-xs text-zinc-600 mt-1 px-1">Keine Nutzer gefunden</p>
+                )}
+                {dmSearchResults.length > 0 && (
+                  <div className="mt-1 space-y-0.5 max-h-[140px] overflow-y-auto">
+                    {dmSearchResults.map((u) => (
+                      <button
+                        key={u.id}
+                        onClick={() => void selectDmUser(u)}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left hover:bg-white/5 text-zinc-300 hover:text-white transition-colors"
+                        data-testid={`dm-search-result-${u.username}`}
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden">
+                          {u.avatar_url ? (
+                            <img src={resolveAssetUrl(u.avatar_url, config?.assetBase)} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            u.display_name?.[0]?.toUpperCase() || "?"
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate">{u.display_name || u.username}</p>
+                          <p className="text-xs text-zinc-600 truncate">@{u.username}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-3 space-y-1" data-testid="dm-conversations-list">
               {/* Sortierte Konversationen */}

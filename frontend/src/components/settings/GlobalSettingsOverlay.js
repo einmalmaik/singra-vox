@@ -22,7 +22,7 @@ import api from "@/lib/api";
 import { formatAppError } from "@/lib/appErrors";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
-import { useE2EE } from "@/contexts/E2EEContext";
+import { useE2EE, getE2EEAutoPassphrase } from "@/contexts/E2EEContext";
 import SettingsOverlayShell from "@/components/settings/SettingsOverlayShell";
 import E2EEStatus from "@/components/security/E2EEStatus";
 import { Button } from "@/components/ui/button";
@@ -202,6 +202,7 @@ export default function GlobalSettingsOverlay({
   const [confirmRecoveryPassphrase, setConfirmRecoveryPassphrase] = useState("");
   const [e2eeSubmitting, setE2eeSubmitting] = useState(false);
   const [currentDeviceFingerprint, setCurrentDeviceFingerprint] = useState("");
+  const [showPassphrase, setShowPassphrase] = useState(false);
   const [authSessions, setAuthSessions] = useState([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [sessionActionTarget, setSessionActionTarget] = useState("");
@@ -1145,7 +1146,7 @@ export default function GlobalSettingsOverlay({
 
                 {/* Erklärungstext – warum E2EE standardmäßig aktiv & kein Toggle */}
                 <div className="mt-3 rounded-2xl border border-white/6 bg-zinc-900/40 px-4 py-3 space-y-2 text-xs text-zinc-400">
-                  <p><span className="font-semibold text-zinc-200">Warum immer aktiv?</span> E2EE schützt deine Nachrichten und Dateien so, dass nur du und dein Gesprächspartner sie lesen können – nicht einmal der Server-Betreiber. Deshalb ist sie nicht deaktivierbar.</p>
+                  <p><span className="font-semibold text-zinc-200">Warum immer aktiv?</span> Alle Nachrichten und Dateien werden <span className="text-emerald-400 font-medium">direkt in deinem Browser</span> ver- und entschlüsselt, bevor sie den Server verlassen. Der Server – und damit auch die Datenbank – erhält ausschließlich unlesbaren Geheimtext. Selbst der Betreiber dieser Instanz kann <strong className="text-white">keine einzige Nachricht lesen</strong>, da der geheime Schlüssel diesen Rechner niemals verlässt.</p>
                   <p><span className="font-semibold text-zinc-200">Warum nicht sofort beim ersten Start?</span> Die Schlüsselgenerierung (Argon2id / NaCl) läuft einmalig im Hintergrund, 2 Sekunden nach dem Login. Das verhindert, dass die App beim ersten Start einfriert.</p>
                   <p><span className="font-semibold text-zinc-200">Neues Gerät?</span> Deine gespeicherte Gerät-Passphrase wird automatisch verwendet. Wenn du ein komplett neues Gerät nutzt (ohne lokale Daten), wirst du gebeten, das Gerät manuell zu bestätigen.</p>
                 </div>
@@ -1213,6 +1214,80 @@ export default function GlobalSettingsOverlay({
               </div>
             </div>
           </section>
+
+          {/* E2EE Passphrase Export */}
+          {e2eeEnabled && (
+            <section className="workspace-card p-5" data-testid="e2ee-passphrase-export">
+              <div className="flex items-start gap-3">
+                <ShieldCheck size={20} className="mt-0.5 text-cyan-300" />
+                <div className="flex-1">
+                  <h3 className="text-base font-bold" style={{ fontFamily: "Manrope" }}>Gerät-Passphrase exportieren</h3>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    Exportiere deine Geräte-Passphrase für ein neues Gerät oder als Backup. <span className="text-amber-400 font-medium">Teile sie niemals mit anderen Personen.</span>
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {showPassphrase ? (
+                      <>
+                        <div className="rounded-2xl border border-white/10 bg-zinc-950/80 px-4 py-3">
+                          <p className="text-xs font-mono break-all text-cyan-300 select-all" data-testid="e2ee-passphrase-value">
+                            {getE2EEAutoPassphrase() || "—"}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-xl border-white/10 bg-white/[0.03] text-zinc-300 hover:bg-white/8 text-xs"
+                            onClick={() => {
+                              const pp = getE2EEAutoPassphrase();
+                              if (pp) { navigator.clipboard.writeText(pp); toast.success("Passphrase kopiert"); }
+                            }}
+                            data-testid="e2ee-copy-passphrase-btn"
+                          >
+                            Kopieren
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-xl border-white/10 bg-white/[0.03] text-zinc-300 hover:bg-white/8 text-xs"
+                            onClick={() => {
+                              const pp = getE2EEAutoPassphrase();
+                              if (!pp) return;
+                              const blob = new Blob([`Singra Vox – E2EE Geräte-Passphrase\n\nPassphrase: ${pp}\n\nWichtig: Teile diese Datei niemals mit anderen Personen.\nAufbewahrungsort: sicher offline (z.B. Passwortmanager)\n`], { type: "text/plain" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url; a.download = "singravox-e2ee-passphrase.txt";
+                              a.click(); URL.revokeObjectURL(url);
+                            }}
+                            data-testid="e2ee-download-passphrase-btn"
+                          >
+                            Als .txt speichern
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-xl border-white/10 bg-transparent text-zinc-500 hover:bg-white/5 text-xs"
+                            onClick={() => setShowPassphrase(false)}
+                          >
+                            Verbergen
+                          </Button>
+                        </div>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="rounded-xl bg-zinc-800 text-zinc-200 hover:bg-zinc-700 text-xs border border-white/10"
+                        onClick={() => setShowPassphrase(true)}
+                        data-testid="e2ee-show-passphrase-btn"
+                      >
+                        Passphrase anzeigen
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
 
           <section className="workspace-card p-5">
             <div className="flex items-start gap-3">

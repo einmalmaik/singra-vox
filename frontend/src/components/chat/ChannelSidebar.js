@@ -1622,10 +1622,10 @@ export default function ChannelSidebar({
                   <div>
                     <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
                     <p className="text-xs text-zinc-400">
-                      {t("channel.nativeAudioHint")}
+                      Desktop-Audio wird zusammen mit dem Bildschirm aufgenommen (soweit vom System unterstützt).
                     </p>
                   </div>
-                  <Switch checked={false} disabled />
+                  <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
                 </div>
 
                 <div className="workspace-card space-y-2 px-4 py-3 text-xs text-zinc-400">
