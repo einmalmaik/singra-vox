@@ -775,6 +775,11 @@ export default function ChannelSidebar({
 
       const selectedSource = captureSources.find((source) => source.id === selectedCaptureSourceId) || null;
       const selectedPreset = getScreenSharePreset(screenShareQuality);
+
+      // Audio-Lautstärke VOR dem Start setzen, damit der GainNode
+      // mit dem richtigen Wert initialisiert wird
+      voiceEngineRef.current.setScreenShareAudioVolume(screenShareAudioVolume);
+
       const enabled = await voiceEngineRef.current.startScreenShare(
         isDesktop
           ? {
@@ -1640,7 +1645,11 @@ export default function ChannelSidebar({
                         min={0}
                         max={200}
                         step={5}
-                        onValueChange={([value]) => setScreenShareAudioVolume(value)}
+                        onValueChange={([value]) => {
+                          setScreenShareAudioVolume(value);
+                          // Lautstärke sofort an den VoiceEngine weiterleiten
+                          voiceEngineRef?.current?.setScreenShareAudioVolume?.(value);
+                        }}
                         data-testid="screen-share-audio-volume-slider"
                       />
                     </div>
@@ -1745,7 +1754,11 @@ export default function ChannelSidebar({
                     min={0}
                     max={200}
                     step={5}
-                    onValueChange={([value]) => setScreenShareAudioVolume(value)}
+                    onValueChange={([value]) => {
+                      setScreenShareAudioVolume(value);
+                      // Lautstärke sofort an den VoiceEngine weiterleiten
+                      voiceEngineRef?.current?.setScreenShareAudioVolume?.(value);
+                    }}
                     data-testid="screen-share-audio-volume-web"
                   />
                 </div>

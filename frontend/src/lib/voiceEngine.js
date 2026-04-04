@@ -1,9 +1,36 @@
+/**
+ * voiceEngine.js – Zentrale Steuerung für Voice, Kamera und Bildschirmfreigabe
+ *
+ * Architektur:
+ *   VoiceEngine verwaltet den kompletten Medien-Lifecycle für einen Voice-Channel:
+ *   - Mikrofon (Capture, Gain, Mute/PTT, Rauschunterdrückung)
+ *   - Kamera (Toggle, Device-Wechsel)
+ *   - Bildschirmfreigabe (Browser getDisplayMedia + Tauri native capture)
+ *   - Screen-Share Audio (GainNode-Pipeline für Lautstärkeregler)
+ *   - Remote-Audio (pro-User Lautstärke, lokales Stummschalten, Deafen)
+ *   - Spracherkennung (Active Speaker Detection via LiveKit)
+ *   - E2EE-Medien-Verschlüsselung (optional, für private Kanäle)
+ *
+ * Events:
+ *   Nutzer registrieren Listener via addStateListener() oder setzen onStateChange.
+ *   Events: connected, disconnected, mute_change, deafen_change, camera_change,
+ *           screen_share_change, media_tracks_update, speaking_update, input_level,
+ *           mic_test_state, peer_connected, peer_disconnected
+ *
+ * Erweiterung:
+ *   Neue Qualitätsprofile → screenSharePresets.js
+ *   LiveKit-Transport-Abstraktion → LiveKitTransport.js (noch nicht vollständig migriert)
+ *   Audio-Analyse → AudioAnalyzer.js
+ */
+
 import api from "@/lib/api";
 import { Room, RoomEvent, Track, createLocalScreenTracks, createLocalVideoTrack } from "livekit-client";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
 import { getDesktopCaptureFrame, startDesktopCapture, stopDesktopCapture } from "@/lib/desktop";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
 import { AudioAnalyzer } from "@/lib/AudioAnalyzer";
+
+// ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
 
 function clampVolume(value, min = 0, max = 200) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
@@ -105,6 +132,15 @@ export class VoiceEngine {
     this.cameraTrack = null;
     this.screenShareTracks = [];
     this.nativeScreenShare = null;
+
+    // ── Screen-Share Audio Gain ──────────────────────────────────────────────
+    // Ermöglicht es dem Nutzer, die Lautstärke des geteilten System-/Spielaudios
+    // zur Laufzeit zu regeln. Der GainNode sitzt zwischen dem rohen
+    // getDisplayMedia-Audio und dem an LiveKit publizierten Track.
+    this.screenShareAudioGain = null;       // GainNode
+    this.screenShareAudioSourceNode = null; // MediaStreamSource vom Capture
+    this.screenShareAudioDest = null;       // MediaStreamDestination
+    this.screenShareAudioVolume = 100;      // 0-200%, Default 100%
   }
 
   addStateListener(listener) {
@@ -449,6 +485,28 @@ export class VoiceEngine {
     return this.startScreenShare(options);
   }
 
+  /**
+   * Startet eine Browser-basierte Bildschirmfreigabe via getDisplayMedia.
+   *
+   * Ablauf:
+   * 1. createLocalScreenTracks() ruft getDisplayMedia auf (Nutzer wählt Quelle)
+   * 2. Video-Track: contentHint="detail" für scharfe Text-/UI-Darstellung
+   * 3. Audio-Track (optional): wird durch einen GainNode geleitet, damit der
+   *    Nutzer die Spielaudio-Lautstärke zur Laufzeit über setScreenShareAudioVolume()
+   *    regulieren kann
+   * 4. Alle Tracks werden an LiveKit publiziert mit den gewählten Qualitäts-Einstellungen
+   *
+   * @param {Object} options
+   * @param {boolean} [options.audio=false]           - Systemaudio mitteilen?
+   * @param {string}  [options.displaySurface="monitor"] - "monitor" | "window" | "browser"
+   * @param {Object}  [options.resolution]            - { width, height, frameRate }
+   * @param {string}  [options.qualityPreset]         - Preset-ID aus screenSharePresets.js
+   * @param {boolean} [options.nativeCapture=false]    - Tauri-nativer Capture-Pfad
+   * @param {string}  [options.sourceId]               - Native capture source ID
+   * @param {string}  [options.sourceKind]             - Native capture source kind
+   * @param {string}  [options.sourceLabel]            - Native capture source label
+   * @returns {Promise<boolean>} true wenn erfolgreich gestartet
+   */
   async startScreenShare(options = {}) {
     if (!this.room) return false;
     const {
@@ -466,6 +524,7 @@ export class VoiceEngine {
       await this.stopScreenShare();
     }
 
+    // Tauri-nativer Capture-Pfad (eigener Frame-Loop, kein getDisplayMedia)
     if (nativeCapture && this.runtimeConfig?.isDesktop && sourceId) {
       return this._startNativeDesktopScreenShare({
         audio,
@@ -477,10 +536,17 @@ export class VoiceEngine {
       });
     }
 
+    // ── Browser-Capture via getDisplayMedia ─────────────────────────────────
+
+    // AudioContext sicherstellen für den Audio-GainNode (falls Audio gewünscht)
+    if (audio) {
+      await this._ensureAudioContext();
+    }
+
     this.screenShareTracks = await createLocalScreenTracks({
-      // Screen-share audio is separate from the microphone track. Requesting it
-      // as a boolean lets getDisplayMedia negotiate native system/tab audio
-      // support instead of reusing microphone-specific constraints.
+      // Screen-Share-Audio ist ein separater Track vom Mikrofon.
+      // Als Boolean übergeben, damit getDisplayMedia native System-/Tab-Audio
+      // aushandeln kann statt Mikrofon-Constraints zu verwenden.
       audio: Boolean(audio),
       video: { displaySurface },
       resolution,
@@ -490,13 +556,19 @@ export class VoiceEngine {
       suppressLocalAudioPlayback: true,
       contentHint: "detail",
     });
+
     const screenShareStreamName = `screen-share-${Date.now()}`;
     const screenSharePublishOptions = buildScreenSharePublishOptions(qualityPreset);
+
+    // Video-Track: contentHint="detail" sorgt für scharfe Darstellung von
+    // Text, UI-Elementen und Spielgrafik (Chromium/Firefox optimiert entsprechend)
     const screenShareVideoTrack = this.screenShareTracks.find((track) => track.kind === Track.Kind.Video);
     if (screenShareVideoTrack?.mediaStreamTrack) {
       screenShareVideoTrack.mediaStreamTrack.contentHint = "detail";
     }
 
+    // Bei Track-Ende (Nutzer klickt "Freigabe beenden" im Browser-Picker)
+    // automatisch aufräumen
     this.screenShareTracks.forEach((track) => {
       track.mediaStreamTrack?.addEventListener("ended", () => {
         if (this.screenShareTracks.includes(track)) {
@@ -504,24 +576,55 @@ export class VoiceEngine {
         }
       }, { once: true });
     });
+
+    // ── Audio-Track durch GainNode leiten (Lautstärke-Regler) ──────────────
+    // Falls Audio aktiv ist, pipen wir den rohen getDisplayMedia-Audio-Track
+    // durch einen GainNode. So kann der Nutzer die Spielaudio-Lautstärke
+    // mit setScreenShareAudioVolume() zur Laufzeit regeln.
+    const screenShareAudioTrackRaw = this.screenShareTracks.find(
+      (track) => track.kind === Track.Kind.Audio || track.source === Track.Source.ScreenShareAudio,
+    );
+    let processedAudioTrack = null;
+
+    if (screenShareAudioTrackRaw?.mediaStreamTrack && this.audioContext) {
+      processedAudioTrack = this._processScreenShareAudioTrack(
+        screenShareAudioTrackRaw.mediaStreamTrack,
+      );
+    }
+
+    // ── Tracks an LiveKit publizieren ──────────────────────────────────────
     await Promise.all(
-      this.screenShareTracks.map((track, index) => this.room.localParticipant.publishTrack(
-        track,
-        track.kind === Track.Kind.Video
-          ? {
-            ...screenSharePublishOptions,
-            name: `screen-share-video-${index}-${Date.now()}`,
-            source: Track.Source.ScreenShare,
-            stream: screenShareStreamName,
-          }
-          : {
+      this.screenShareTracks.map((track, index) => {
+        const isVideo = track.kind === Track.Kind.Video;
+        const isAudio = !isVideo;
+
+        if (isVideo) {
+          return this.room.localParticipant.publishTrack(
+            track,
+            {
+              ...screenSharePublishOptions,
+              name: `screen-share-video-${index}-${Date.now()}`,
+              source: Track.Source.ScreenShare,
+              stream: screenShareStreamName,
+            },
+          );
+        }
+
+        // Audio: Falls wir einen verarbeiteten Track haben (GainNode),
+        // publizieren wir diesen statt dem Rohen
+        const audioTrackToPublish = processedAudioTrack || track;
+        return this.room.localParticipant.publishTrack(
+          audioTrackToPublish,
+          {
             name: `screen-share-audio-${index}-${Date.now()}`,
             source: Track.Source.ScreenShareAudio,
             stream: screenShareStreamName,
           },
-      )),
+        );
+      }),
     );
-    const screenShareAudioTrack = this.screenShareTracks.find((track) => track.source === Track.Source.ScreenShareAudio);
+
+    const hasAudio = Boolean(screenShareAudioTrackRaw);
     this._emitRemoteMediaUpdate();
     this._emit("screen_share_change", {
       enabled: true,
@@ -529,7 +632,7 @@ export class VoiceEngine {
       sourceId: null,
       sourceKind: displaySurface,
       sourceLabel: null,
-      hasAudio: Boolean(screenShareAudioTrack),
+      hasAudio,
       actualCaptureSettings: screenShareVideoTrack?.mediaStreamTrack?.getSettings?.() || null,
     });
     return true;
@@ -546,6 +649,7 @@ export class VoiceEngine {
     );
     this.screenShareTracks.forEach((track) => track.stop?.());
     this.screenShareTracks = [];
+    this._cleanupScreenShareAudioGain();
     this._emitRemoteMediaUpdate();
     this._emit("screen_share_change", {
       enabled: false,
@@ -556,6 +660,66 @@ export class VoiceEngine {
       hasAudio: false,
       actualCaptureSettings: null,
     });
+  }
+
+  /**
+   * Stellt die Lautstärke des geteilten System-/Spielaudios ein.
+   *
+   * @param {number} volume - 0-200 (Prozent), wobei 100 = Originallautstärke
+   *
+   * Der Wert wird sofort am internen GainNode angewendet (falls ein
+   * Screen-Share mit Audio aktiv ist). Kann auch VOR dem Start eines
+   * Screen-Shares aufgerufen werden – der Wert wird dann beim nächsten
+   * startScreenShare() übernommen.
+   */
+  setScreenShareAudioVolume(volume) {
+    this.screenShareAudioVolume = clampVolume(volume, 0, 200);
+    if (this.screenShareAudioGain) {
+      this.screenShareAudioGain.gain.value = this.screenShareAudioVolume / 100;
+    }
+  }
+
+  /**
+   * Räumt die Web-Audio-Pipeline für Screen-Share-Audio auf.
+   * Wird beim Stoppen eines Screen-Shares automatisch aufgerufen.
+   */
+  _cleanupScreenShareAudioGain() {
+    try {
+      this.screenShareAudioSourceNode?.disconnect();
+      this.screenShareAudioGain?.disconnect();
+      this.screenShareAudioDest?.disconnect?.();
+    } catch {
+      // Disconnect-Fehler bei bereits getrennte Nodes ignorieren
+    }
+    this.screenShareAudioSourceNode = null;
+    this.screenShareAudioGain = null;
+    this.screenShareAudioDest = null;
+  }
+
+  /**
+   * Leitet einen rohen Audio-MediaStreamTrack durch einen GainNode,
+   * sodass der Nutzer die Lautstärke zur Laufzeit regeln kann.
+   *
+   * @param {MediaStreamTrack} rawAudioTrack - Roher AudioTrack von getDisplayMedia
+   * @returns {MediaStreamTrack} - Verarbeiteter Track (gleicher Track falls kein AudioContext)
+   */
+  _processScreenShareAudioTrack(rawAudioTrack) {
+    if (!this.audioContext || !rawAudioTrack) {
+      return rawAudioTrack;
+    }
+
+    this._cleanupScreenShareAudioGain();
+
+    const rawStream = new MediaStream([rawAudioTrack]);
+    this.screenShareAudioSourceNode = this.audioContext.createMediaStreamSource(rawStream);
+    this.screenShareAudioGain = this.audioContext.createGain();
+    this.screenShareAudioGain.gain.value = this.screenShareAudioVolume / 100;
+    this.screenShareAudioDest = this.audioContext.createMediaStreamDestination();
+
+    this.screenShareAudioSourceNode.connect(this.screenShareAudioGain);
+    this.screenShareAudioGain.connect(this.screenShareAudioDest);
+
+    return this.screenShareAudioDest.stream.getAudioTracks()[0] || rawAudioTrack;
   }
 
   async _startNativeDesktopScreenShare({
