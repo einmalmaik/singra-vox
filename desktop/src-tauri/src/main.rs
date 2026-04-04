@@ -5,7 +5,7 @@ mod native_capture;
 
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
-use tauri::{Emitter, Manager, State};
+use tauri::{process::restart, Emitter, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(target_os = "windows")]
@@ -627,7 +627,7 @@ async fn install_update_command(app: tauri::AppHandle) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
 
         // Nach dem Install neu starten
-        tauri_plugin_process::restart(&app.env());
+        restart(&app.env());
     }
 
     Ok(())

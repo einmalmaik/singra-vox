@@ -49,113 +49,175 @@ export default function SetupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center px-6" data-testid="setup-page">
+    <div
+      className="min-h-screen flex items-center justify-center px-6"
+      style={{
+        background:
+          "radial-gradient(circle at top left, rgba(34,211,238,0.12), transparent 28%), radial-gradient(circle at bottom right, rgba(113,113,122,0.2), transparent 32%), linear-gradient(180deg,#05070b 0%,#09090b 45%,#060608 100%)",
+      }}
+      data-testid="setup-page"
+    >
       <div className="w-full max-w-lg">
-        <div className="flex items-center gap-3 mb-8">
-          <RocketLaunch size={40} weight="fill" className="text-[#6366F1]" />
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-8">
+          <div
+            className="flex items-center justify-center w-12 h-12 rounded-2xl"
+            style={{
+              background: "rgba(34,211,238,0.12)",
+              border: "1px solid rgba(34,211,238,0.22)",
+              boxShadow: "0 0 28px rgba(34,211,238,0.1)",
+            }}
+          >
+            <RocketLaunch size={24} weight="fill" className="text-cyan-400" />
+          </div>
           <div>
-            <h1 className="text-3xl font-bold" style={{ fontFamily: "Manrope" }}>{t("setup.initializeInstance")}</h1>
-            <p className="text-[#71717A] text-sm">
+            <h1
+              className="text-2xl font-bold text-white"
+              style={{ fontFamily: "Manrope" }}
+            >
+              {t("setup.initializeInstance")}
+            </h1>
+            <p className="text-zinc-500 text-sm mt-0.5">
               {t("setup.initializeSubtitle", {
-                target: config?.isDesktop ? t("setup.connectedServer") : t("setup.selfHostedInstance"),
+                target: config?.isDesktop
+                  ? t("setup.connectedServer")
+                  : t("setup.selfHostedInstance"),
               })}
             </p>
           </div>
         </div>
 
-        <div className="bg-[#121212] border border-[#27272A] rounded-xl p-6">
-          <div className="flex items-start gap-3 bg-[#18181B] border border-[#27272A] rounded-lg p-4 mb-6">
-            <ShieldCheck size={24} weight="fill" className="text-[#6366F1] shrink-0 mt-0.5" />
-            <div className="text-sm text-[#A1A1AA]">
-              {t("setup.wizardHelp")}
-            </div>
+        {/* Card */}
+        <div className="workspace-card p-6 space-y-5">
+          {/* Info Banner */}
+          <div
+            className="flex items-start gap-3 rounded-xl p-4"
+            style={{
+              background: "rgba(34,211,238,0.06)",
+              border: "1px solid rgba(34,211,238,0.15)",
+            }}
+          >
+            <ShieldCheck size={20} weight="fill" className="text-cyan-400 shrink-0 mt-0.5" />
+            <p className="text-sm text-zinc-400 leading-relaxed">{t("setup.wizardHelp")}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <LocalizedErrorBanner message={error} className="rounded-md text-red-200" data-testid="setup-error" />
+            <LocalizedErrorBanner
+              message={error}
+              className="rounded-xl text-red-300 bg-red-950/30 border border-red-800/30 px-4 py-3 text-sm"
+              data-testid="setup-error"
+            />
 
-            <div className="space-y-2">
-              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("setup.instanceName")}</Label>
+            {/* Instance Name */}
+            <div className="space-y-1.5">
+              <Label className="workspace-section-label">{t("setup.instanceName")}</Label>
               <Input
                 value={instanceName}
                 onChange={(e) => setInstanceName(e.target.value)}
                 placeholder={t("setup.instanceNamePlaceholder")}
                 required
                 data-testid="instance-name-input"
-                className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                className="bg-zinc-900/70 border-white/10 focus:border-cyan-500/50 text-white placeholder:text-zinc-600 rounded-xl h-10"
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                  <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("setup.ownerEmail")}</Label>
+            {/* Email & Username */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="workspace-section-label">{t("setup.ownerEmail")}</Label>
                 <Input
                   type="email"
                   value={ownerEmail}
                   onChange={(e) => setOwnerEmail(e.target.value)}
-                    placeholder={t("setup.ownerEmailPlaceholder")}
+                  placeholder={t("setup.ownerEmailPlaceholder")}
                   required
                   data-testid="setup-owner-email"
-                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                  className="bg-zinc-900/70 border-white/10 focus:border-cyan-500/50 text-white placeholder:text-zinc-600 rounded-xl h-10"
                 />
               </div>
-              <div className="space-y-2">
-                  <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("setup.ownerUsername")}</Label>
+              <div className="space-y-1.5">
+                <Label className="workspace-section-label">{t("setup.ownerUsername")}</Label>
                 <Input
                   value={ownerUsername}
-                  onChange={(e) => setOwnerUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-                    placeholder={t("setup.ownerUsernamePlaceholder")}
+                  onChange={(e) =>
+                    setOwnerUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))
+                  }
+                  placeholder={t("setup.ownerUsernamePlaceholder")}
                   required
                   data-testid="setup-owner-username"
-                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                  className="bg-zinc-900/70 border-white/10 focus:border-cyan-500/50 text-white placeholder:text-zinc-600 rounded-xl h-10"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                  <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.displayName")}</Label>
+            {/* Display Name & Password */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="workspace-section-label">{t("auth.displayName")}</Label>
                 <Input
                   value={ownerDisplayName}
                   onChange={(e) => setOwnerDisplayName(e.target.value)}
-                    placeholder={t("setup.ownerDisplayNamePlaceholder")}
+                  placeholder={t("setup.ownerDisplayNamePlaceholder")}
                   data-testid="setup-owner-display-name"
-                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                  className="bg-zinc-900/70 border-white/10 focus:border-cyan-500/50 text-white placeholder:text-zinc-600 rounded-xl h-10"
                 />
               </div>
-              <div className="space-y-2">
-                  <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("auth.password")}</Label>
+              <div className="space-y-1.5">
+                <Label className="workspace-section-label">{t("auth.password")}</Label>
                 <Input
                   type="password"
                   value={ownerPassword}
                   onChange={(e) => setOwnerPassword(e.target.value)}
-                    placeholder={t("auth.passwordMinLength")}
+                  placeholder={t("auth.passwordMinLength")}
                   required
                   data-testid="setup-owner-password"
-                  className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                  className="bg-zinc-900/70 border-white/10 focus:border-cyan-500/50 text-white placeholder:text-zinc-600 rounded-xl h-10"
                 />
               </div>
             </div>
 
-            <label className="flex items-start gap-3 rounded-lg border border-[#27272A] bg-[#18181B] px-4 py-3 cursor-pointer">
+            {/* Open Signup Toggle */}
+            <label
+              className="flex items-start gap-3 rounded-xl cursor-pointer transition-colors duration-200"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.07)",
+                padding: "12px 16px",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.055)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,0.03)";
+              }}
+            >
               <input
                 type="checkbox"
                 checked={allowOpenSignup}
                 onChange={(e) => setAllowOpenSignup(e.target.checked)}
-                className="mt-1 accent-[#6366F1]"
+                className="mt-1 accent-cyan-400"
                 data-testid="setup-open-signup"
               />
               <div>
-                  <p className="text-sm font-medium text-white">{t("setup.enableOpenSignup")}</p>
-                  <p className="text-xs text-[#71717A]">{t("setup.enableOpenSignupHelp")}</p>
-                </div>
-              </label>
+                <p className="text-sm font-medium text-white">{t("setup.enableOpenSignup")}</p>
+                <p className="text-xs text-zinc-500 mt-0.5">{t("setup.enableOpenSignupHelp")}</p>
+              </div>
+            </label>
 
+            {/* Submit */}
             <Button
               type="submit"
               disabled={loading}
               data-testid="setup-submit-button"
-              className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
+              className="w-full font-semibold h-11 rounded-xl text-sm transition-all duration-200"
+              style={{
+                background: loading
+                  ? "rgba(34,211,238,0.3)"
+                  : "linear-gradient(135deg, rgba(34,211,238,0.85), rgba(6,182,212,0.9))",
+                color: "#05070b",
+                border: "1px solid rgba(34,211,238,0.3)",
+                boxShadow: loading ? "none" : "0 0 20px rgba(34,211,238,0.2)",
+              }}
             >
               {loading ? t("setup.initializing") : t("setup.createOwnerAccount")}
             </Button>

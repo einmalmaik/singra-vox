@@ -33,42 +33,86 @@ export default function ConnectPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0A] px-6" data-testid="connect-page">
+    <div
+      className="min-h-screen flex items-center justify-center px-6"
+      style={{
+        background:
+          "radial-gradient(circle at top left, rgba(34,211,238,0.12), transparent 28%), radial-gradient(circle at bottom right, rgba(113,113,122,0.2), transparent 32%), linear-gradient(180deg,#05070b 0%,#09090b 45%,#060608 100%)",
+      }}
+      data-testid="connect-page"
+    >
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-3 mb-8">
-          <DesktopTower size={40} weight="fill" className="text-[#6366F1]" />
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-8">
+          <div
+            className="flex items-center justify-center w-12 h-12 rounded-2xl"
+            style={{
+              background: "rgba(34,211,238,0.12)",
+              border: "1px solid rgba(34,211,238,0.22)",
+              boxShadow: "0 0 28px rgba(34,211,238,0.1)",
+            }}
+          >
+            <DesktopTower size={24} weight="fill" className="text-cyan-400" />
+          </div>
           <div>
-            <h1 className="text-3xl font-bold" style={{ fontFamily: "Manrope" }}>{t("connect.title")}</h1>
-            <p className="text-[#71717A] text-sm">{t("connect.subtitle")}</p>
+            <h1
+              className="text-2xl font-bold text-white"
+              style={{ fontFamily: "Manrope" }}
+            >
+              {t("connect.title")}
+            </h1>
+            <p className="text-zinc-500 text-sm mt-0.5">{t("connect.subtitle")}</p>
           </div>
         </div>
 
-        <div className="bg-[#121212] border border-[#27272A] rounded-xl p-6">
+        {/* Card */}
+        <div className="workspace-card p-6 space-y-4">
           <form onSubmit={handleSubmit} className="space-y-4">
-            <LocalizedErrorBanner message={error} className="rounded-md text-red-200" data-testid="connect-error" />
+            <LocalizedErrorBanner
+              message={error}
+              className="rounded-xl text-red-300 bg-red-950/30 border border-red-800/30 px-4 py-3 text-sm"
+              data-testid="connect-error"
+            />
 
-            <div className="space-y-2">
-              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("connect.instanceUrl")}</Label>
+            {/* URL Input */}
+            <div className="space-y-1.5">
+              <Label className="workspace-section-label">{t("connect.instanceUrl")}</Label>
               <Input
                 value={instanceUrl}
                 onChange={(e) => setInstanceUrl(e.target.value)}
                 placeholder={t("connect.instanceUrlPlaceholder")}
                 required
                 data-testid="instance-url-input"
-                className="bg-[#18181B] border-[#27272A] focus:border-[#6366F1] text-white"
+                className="bg-zinc-900/70 border-white/10 focus:border-cyan-500/50 text-white placeholder:text-zinc-600 rounded-xl h-10"
               />
             </div>
 
-            <div className="rounded-lg border border-[#27272A] bg-[#18181B] px-4 py-3 text-xs text-[#71717A] flex gap-2">
-              <LinkSimple size={16} className="text-[#6366F1] shrink-0 mt-0.5" />
-              {t("connect.helpText")}
+            {/* Help Text */}
+            <div
+              className="flex items-start gap-2.5 rounded-xl px-4 py-3 text-xs text-zinc-400"
+              style={{
+                background: "rgba(34,211,238,0.06)",
+                border: "1px solid rgba(34,211,238,0.15)",
+              }}
+            >
+              <LinkSimple size={15} className="text-cyan-400 shrink-0 mt-0.5" />
+              <span>{t("connect.helpText")}</span>
             </div>
 
+            {/* Submit */}
             <Button
               type="submit"
               disabled={loading}
               data-testid="connect-submit-button"
-              className="w-full bg-[#6366F1] hover:bg-[#4F46E5] text-white font-semibold h-11"
+              className="w-full font-semibold h-11 rounded-xl text-sm transition-all duration-200"
+              style={{
+                background: loading
+                  ? "rgba(34,211,238,0.3)"
+                  : "linear-gradient(135deg, rgba(34,211,238,0.85), rgba(6,182,212,0.9))",
+                color: "#05070b",
+                border: "1px solid rgba(34,211,238,0.3)",
+                boxShadow: loading ? "none" : "0 0 20px rgba(34,211,238,0.2)",
+              }}
             >
               {loading ? t("connect.connecting") : t("connect.connect")}
             </Button>
