@@ -775,9 +775,21 @@ export class VoiceEngine {
     });
   }
 
+  /**
+   * Hängt einen Video-Track (Kamera oder Screen-Share) an ein <video>-Element.
+   *
+   * Gibt eine Detach-Funktion zurück wenn der Track erfolgreich angehängt wurde,
+   * oder **null** wenn kein Track verfügbar ist. Der Aufrufer (VoiceMediaStage)
+   * nutzt diesen Rückgabewert, um zu entscheiden ob ein Retry nötig ist.
+   *
+   * @param {string} participantId  - User-ID oder LiveKit-Identity
+   * @param {string} source         - "screen_share" | "camera"
+   * @param {HTMLVideoElement} element
+   * @returns {Function|null} Detach-Callback oder null bei fehlendem Track
+   */
   attachParticipantMediaElement(participantId, source, element) {
     if (!element) {
-      return () => {};
+      return null;
     }
 
     const normalizedSource = source || Track.Source.Camera;
@@ -785,25 +797,36 @@ export class VoiceEngine {
       ? this._getLocalVideoTrack(normalizedSource)
       : this.remoteVideoTracks.get(this._trackKey(participantId, normalizedSource))?.track;
 
+    // Kein Track verfügbar → null zurückgeben damit der Aufrufer retrien kann
     if (!track) {
-      return () => {};
+      return null;
     }
 
     element.autoplay = true;
     element.playsInline = true;
+    // Eigenen Stream stumm schalten um Echo-Feedback zu vermeiden
     element.muted = participantId === this.userId;
     track.attach(element);
-    void element.play?.().catch(() => {
-      // Autoplay may still be gated by the embedding runtime. The stage will
-      // retry on the next media revision if the track becomes available later.
-    });
+
+    // play() kann durch Browser-Autoplay-Policy blockiert werden.
+    // Wir versuchen es sofort und nochmal nach einer kurzen Verzögerung.
+    const tryPlay = () => {
+      void element.play?.().catch(() => {
+        // Wird vom VoiceMediaStage-Retry-Mechanismus aufgefangen
+      });
+    };
+    tryPlay();
+    // Zweiter Versuch nach 150ms – hilft bei Chromium wenn der Track
+    // noch nicht vollständig decodiert ist (typisch bei Screen-Share)
+    const playRetryTimer = setTimeout(tryPlay, 150);
 
     return () => {
+      clearTimeout(playRetryTimer);
       try {
         element.pause?.();
         track.detach(element);
       } catch {
-        // Ignore detach errors during rapid overlay switches.
+        // Detach-Fehler bei schnellen Overlay-Wechseln ignorieren
       }
     };
   }

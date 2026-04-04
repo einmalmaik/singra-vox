@@ -122,7 +122,10 @@ export default function ChannelSidebar({
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [screenShareDialogOpen, setScreenShareDialogOpen] = useState(false);
   const [screenShareQuality, setScreenShareQuality] = useState(DEFAULT_SCREEN_SHARE_PRESET_ID);
-  const [screenShareAudio, setScreenShareAudio] = useState(true);
+  // Systemaudio ist standardmäßig AUS – Nutzer aktiviert es explizit
+  const [screenShareAudio, setScreenShareAudio] = useState(false);
+  // Lautstärke des geteilten Audios (0-200%, Default 100%)
+  const [screenShareAudioVolume, setScreenShareAudioVolume] = useState(100);
   const [screenShareSurface, setScreenShareSurface] = useState("monitor");
   const [captureSourcesStatus, setCaptureSourcesStatus] = useState("idle");
   const [captureSources, setCaptureSources] = useState([]);
@@ -792,9 +795,6 @@ export default function ChannelSidebar({
       );
       setScreenShareEnabled(Boolean(enabled));
       setScreenShareDialogOpen(false);
-      if (isDesktop && screenShareAudio) {
-        toast.info(t("channel.nativeAudioPending"));
-      }
     } catch (error) {
       toast.error(formatAppError(t, error, { fallbackKey: "errors.screenShareStartFailed" }));
     }
@@ -1618,14 +1618,33 @@ export default function ChannelSidebar({
                   </select>
                 </div>
 
-                <div className="workspace-card flex items-center justify-between px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
-                    <p className="text-xs text-zinc-400">
-                      Desktop-Audio wird zusammen mit dem Bildschirm aufgenommen (soweit vom System unterstützt).
-                    </p>
+                <div className="workspace-card space-y-3 px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
+                      <p className="text-xs text-zinc-400">
+                        {t("channel.shareSystemAudioHelp")}
+                      </p>
+                    </div>
+                    <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
                   </div>
-                  <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
+                  {/* Lautstärkeregler – nur sichtbar wenn Systemaudio aktiv */}
+                  {screenShareAudio && (
+                    <div className="space-y-2 pt-1 border-t border-white/5">
+                      <div className="flex items-center justify-between text-xs text-zinc-400">
+                        <span>{t("channel.shareAudioVolume", { defaultValue: "Audio-Lautstärke" })}</span>
+                        <span>{screenShareAudioVolume}%</span>
+                      </div>
+                      <Slider
+                        value={[screenShareAudioVolume]}
+                        min={0}
+                        max={200}
+                        step={5}
+                        onValueChange={([value]) => setScreenShareAudioVolume(value)}
+                        data-testid="screen-share-audio-volume-slider"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="workspace-card space-y-2 px-4 py-3 text-xs text-zinc-400">
@@ -1706,12 +1725,31 @@ export default function ChannelSidebar({
               </Select>
             </div>
 
-            <div className="workspace-card flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
-                <p className="text-xs text-[#71717A]">{t("channel.shareSystemAudioHelp")}</p>
+            <div className="workspace-card space-y-3 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
+                  <p className="text-xs text-[#71717A]">{t("channel.shareSystemAudioHelp")}</p>
+                </div>
+                <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
               </div>
-              <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
+              {/* Lautstärkeregler – nur sichtbar wenn Systemaudio aktiv */}
+              {screenShareAudio && (
+                <div className="space-y-2 pt-1 border-t border-white/5">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>{t("channel.shareAudioVolume", { defaultValue: "Audio-Lautstärke" })}</span>
+                    <span>{screenShareAudioVolume}%</span>
+                  </div>
+                  <Slider
+                    value={[screenShareAudioVolume]}
+                    min={0}
+                    max={200}
+                    step={5}
+                    onValueChange={([value]) => setScreenShareAudioVolume(value)}
+                    data-testid="screen-share-audio-volume-web"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="workspace-card px-4 py-3 text-xs text-[#71717A]">
