@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ShieldCheck, RocketLaunch } from "@phosphor-icons/react";
+import { ShieldCheck, RocketLaunch, ArrowLeft } from "@phosphor-icons/react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { formatAppError } from "@/lib/appErrors";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { toast } from "sonner";
+import { clearDesktopInstanceUrl } from "@/lib/runtimeConfig";
 
 export default function SetupPage() {
   const { t } = useTranslation();
@@ -48,6 +49,11 @@ export default function SetupPage() {
     }
   };
 
+  const handleBack = async () => {
+    await clearDesktopInstanceUrl();
+    navigate("/connect");
+  };
+
   return (
     <div
       className="min-h-screen flex items-center justify-center px-6"
@@ -60,8 +66,19 @@ export default function SetupPage() {
       <div className="w-full max-w-lg">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
+          {config?.isDesktop && (
+            <button
+              type="button"
+              onClick={handleBack}
+              data-testid="setup-back-button"
+              className="flex items-center justify-center w-9 h-9 rounded-xl text-zinc-400 hover:text-white hover:bg-white/10 transition-all duration-150 shrink-0"
+              title="Andere URL eingeben"
+            >
+              <ArrowLeft size={18} weight="bold" />
+            </button>
+          )}
           <div
-            className="flex items-center justify-center w-12 h-12 rounded-2xl"
+            className="flex items-center justify-center w-12 h-12 rounded-2xl shrink-0"
             style={{
               background: "rgba(34,211,238,0.12)",
               border: "1px solid rgba(34,211,238,0.22)",

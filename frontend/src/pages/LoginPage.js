@@ -10,10 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AuthShell from "@/components/auth/AuthShell";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
-import { ShieldCheck } from "@phosphor-icons/react";
+import { ShieldCheck, ArrowLeft } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 import { rememberPendingVerification } from "@/lib/pendingVerification";
+import { clearDesktopInstanceUrl } from "@/lib/runtimeConfig";
 
 export default function LoginPage() {
   const { t } = useTranslation();
@@ -22,9 +23,14 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
-  const { setupStatus } = useRuntime();
+  const { setupStatus, config } = useRuntime();
   const navigate = useNavigate();
   const pendingInvite = useMemo(() => loadPendingInvite(), []);
+
+  const handleChangeServer = async () => {
+    await clearDesktopInstanceUrl();
+    navigate("/connect");
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -127,6 +133,18 @@ export default function LoginPage() {
           >
             {loading ? t("auth.signingIn") : t("auth.signIn")}
           </Button>
+
+          {config?.isDesktop && (
+            <button
+              type="button"
+              onClick={handleChangeServer}
+              data-testid="login-change-server-button"
+              className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors duration-150 pt-1"
+            >
+              <ArrowLeft size={12} />
+              Andere Server-URL eingeben
+            </button>
+          )}
         </form>
       </div>
     </AuthShell>
