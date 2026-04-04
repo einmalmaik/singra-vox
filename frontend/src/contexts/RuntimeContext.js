@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import api, { configureApi } from "@/lib/api";
-import { loadRuntimeConfig, saveDesktopInstanceUrl } from "@/lib/runtimeConfig";
+import { clearDesktopInstanceUrl, loadRuntimeConfig, saveDesktopInstanceUrl } from "@/lib/runtimeConfig";
 
 const RuntimeContext = createContext(null);
 
@@ -68,14 +68,22 @@ export function RuntimeProvider({ children }) {
     return { config: nextConfig, status };
   }, [fetchSetupStatus]);
 
+  const disconnectFromInstance = useCallback(async () => {
+    await clearDesktopInstanceUrl();
+    const emptyConfig = await loadRuntimeConfig(); // liest localStorage neu → needsConnection: true
+    setConfig(emptyConfig);
+    setSetupStatus(EMPTY_SETUP_STATUS);
+  }, []);
+
   const value = useMemo(() => ({
     ready,
     config,
     setupStatus,
     connectToInstance,
+    disconnectFromInstance,
     refreshSetupStatus: () => fetchSetupStatus(config),
     setSetupStatus,
-  }), [config, connectToInstance, fetchSetupStatus, ready, setupStatus]);
+  }), [config, connectToInstance, disconnectFromInstance, fetchSetupStatus, ready, setupStatus]);
 
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

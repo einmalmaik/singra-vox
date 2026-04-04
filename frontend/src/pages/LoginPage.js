@@ -23,12 +23,12 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
-  const { setupStatus, config } = useRuntime();
+  const { setupStatus, config, disconnectFromInstance } = useRuntime();
   const navigate = useNavigate();
   const pendingInvite = useMemo(() => loadPendingInvite(), []);
 
   const handleChangeServer = async () => {
-    await clearDesktopInstanceUrl();
+    await disconnectFromInstance();
     navigate("/connect");
   };
 

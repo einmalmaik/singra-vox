@@ -12,11 +12,13 @@ import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { toast } from "sonner";
 import { clearDesktopInstanceUrl } from "@/lib/runtimeConfig";
 
+
+
 export default function SetupPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { bootstrap } = useAuth();
-  const { config } = useRuntime();
+  const { config, disconnectFromInstance } = useRuntime();
   const [instanceName, setInstanceName] = useState("Singra Vox");
   const [ownerEmail, setOwnerEmail] = useState("");
   const [ownerUsername, setOwnerUsername] = useState("");
