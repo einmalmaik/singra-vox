@@ -657,7 +657,7 @@ export default function ChannelSidebar({
       console.error("Voice join error:", error);
       toast.error(formatAppError(t, error, { fallbackKey: "channel.joinVoiceFailed" }));
     }
-  }, [bindVoiceEngine, config, e2eeReady, isDesktop, isDesktopCapable, localVoicePreferences.selfDeafenEnabled, localVoicePreferences.selfMuteEnabled, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
+  }, [bindVoiceEngine, config, e2eeReady, isDesktop, localVoicePreferences.selfDeafenEnabled, localVoicePreferences.selfMuteEnabled, onRefreshChannels, server?.id, t, user?.id, voiceChannel?.id, voiceEngineRef]);
 
   const leaveVoice = useCallback(async () => {
     if (!voiceChannel) return;
