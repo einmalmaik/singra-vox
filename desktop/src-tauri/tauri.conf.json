@@ -59,12 +59,12 @@
       }
     },
     "updater": {
-      "pubkey": "TAURI_UPDATER_PUBKEY_PLACEHOLDER",
+      "pubkey": "",
       "endpoints": [
         "https://github.com/GITHUB_OWNER/singra-vox/releases/latest/download/latest.json"
       ],
       "dialog": false,
-      "active": true
+      "active": false
     }
   }
 }

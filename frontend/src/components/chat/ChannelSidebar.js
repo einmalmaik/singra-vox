@@ -1325,23 +1325,23 @@ export default function ChannelSidebar({
                         </DialogHeader>
                         <form onSubmit={createChannel} className="space-y-4 mt-2">
                           <div className="space-y-2">
-                            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">
+                            <Label className="workspace-section-label">
                               {chType === "category" ? t("serverSettings.categoryName") : t("serverSettings.channelName")}
                             </Label>
                             <Input
                               value={chName}
                               onChange={(event) => setChName(event.target.value)}
                               placeholder={chType === "category" ? t("serverSettings.newCategoryPlaceholder") : t("serverSettings.createChannelPlaceholder")}
-                              className="bg-[#121212] border-[#27272A] focus:border-[#6366F1] text-white"
+                              className="h-11 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus-visible:border-cyan-400/50 focus-visible:ring-cyan-400/40"
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("common.type")}</Label>
+                            <Label className="workspace-section-label">{t("common.type")}</Label>
                             <Select value={chType} onValueChange={setChType}>
-                              <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
+                              <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-zinc-950/70 text-white focus:border-cyan-400/50 focus:ring-cyan-400/40">
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
+                              <SelectContent className="border-white/10 bg-zinc-900 text-white">
                                 <SelectItem value="text">{t("serverSettings.channelTypeText")}</SelectItem>
                                 <SelectItem value="voice">{t("serverSettings.channelTypeVoice")}</SelectItem>
                                 <SelectItem value="category">{t("serverSettings.channelTypeCategory")}</SelectItem>
@@ -1350,12 +1350,12 @@ export default function ChannelSidebar({
                           </div>
                           {chType !== "category" && (
                             <div className="space-y-2">
-                              <Label className="text-[#A1A1AA] text-xs font-bold uppercase tracking-[0.2em]">{t("common.category")}</Label>
+                              <Label className="workspace-section-label">{t("common.category")}</Label>
                               <Select value={chParentId} onValueChange={setChParentId}>
-                                <SelectTrigger className="bg-[#121212] border-[#27272A] text-white">
+                                <SelectTrigger className="h-11 rounded-2xl border-white/10 bg-zinc-950/70 text-white focus:border-cyan-400/50 focus:ring-cyan-400/40">
                                   <SelectValue />
                                 </SelectTrigger>
-                                <SelectContent className="bg-[#18181B] border-[#27272A] text-white">
+                                <SelectContent className="border-white/10 bg-zinc-900 text-white">
                                   <SelectItem value="__root__">{t("common.noCategory")}</SelectItem>
                                   {categories.map((category) => (
                                     <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
@@ -1364,7 +1364,7 @@ export default function ChannelSidebar({
                               </Select>
                             </div>
                           )}
-                          <Button type="submit" disabled={creating || !chName.trim()} className="w-full bg-[#6366F1] hover:bg-[#4F46E5]">
+                          <Button type="submit" disabled={creating || !chName.trim()} className="w-full rounded-2xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300 font-semibold">
                             {creating ? t("server.creating") : t("common.create")}
                           </Button>
                         </form>
