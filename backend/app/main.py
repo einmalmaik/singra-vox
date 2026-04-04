@@ -2425,6 +2425,18 @@ async def get_audit_log(server_id: str, request: Request):
     return logs
 
 # --- Invites ---
+@servers_r.get("/{server_id}/invites")
+async def list_invites(server_id: str, request: Request):
+    """Liste alle aktiven Einladungen für einen Server."""
+    user = await current_user(request)
+    if not await check_permission(user["id"], server_id, "manage_server"):
+        raise HTTPException(403, "No permission")
+    invites = await db.invites.find(
+        {"server_id": server_id},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(50)
+    return invites
+
 @servers_r.post("/{server_id}/invites")
 async def create_invite(server_id: str, inp: InviteCreateInput, request: Request):
     user = await current_user(request)

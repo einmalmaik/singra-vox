@@ -1,4 +1,102 @@
-# Singra Vox – PRD (Stand: 2026-04-03)
+# Singra Vox – PRD
+
+## Originales Problem-Statement
+Selbst-gehostete Discord-Alternative mit E2E-Verschlüsselung, Voice/Video-Streaming und strengen Privacy-Controls (Tauri Desktop + Web-App).
+
+## Produkt-Ziele
+- Self-hostable via `install.sh`
+- E2EE für Nachrichten und Dateien in privaten Kanälen
+- Skalierbare, modulare Backend-Architektur (FastAPI, kein Monolith)
+- Voice/Video via LiveKit
+- Minimaler Datenfußabdruck
+
+---
+
+## Was wurde implementiert
+
+### Session 1-14 (Vorherige Arbeit)
+- [x] React Frontend + FastAPI Backend + MongoDB
+- [x] Modulare Route-Struktur (auth, servers, channels, messages, voice, invites, files, etc.)
+- [x] E2EE (Web Crypto API) für private Kanäle
+- [x] LiveKit Voice/Video Integration (Token-basiert)
+- [x] MinIO S3-kompatibler Blob-Storage für E2EE-Anhänge
+- [x] Mailpit SMTP Mock für lokale E-Mail-Verifikation
+- [x] Discord-style Rollen- und Berechtigungssystem (permissions.py)
+- [x] install.sh – Docker-basierter 1-Klick-Installer
+- [x] Tauri v2 Desktop-App Grundkonfiguration
+- [x] GitHub Actions für automatische Desktop-App-Releases
+- [x] WebSocket-basiertes Real-time Messaging
+- [x] Server/Channel/Member Management
+- [x] Invite-Links mit Ablaufzeit und Max-Uses
+
+### Session 15 (02.04.2026)
+- [x] **BugFix**: Backend startete nicht wenn MinIO nicht läuft (ensure_bucket im startup gewrapped)
+- [x] **BugFix**: Registrierung fehlschlug wenn SMTP nicht antwortet (auto-verify fallback)
+- [x] **BugFix**: Tauri `main.rs` – `native_capture` fehlte Linux-Guard in `main()`
+- [x] **BugFix**: Tauri `main.rs` – fehlendes `UpdaterExt` Import
+- [x] **BugFix**: Tauri `Cargo.toml` – doppelter `rdev`-Eintrag bereinigt
+- [x] **Feature**: GET `/api/servers/{id}/invites` Endpoint hinzugefügt
+- [x] **Security**: `attach_files` Permission-Check in multipart Upload Route hinzugefügt
+- [x] **UX**: `data-testid` Attribute in ServerSettingsOverlay (Rollen, Members, General)
+- [x] README.md: SMTP-Optional-Hinweis hinzugefügt
+
+---
+
+## Architektur
+
+```
+/app/
+├── backend/
+│   ├── app/
+│   │   ├── routes/          # Modulare API-Routen
+│   │   ├── permissions.py   # Zentrales Berechtigungssystem
+│   │   ├── blob_storage.py  # MinIO/S3 (optional)
+│   │   ├── emailing.py      # SMTP (optional)
+│   │   └── voice_access.py  # LiveKit
+│   └── tests/               # pytest Test-Suite
+├── frontend/
+│   ├── src/
+│   │   ├── components/      # ChatArea, VoiceMediaStage, Settings
+│   │   ├── contexts/        # Auth, Runtime, E2EE
+│   │   └── lib/             # API, voiceEngine, inviteLinks
+├── desktop/                 # Tauri v2 App
+│   └── src-tauri/
+│       ├── src/main.rs      # (Bugs gefixt)
+│       └── Cargo.toml
+├── deploy/                  # Nginx, Docker configs
+├── docs/                    # Dokumentation
+└── install.sh               # Self-hosted Quickstart
+```
+
+---
+
+## Priorisiertes Backlog
+
+### P0 (Kritisch)
+- [ ] Rust auf Build-Server installieren und `tauri build` ausführen (Compile-Check)
+
+### P1 (Wichtig)
+- [ ] Tauri Desktop App – vollständiger lokaler Build-Test auf User-Maschine
+- [ ] Multi-Turn-Chat-Sessions mit Desktop-App testen
+
+### P2 (Nice-to-have)
+- [ ] UI/UX Polish nach User-Feedback
+- [ ] E2EE Audit (Third-Party Pentest)
+- [ ] Push-Benachrichtigungen (web-push API)
+- [ ] Mobile Web-App Optimierungen
+
+---
+
+## Aktuelle Test-Credentials
+- Admin: admin@singravox.local / AdminPass123!
+- TestUser2: testuser2@test.de / TestPass123!
+- TestUser3: testuser3@test.de / TestPass123!
+
+## Bekannte Einschränkungen (Preview-Umgebung)
+- MinIO nicht aktiv (E2EE Blobs werden lokal im Filesystem gespeichert)
+- Mailpit nicht aktiv (Auto-Verify bei Registrierung)
+- LiveKit nicht aktiv (Voice-Token generiert, aber WebRTC nicht möglich)
+ (Stand: 2026-04-03)
 
 ## Original Problem Statement
 "Es ist eine Discord-Alternative mit E2E-Verschlüsselung und vieles mehr. Backend muss getrennt bleiben, self-hosted. Tauri Desktop + Webversion. Server-Install per einem Command. Richte alles ein, Docs aktuell halten."

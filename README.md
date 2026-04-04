@@ -113,7 +113,7 @@ Wichtige Variablen:
 
 | Variable | Bedeutung |
 |----------|-----------|
-| `SMTP_HOST` | SMTP-Server für E-Mail-Verifikation |
+| `SMTP_HOST` | SMTP-Server für E-Mail-Verifikation (optional – ohne SMTP werden neue User automatisch verifiziert) |
 | `LIVEKIT_PUBLIC_URL` | Öffentliche URL für Voice-Verbindungen |
 | `S3_ENDPOINT_URL` | S3-kompatibler Storage (Standard: internes MinIO) |
 | `JWT_SECRET` | Wird beim Install automatisch generiert – nicht ändern! |

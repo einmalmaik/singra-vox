@@ -155,6 +155,15 @@ async def upload_multipart(
     """Upload a file using multipart/form-data (large files, desktop app)."""
     user = await _get_current_user(request)
 
+    # Kanal-Permission prüfen wenn ein Channel angegeben wurde
+    if channel_id:
+        channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
+        if channel:
+            await assert_channel_permission(
+                db, user["id"], channel, "attach_files",
+                "Keine Berechtigung, Dateien in diesem Kanal hochzuladen"
+            )
+
     raw_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(raw_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "File exceeds the maximum allowed size")
