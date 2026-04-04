@@ -1,70 +1,79 @@
 {
-  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/tauri-v2/crates/tauri-cli/schema.json",
-  "productName": "Singra Vox",
-  "version": "0.2.0",
-  "identifier": "io.singravox.app",
-  "build": {
-    "beforeBuildCommand": "yarn --cwd ../frontend build",
-    "beforeDevCommand": "yarn --cwd ../frontend start",
-    "devUrl": "http://localhost:3000",
-    "frontendDist": "../../frontend/build"
-  },
-  "app": {
-    "windows": [
-      {
-        "title": "Singra Vox",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "resizable": true,
-        "fullscreen": false,
-        "decorations": true
-      }
-    ],
-    "security": {
-      "csp": "default-src 'self' asset: http://localhost:3000 http://127.0.0.1:3000 http://tauri.localhost; img-src 'self' asset: data: blob: http://localhost:3000 http://127.0.0.1:3000 http://localhost:8080 http://127.0.0.1:8080 https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:* http://127.0.0.1:* http://tauri.localhost ws://localhost:* ws://127.0.0.1:* https: wss:; media-src 'self' blob: mediastream: data:; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self';"
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "icon": [
-      "icons/icon.ico",
-      "icons/icon.png"
-    ],
-    "linux": {
-      "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libayatana-appindicator3-1"]
-      }
+    "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/tauri-v2/crates/tauri-cli/schema.json",
+    "productName": "Singra Vox",
+    "version": "0.2.0",
+    "identifier": "io.singravox.app",
+    "build": {
+        "beforeBuildCommand": "yarn --cwd ../frontend build",
+        "beforeDevCommand": "yarn --cwd ../frontend start",
+        "devUrl": "http://localhost:3000",
+        "frontendDist": "../../frontend/build"
     },
-    "macOS": {
-      "minimumSystemVersion": "10.15",
-      "signingIdentity": null
+    "app": {
+        "windows": [
+            {
+                "title": "Singra Vox",
+                "width": 1200,
+                "height": 800,
+                "minWidth": 800,
+                "minHeight": 600,
+                "resizable": true,
+                "fullscreen": false,
+                "decorations": true
+            }
+        ],
+        "security": {
+            "csp": "default-src 'self' asset: http://localhost:3000 http://127.0.0.1:3000 http://tauri.localhost; img-src 'self' asset: data: blob: http://localhost:3000 http://127.0.0.1:3000 http://localhost:8080 http://127.0.0.1:8080 https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://localhost:* http://127.0.0.1:* http://tauri.localhost ws://localhost:* ws://127.0.0.1:* https: wss:; media-src 'self' blob: mediastream: data:; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self';"
+        }
     },
-    "windows": {
-      "nsis": {
-        "displayLanguageSelector": true,
-        "installMode": "perMachine"
-      },
-      "wix": {
-        "language": "de-DE"
-      }
-    }
-  },
-  "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": ["singravox"]
-      }
+    "bundle": {
+        "active": true,
+        "targets": "all",
+        "icon": [
+            "icons/32x32.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico",
+            "icons/icon.png"
+        ],
+        "linux": {
+            "deb": {
+                "depends": [
+                    "libwebkit2gtk-4.1-0",
+                    "libayatana-appindicator3-1"
+                ]
+            }
+        },
+        "macOS": {
+            "minimumSystemVersion": "10.15",
+            "signingIdentity": null
+        },
+        "windows": {
+            "nsis": {
+                "displayLanguageSelector": true,
+                "installMode": "perMachine"
+            },
+            "wix": {
+                "language": "de-DE"
+            }
+        }
     },
-    "updater": {
-      "pubkey": "RWQppVVhbeZPpInv3S8HHnYNkRapC3pe7RY27Rjlnh6WcfNJ++8RJv26",
-      "endpoints": [
-        "https://github.com/einmalmaik/singra-vox/releases/latest/download/latest.json"
-      ],
-      "dialog": false,
-      "active": false
+    "plugins": {
+        "deep-link": {
+            "desktop": {
+                "schemes": [
+                    "singravox"
+                ]
+            }
+        },
+        "updater": {
+            "pubkey": "RWSR8DRh5csuzbWojabGXrEKtYSbteHq21LumnMlw6V8zAFgoKt/SkzV",
+            "endpoints": [
+                "https://github.com/einmalmaik/singra-vox/releases/latest/download/latest.json"
+            ],
+            "dialog": false,
+            "active": false
+        }
     }
-  }
 }
