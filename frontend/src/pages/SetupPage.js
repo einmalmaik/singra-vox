@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { toast } from "sonner";
-import { clearDesktopInstanceUrl } from "@/lib/runtimeConfig";
 
 
 
@@ -52,7 +51,9 @@ export default function SetupPage() {
   };
 
   const handleBack = async () => {
-    await clearDesktopInstanceUrl();
+    // disconnectFromInstance() aktualisiert auch den RuntimeContext-State,
+    // sodass AppRoutes sofort zur /connect-Seite wechselt (Back-Button-Fix).
+    await disconnectFromInstance();
     navigate("/connect");
   };
 

@@ -549,11 +549,18 @@ struct UpdateInfo {
 }
 
 /// Wird beim App-Start im Hintergrund aufgerufen.
-/// Findet ein Update → sendet "update-available" Event an das Frontend.
+/// Sendet update-checking → update-available oder update-not-available.
 async fn check_for_update(app: tauri::AppHandle) {
+    // Dem Frontend signalisieren, dass wir gerade prüfen
+    let current_version = app.package_info().version.to_string();
+    let _ = app.emit("update-checking", serde_json::json!({ "currentVersion": current_version }));
+
     let updater = match app.updater() {
         Ok(u) => u,
-        Err(_) => return,
+        Err(_) => {
+            let _ = app.emit("update-not-available", ());
+            return;
+        }
     };
 
     match updater.check().await {
@@ -569,10 +576,11 @@ async fn check_for_update(app: tauri::AppHandle) {
             );
         }
         Ok(None) => {
-            // Kein Update verfügbar – kein Event nötig
+            let _ = app.emit("update-not-available", ());
         }
         Err(_) => {
             // Netzwerkfehler – still ignorieren (kein Internet etc.)
+            let _ = app.emit("update-not-available", ());
         }
     }
 }

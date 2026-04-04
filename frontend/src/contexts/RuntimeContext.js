@@ -12,6 +12,28 @@ const EMPTY_SETUP_STATUS = {
   instance_name: "",
 };
 
+// ── Setup-Status-Cache (verhindert Setup-Screen nach Neustart/Update) ────────
+const SETUP_CACHE_KEY = "singravox.setup_status_cache";
+
+function loadCachedSetupStatus() {
+  try {
+    const raw = window.localStorage.getItem(SETUP_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function cacheSetupStatus(status) {
+  try {
+    if (status?.initialized) {
+      window.localStorage.setItem(SETUP_CACHE_KEY, JSON.stringify(status));
+    }
+  } catch { /* ignore */ }
+}
+
+function clearSetupCache() {
+  try { window.localStorage.removeItem(SETUP_CACHE_KEY); } catch { /* ignore */ }
+}
+
 export function RuntimeProvider({ children }) {
   const [config, setConfig] = useState(null);
   const [setupStatus, setSetupStatus] = useState(EMPTY_SETUP_STATUS);
@@ -24,13 +46,26 @@ export function RuntimeProvider({ children }) {
     }
 
     configureApi(targetConfig);
-    const res = await api.get("/setup/status");
-    const normalizedStatus = {
-      ...res.data,
-      server_count: res.data?.server_count ?? res.data?.community_count ?? 0,
-    };
-    setSetupStatus(normalizedStatus);
-    return normalizedStatus;
+    try {
+      const res = await api.get("/setup/status");
+      const normalizedStatus = {
+        ...res.data,
+        server_count: res.data?.server_count ?? res.data?.community_count ?? 0,
+      };
+      setSetupStatus(normalizedStatus);
+      cacheSetupStatus(normalizedStatus);       // Cache für Neustart/Update
+      return normalizedStatus;
+    } catch {
+      // Netzwerk- oder Server-Fehler: gecachten Status verwenden damit
+      // nach einem Update / Neustart nicht der Setup-Screen erscheint.
+      const cached = loadCachedSetupStatus();
+      if (cached) {
+        setSetupStatus(cached);
+        return cached;
+      }
+      setSetupStatus(EMPTY_SETUP_STATUS);
+      return EMPTY_SETUP_STATUS;
+    }
   }, []);
 
   useEffect(() => {
@@ -70,6 +105,7 @@ export function RuntimeProvider({ children }) {
 
   const disconnectFromInstance = useCallback(async () => {
     await clearDesktopInstanceUrl();
+    clearSetupCache();                               // Cache löschen beim Disconnect
     const emptyConfig = await loadRuntimeConfig(); // liest localStorage neu → needsConnection: true
     setConfig(emptyConfig);
     setSetupStatus(EMPTY_SETUP_STATUS);

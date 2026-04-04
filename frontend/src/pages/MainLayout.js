@@ -130,6 +130,7 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const wsRef = useRef(null);
   const reconnectTimer = useRef(null);
+  const reconnectAttempt = useRef(0);
   const heartbeatTimer = useRef(null);
   const sessionInvalidatedRef = useRef(false);
   const voiceRef = useRef(null);
@@ -141,6 +142,9 @@ export default function MainLayout() {
     web_push_enabled: true,
     desktop_push_enabled: true,
   });
+
+  // WS-Verbindungsstatus (für Reconnect-Banner)
+  const [wsConnected, setWsConnected] = useState(false);
 
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
@@ -766,6 +770,8 @@ export default function MainLayout() {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      setWsConnected(true);
+      reconnectAttempt.current = 0;   // Backoff zurücksetzen bei erfolgreicher Verbindung
       if (heartbeatTimer.current) {
         clearInterval(heartbeatTimer.current);
       }
@@ -797,6 +803,7 @@ export default function MainLayout() {
     };
 
     ws.onclose = () => {
+      setWsConnected(false);
       if (heartbeatTimer.current) {
         clearInterval(heartbeatTimer.current);
         heartbeatTimer.current = null;
@@ -807,7 +814,10 @@ export default function MainLayout() {
       if (sessionInvalidatedRef.current) {
         return;
       }
-      reconnectTimer.current = setTimeout(connectWs, 3000);
+      // Exponential Backoff: 1s → 2s → 4s → 8s → max 30s
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
+      reconnectAttempt.current += 1;
+      reconnectTimer.current = setTimeout(connectWs, delay);
     };
 
     ws.onerror = () => ws.close();
@@ -981,6 +991,17 @@ export default function MainLayout() {
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-transparent p-2 gap-2" data-testid="main-layout">
+      {/* WS-Reconnect-Banner */}
+      {!wsConnected && (
+        <div
+          className="fixed top-0 left-0 right-0 z-[60] flex items-center justify-center gap-2 py-1 text-xs font-medium"
+          style={{ background: "rgba(161,161,170,0.15)", borderBottom: "1px solid rgba(161,161,170,0.15)", color: "#a1a1aa" }}
+          data-testid="ws-reconnect-banner"
+        >
+          <div className="w-2.5 h-2.5 border border-zinc-400 border-t-transparent rounded-full animate-spin" />
+          <span>Verbindung unterbrochen – verbinde erneut…</span>
+        </div>
+      )}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute -left-24 -top-24 h-[30rem] w-[30rem] rounded-full bg-cyan-500/10 blur-[120px]" />
         <div className="absolute -right-24 bottom-[-8rem] h-[26rem] w-[26rem] rounded-full bg-zinc-500/12 blur-[120px]" />
