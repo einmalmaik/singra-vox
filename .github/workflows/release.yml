@@ -1,63 +1,32 @@
 name: Singra Vox Release
 
-# ── Auslöser ──────────────────────────────────────────────────────────────────
-# Wird ausgeführt wenn ein Tag wie v1.0.0 gepusht wird
-# Beispiel:  git tag v0.2.0 && git push origin v0.2.0
+# Wird ausgelöst wenn ein Tag wie v1.0.0 gepusht wird
+# Beispiel:  git tag v0.3.0 && git push origin v0.3.0
 on:
   push:
     tags:
       - "v*.*.*"
 
-env:
-  # Wird von tauri-action für signierte Updates benötigt
-  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
 jobs:
-  # ── Schritt 1: Release erstellen ─────────────────────────────────────────────
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create-release.outputs.id }}
-      upload_url: ${{ steps.create-release.outputs.upload_url }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: GitHub Release erstellen
-        id: create-release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          prerelease: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ── Schritt 2: Desktop-Apps bauen (alle 3 Plattformen) ───────────────────────
+  # ── Desktop-Apps bauen (Windows, Linux, macOS) ────────────────────────────
   build-desktop:
-    needs: create-release
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Windows: .msi + .exe (NSIS)
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             label: windows
-          # macOS Intel
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            label: macos-intel
-          # macOS Apple Silicon
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            label: macos-arm
-          # Linux: .deb + .AppImage
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             label: linux
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            label: macos
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -79,8 +48,7 @@ jobs:
         with:
           workdir: desktop/src-tauri
 
-      # Linux: System-Abhängigkeiten
-      - name: Linux-Abhängigkeiten
+      - name: Linux-Systemabhängigkeiten
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
@@ -89,56 +57,45 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libgtk-3-dev \
-            libxdo-dev \
-            libxcb-composite0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libx11-dev \
             pkg-config
-
-      # macOS: Notarisierung konfigurieren (optional, nur wenn Certs vorhanden)
-      - name: macOS Signing einrichten
-        if: startsWith(matrix.os, 'macos') && env.APPLE_CERTIFICATE != ''
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
-          security create-keychain -p "" build.keychain
-          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
-          security default-keychain -s build.keychain
 
       - name: Frontend-Abhängigkeiten installieren
         run: yarn install --frozen-lockfile
         working-directory: frontend
 
-      - name: Desktop npm-Abhängigkeiten installieren
+      - name: Desktop-Abhängigkeiten installieren
         run: yarn install --frozen-lockfile
         working-directory: desktop
 
-      # ── Tauri bauen ────────────────────────────────────────────────────────
-      - name: Tauri Desktop-App bauen
+      # tauri-action erstellt den Release selbst und lädt alle Installer hoch
+      - name: Tauri Desktop-App bauen & Release befüllen
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS Notarisierung (optional)
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseName: "Singra Vox ${{ github.ref_name }}"
+          releaseBody: |
+            ## Singra Vox ${{ github.ref_name }}
+
+            ### Download
+            | Plattform | Datei |
+            |-----------|-------|
+            | Windows   | `Singra.Vox_*_x64-setup.exe` oder `.msi` |
+            | Linux     | `singra-vox_*_amd64.deb` oder `.AppImage` |
+            | macOS     | `Singra.Vox_*_aarch64.dmg` |
+
+            ### Selfhosting
+            Server-Images: `ghcr.io/einmalmaik/singra-vox/backend` und `/web`
+          releaseDraft: true
+          prerelease: false
           args: --target ${{ matrix.target }}
 
-  # ── Schritt 3: Server-Docker-Images bauen + pushen ───────────────────────────
+  # ── Server Docker-Images bauen & zu GHCR pushen ──────────────────────────
   build-server:
-    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -161,7 +118,7 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Backend-Image bauen + pushen
+      - name: Backend-Image bauen und pushen
         uses: docker/build-push-action@v5
         with:
           context: backend
@@ -171,7 +128,7 @@ jobs:
             ghcr.io/${{ github.repository }}/backend:latest
             ghcr.io/${{ github.repository }}/backend:${{ steps.version.outputs.version }}
 
-      - name: Frontend-Image bauen + pushen
+      - name: Frontend-Image bauen und pushen
         uses: docker/build-push-action@v5
         with:
           context: frontend
@@ -183,17 +140,20 @@ jobs:
             ghcr.io/${{ github.repository }}/web:latest
             ghcr.io/${{ github.repository }}/web:${{ steps.version.outputs.version }}
 
-  # ── Schritt 4: update.json für Tauri Updater erstellen ──────────────────────
-  publish-updater:
-    needs: [create-release, build-desktop]
+  # ── Draft-Release veröffentlichen (nachdem alle Builds fertig sind) ────────
+  publish-release:
+    needs: [build-desktop, build-server]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Release veröffentlichen (Draft → Veröffentlicht)
+      - name: Release veröffentlichen (Draft → Öffentlich)
         uses: softprops/action-gh-release@v2
         with:
-          release_id: ${{ needs.create-release.outputs.release_id }}
+          tag_name: ${{ github.ref_name }}
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

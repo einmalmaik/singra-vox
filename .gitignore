@@ -14,8 +14,18 @@ memory/
 .emergent/
 test_reports/
 _archive/
-/app/memory/
 *.emergent
+
+# ── KI-Assistenten (Cursor, Claude Code, Codex, Aider usw.) ──────────────────
+.cursor/
+.claude/
+CLAUDE.md
+.aider*
+.codex/
+codex.md
+.copilot/
+.github/copilot*
+*.agent.md
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
