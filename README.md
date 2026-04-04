@@ -12,7 +12,7 @@ Eine selbst-gehostete, verschlüsselte Chat-Plattform. Wie Discord – nur unter
 ## Schnellstart
 
 ```bash
-git clone https://github.com/DEIN_USER/singra-vox.git
+git clone https://github.com/einmalmaik/singra-vox.git
 cd singra-vox
 bash install.sh
 ```

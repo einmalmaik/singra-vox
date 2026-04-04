@@ -37,7 +37,7 @@ Den Inhalt in `desktop/src-tauri/tauri.conf.json` eintragen:
 In `desktop/src-tauri/tauri.conf.json`:
 ```json
 "endpoints": [
-  "https://github.com/DEIN_USERNAME/singra-vox/releases/latest/download/latest.json"
+  "https://github.com/einmalmaik/singra-vox/releases/latest/download/latest.json"
 ]
 ```
 
