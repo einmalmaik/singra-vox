@@ -140,9 +140,9 @@ jobs:
             ghcr.io/${{ github.repository }}/web:latest
             ghcr.io/${{ github.repository }}/web:${{ steps.version.outputs.version }}
 
-  # ── Draft-Release veröffentlichen (nachdem alle Builds fertig sind) ────────
+  # ── Draft-Release veröffentlichen (sobald alle Desktop-Builds fertig sind) ──
   publish-release:
-    needs: [build-desktop, build-server]
+    needs: [build-desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
