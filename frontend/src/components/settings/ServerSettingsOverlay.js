@@ -693,22 +693,23 @@ export default function ServerSettingsOverlay({
       activeSection={activeSection}
       onSectionChange={setActiveSection}
       onClose={onClose}
+      data-testid="server-settings-overlay"
     >
       {activeSection === "general" && (
-        <div className="space-y-6">
+        <div className="space-y-6" data-testid="server-settings-general">
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
             <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.general")}</h3>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("server.serverName")}</Label>
-                <Input value={serverName} onChange={(event) => setServerName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                <Input data-testid="server-name-input" value={serverName} onChange={(event) => setServerName(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
               </div>
               <div className="space-y-2">
                 <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.descriptionLabel")}</Label>
-                <Input value={serverDescription} onChange={(event) => setServerDescription(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+                <Input data-testid="server-description-input" value={serverDescription} onChange={(event) => setServerDescription(event.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
               </div>
             </div>
-            <Button onClick={saveGeneral} className="mt-5 bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveChanges")}</Button>
+            <Button data-testid="server-save-general-btn" onClick={saveGeneral} className="mt-5 bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveChanges")}</Button>
           </section>
 
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
@@ -972,10 +973,11 @@ export default function ServerSettingsOverlay({
       )}
 
       {activeSection === "roles" && (
-        <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]" data-testid="server-settings-roles">
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-4">
             <div className="mb-4 flex gap-2">
               <Input
+                data-testid="new-role-name-input"
                 value={newRoleName}
                 onChange={(event) => setNewRoleName(event.target.value)}
                 placeholder={t("serverSettings.newRolePlaceholder")}
@@ -995,7 +997,7 @@ export default function ServerSettingsOverlay({
               </div>
               <Switch checked={newRoleMentionable} onCheckedChange={setNewRoleMentionable} />
             </div>
-            <Button onClick={createRole} disabled={!newRoleName.trim()} className="mb-4 w-full bg-cyan-400 text-zinc-950 hover:bg-cyan-300">
+            <Button data-testid="create-role-btn" onClick={createRole} disabled={!newRoleName.trim()} className="mb-4 w-full bg-cyan-400 text-zinc-950 hover:bg-cyan-300">
               <Plus size={14} className="mr-2" />
               {t("common.create")} {t("server.roles")}
             </Button>
@@ -1069,7 +1071,7 @@ export default function ServerSettingsOverlay({
                   </div>
                 )}
 
-                <Button onClick={saveRole} className="mt-5 bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveRole")}</Button>
+                <Button data-testid="save-role-btn" onClick={saveRole} className="mt-5 bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveRole")}</Button>
 
                 <div className="mt-6 grid gap-3 md:grid-cols-2">
                   {Object.entries(permissionLabels).map(([permissionKey, label]) => (
@@ -1091,10 +1093,10 @@ export default function ServerSettingsOverlay({
       )}
 
       {activeSection === "members" && (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]" data-testid="server-settings-members">
           <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
             <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.members")}</h3>
-            <ScrollArea className="mt-5 h-[560px] pr-4">
+            <ScrollArea className="mt-5 h-[560px] pr-4" data-testid="members-list">
               <div className="space-y-4">
                 {members?.map((member) => {
                   const isOwner = server?.owner_id === member.user_id;

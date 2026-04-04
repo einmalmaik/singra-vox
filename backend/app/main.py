@@ -1073,9 +1073,21 @@ async def register(inp: RegisterInput, response: Response):
     await db.users.insert_one(user)
     try:
         verification_state = await issue_email_verification(user)
-    except Exception:
-        await db.users.delete_one({"id": uid})
-        raise HTTPException(503, "Verification email could not be sent")
+    except Exception as exc:
+        # SMTP nicht verfügbar → User auto-verifizieren statt löschen
+        logger.warning("Verification email konnte nicht gesendet werden (%s) – User wird auto-verifiziert", exc)
+        await db.users.update_one(
+            {"id": uid},
+            {"$set": {"email_verified": True, "email_verified_at": now_utc()}},
+        )
+        response.delete_cookie("access_token", path="/")
+        response.delete_cookie("refresh_token", path="/")
+        return {
+            "ok": True,
+            "verification_required": False,
+            "email": email,
+            "expires_at": None,
+        }
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
     return {
@@ -3385,7 +3397,11 @@ async def startup():
     # ── Files index (local-filesystem storage) ─────────────────────────────
     await db.files.create_index("id", unique=True)
     await db.files.create_index([("uploaded_by", 1), ("created_at", -1)])
-    await ensure_bucket()
+
+    try:
+        await ensure_bucket()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("S3/MinIO Bucket-Initialisierung fehlgeschlagen (E2EE-Blobs deaktiviert): %s", exc)
 
     await migrate_legacy_instance_state()
     await migrate_default_roles()

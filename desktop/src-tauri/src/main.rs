@@ -6,6 +6,7 @@ mod native_capture;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_updater::UpdaterExt;
 
 #[cfg(target_os = "windows")]
 use rdev::{listen, Event, EventType, Key};
@@ -634,13 +635,17 @@ async fn install_update_command(app: tauri::AppHandle) -> Result<(), String> {
 
 fn main() {
     let desktop_state = DesktopState::default();
-    let capture_state = native_capture::DesktopCaptureStore::default();
     #[cfg(target_os = "windows")]
     let ptt_state = desktop_state.ptt.clone();
 
-    tauri::Builder::default()
-        .manage(desktop_state)
-        .manage(capture_state)
+    let builder = tauri::Builder::default()
+        .manage(desktop_state);
+
+    // DesktopCaptureStore wird nur auf Windows/macOS kompiliert (crabgrab)
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let builder = builder.manage(native_capture::DesktopCaptureStore::default());
+
+    builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_deep_link::init())
