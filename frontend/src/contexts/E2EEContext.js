@@ -117,6 +117,11 @@ export function E2EEProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const autoInitRef = useRef(false);  // verhindert mehrfache Auto-Init
 
+  // Stabile Refs für initializeE2EE/restoreE2EE – damit der Auto-Init-Effect
+  // nicht bei jeder Config-Änderung neu starten muss.
+  const initE2EEFnRef = useRef(null);
+  const restoreE2EEFnRef = useRef(null);
+
   const applyDeviceHeader = useCallback((deviceId) => {
     setApiSession({ deviceId: deviceId || null });
   }, []);
@@ -230,52 +235,61 @@ export function E2EEProvider({ children }) {
     return nextIdentity;
   }, [applyDeviceHeader, config, identity, refreshState]);
 
-  // Auto-Init E2EE nach Login (2 s verzögert damit UI zuerst rendert)
+  // Refs synchron halten damit Auto-Init/Restore die neueste Version nutzt,
+  // ohne sie als useEffect-Dependency führen zu müssen.
+  useEffect(() => { initE2EEFnRef.current = initializeE2EE; }, [initializeE2EE]);
+  useEffect(() => { restoreE2EEFnRef.current = restoreE2EE; }, [restoreE2EE]);
+
+  // Auto-Init E2EE nach Login (feuert EINMALIG wenn alles stabil ist).
+  // Lösung für den Loop-Bug: initializeE2EE ist NICHT in den Deps – stattdessen
+  // nutzen wir initE2EEFnRef. Dadurch lösen Config-Änderungen keinen Cleanup aus.
+  // Fire-and-forget: kein Cleanup der den Ref zurücksetzt, damit keine Dep-Änderung
+  // mitten im 2-Sekunden-Fenster den Init abbricht.
   useEffect(() => {
     if (loading || !user || state.enabled || identity || autoInitRef.current) return;
     autoInitRef.current = true;
 
-    const timer = setTimeout(async () => {
+    void (async () => {
+      // 2 s warten damit alle Context-Importe und Config-Loads abgeschlossen sind
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Sicherheitscheck: wurde E2EE inzwischen von woanders aktiviert?
+      if (autoInitRef.current === false) return; // wurde zurückgesetzt → abbrechen
       try {
         const passphrase = getOrCreateAutoPassphrase();
         const deviceName =
           (typeof navigator !== "undefined" && navigator.platform ? navigator.platform : "Gerät") +
           " (Auto)";
-        await initializeE2EE({ passphrase, deviceName });
+        await initE2EEFnRef.current({ passphrase, deviceName });
       } catch {
-        autoInitRef.current = false; // Bei Fehler nächstes Mal erneut versuchen
+        autoInitRef.current = false; // Bei Fehler beim nächsten Render nochmal
       }
-    }, 2000);
-
-    // WICHTIG: Ref zurücksetzen wenn der Effect neu läuft (z.B. wenn initializeE2EE
-    // sich durch Config-Laden ändert) – sonst bleibt autoInitRef.current=true und
-    // der Timer wird gelöscht ohne neu zu starten.
-    return () => {
-      clearTimeout(timer);
-      autoInitRef.current = false;
-    };
-  }, [loading, user, state.enabled, identity, initializeE2EE]);
+    })();
+    // Kein Cleanup der autoInitRef zurücksetzt – das ist absichtlich:
+    // Die async-Funktion läuft durch, selbst wenn der Effect neu triggert.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, user, state.enabled, identity]);
 
   // Auto-Restore E2EE auf neuem Gerät (E2EE aktiv, aber keine lokale Identity)
   useEffect(() => {
     if (loading || !user || !state.enabled || identity || autoInitRef.current) return;
     autoInitRef.current = true;
 
-    const timer = setTimeout(async () => {
+    void (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (autoInitRef.current === false) return;
       const storedPp = getStoredAutoPassphrase();
       if (!storedPp) return; // Kein Passwort gespeichert → manuelles Restore nötig
       try {
         const deviceName =
           (typeof navigator !== "undefined" && navigator.platform ? navigator.platform : "Gerät") +
           " (Auto)";
-        await restoreE2EE({ passphrase: storedPp, deviceName });
+        await restoreE2EEFnRef.current({ passphrase: storedPp, deviceName });
       } catch {
         autoInitRef.current = false;
       }
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [loading, user, state.enabled, identity, restoreE2EE]);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, user, state.enabled, identity]);
 
   const approveDevice = useCallback(async (deviceId) => {
     await api.post(`/e2ee/devices/${deviceId}/approve`);
