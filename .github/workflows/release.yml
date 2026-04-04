@@ -100,6 +100,7 @@ jobs:
           print("Cargo.toml:", m.group(1) if m else "NOT FOUND")
 
       # tauri-action erstellt den Release selbst und lädt alle Installer hoch
+      # updaterJsonPreferNsis=true → NSIS-Bundle (.nsis.zip) für Windows-Updates bevorzugen
       - name: Tauri Desktop-App bauen & Release befüllen
         uses: tauri-apps/tauri-action@v0
         env:
@@ -124,6 +125,7 @@ jobs:
             Server-Images: `ghcr.io/einmalmaik/singra-vox/backend` und `/web`
           releaseDraft: true
           prerelease: false
+          updaterJsonPreferNsis: true
           args: --target ${{ matrix.target }}
 
   # ── Server Docker-Images bauen & zu GHCR pushen ──────────────────────────
