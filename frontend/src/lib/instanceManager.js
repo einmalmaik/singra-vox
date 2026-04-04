@@ -37,6 +37,8 @@ export function saveInstance({ name, url, email = "", password = "" }) {
     name: name || normalizedUrl,
     url: normalizedUrl,
     savedAt: new Date().toISOString(),
+    lastUsedAt: existingIdx >= 0 ? (instances[existingIdx].lastUsedAt || null) : null,
+    isFavorite: existingIdx >= 0 ? (instances[existingIdx].isFavorite || false) : false,
     email: email || "",
     _pw: _obfuscate(password),
   };
@@ -47,6 +49,34 @@ export function saveInstance({ name, url, email = "", password = "" }) {
   }
   window.localStorage.setItem(INSTANCES_KEY, JSON.stringify(instances));
   return instances;
+}
+
+/** Setzt `lastUsedAt` auf jetzt (beim Verbinden aufrufen). */
+export function markInstanceUsed(id) {
+  const instances = getSavedInstances().map((i) =>
+    i.id === id ? { ...i, lastUsedAt: new Date().toISOString() } : i
+  );
+  window.localStorage.setItem(INSTANCES_KEY, JSON.stringify(instances));
+  return instances;
+}
+
+/** Toggled den Favoriten-Stern einer Instanz. */
+export function toggleInstanceFavorite(id) {
+  const instances = getSavedInstances().map((i) =>
+    i.id === id ? { ...i, isFavorite: !i.isFavorite } : i
+  );
+  window.localStorage.setItem(INSTANCES_KEY, JSON.stringify(instances));
+  return instances;
+}
+
+/** Sortiert Instanzen: Favoriten zuerst, dann nach lastUsedAt (neueste zuerst). */
+export function sortedInstances(instances) {
+  return [...instances].sort((a, b) => {
+    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
+    const ta = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
+    const tb = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
+    return tb - ta;
+  });
 }
 
 /** Löscht eine gespeicherte Instanz nach ID. */

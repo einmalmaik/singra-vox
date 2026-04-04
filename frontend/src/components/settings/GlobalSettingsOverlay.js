@@ -52,6 +52,9 @@ import {
   removeInstance,
   getInstancePassword,
   getActiveInstanceUrl,
+  markInstanceUsed,
+  toggleInstanceFavorite,
+  sortedInstances,
 } from "@/lib/instanceManager";
 
 const SECTION_CONFIG = [
@@ -1350,7 +1353,7 @@ export default function GlobalSettingsOverlay({
               <p className="text-sm text-zinc-600 py-4 text-center">Noch keine Instanzen gespeichert.</p>
             )}
             <div className="space-y-2">
-              {savedInstances.map((inst) => {
+              {sortedInstances(savedInstances).map((inst) => {
                 const activeUrl = getActiveInstanceUrl() || window.location.origin;
                 const isActive = inst.url === activeUrl || inst.url === activeUrl.replace(/\/+$/, "");
                 return (
@@ -1358,16 +1361,35 @@ export default function GlobalSettingsOverlay({
                     key={inst.id}
                     className="flex items-center gap-3 rounded-xl px-4 py-3"
                     style={{
-                      background: isActive ? "rgba(34,211,238,0.07)" : "rgba(255,255,255,0.03)",
-                      border: isActive ? "1px solid rgba(34,211,238,0.2)" : "1px solid rgba(255,255,255,0.06)",
+                      background: isActive ? "rgba(34,211,238,0.07)" : inst.isFavorite ? "rgba(251,191,36,0.04)" : "rgba(255,255,255,0.03)",
+                      border: isActive ? "1px solid rgba(34,211,238,0.2)" : inst.isFavorite ? "1px solid rgba(251,191,36,0.15)" : "1px solid rgba(255,255,255,0.06)",
                     }}
                     data-testid={`instance-item-${inst.id}`}
                   >
+                    {/* Favoriten-Stern */}
+                    <button
+                      onClick={() => setSavedInstances(toggleInstanceFavorite(inst.id))}
+                      className="shrink-0 transition-colors"
+                      title={inst.isFavorite ? "Aus Favoriten entfernen" : "Als Favorit markieren"}
+                      data-testid={`instance-star-btn-${inst.id}`}
+                    >
+                      <Plus
+                        size={14}
+                        weight={inst.isFavorite ? "fill" : "regular"}
+                        className={inst.isFavorite ? "text-yellow-400" : "text-zinc-600 hover:text-yellow-400"}
+                        style={{ transform: "rotate(45deg)" }}
+                      />
+                    </button>
                     <DesktopTower size={15} className={isActive ? "text-cyan-400" : "text-zinc-500"} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-white truncate">{inst.name}</p>
                       <p className="text-xs text-zinc-500 truncate">{inst.url}</p>
                       {inst.email && <p className="text-xs text-zinc-600 truncate">{inst.email}</p>}
+                      {inst.lastUsedAt && (
+                        <p className="text-xs text-zinc-700 truncate">
+                          Zuletzt: {new Date(inst.lastUsedAt).toLocaleDateString("de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                      )}
                     </div>
                     {isActive ? (
                       <span className="text-xs text-cyan-400 font-medium shrink-0 px-2">Aktiv</span>
@@ -1380,6 +1402,7 @@ export default function GlobalSettingsOverlay({
                           setSwitchingInstance(inst.id);
                           try {
                             await connectToInstance(inst.url);
+                            setSavedInstances(markInstanceUsed(inst.id));
                             const pw = getInstancePassword(inst);
                             if (inst.email && pw) {
                               try {
@@ -1394,7 +1417,7 @@ export default function GlobalSettingsOverlay({
                                     window.localStorage.setItem("singravox.autoloading", JSON.stringify({ accessToken: data.access_token, refreshToken: data.refresh_token || "" }));
                                   }
                                 }
-                              } catch { /* Auto-Login fehlgeschlagen, normal weiter */ }
+                              } catch { /* Auto-Login fehlgeschlagen */ }
                             }
                             toast.success(`Verbunden mit ${inst.name}`);
                             setTimeout(() => window.location.reload(), 500);

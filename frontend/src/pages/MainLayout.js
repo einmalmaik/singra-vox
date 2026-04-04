@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { List, Paperclip, ShieldCheck, UsersThree, X } from "@phosphor-icons/react";
+import { ArrowsDownUp, ChatCircleDots, List, Paperclip, ShieldCheck, UsersThree, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
@@ -162,6 +162,8 @@ export default function MainLayout() {
   const [showMembers, setShowMembers] = useState(false);
   const [view, setView] = useState("server");
   const [dmConversations, setDmConversations] = useState([]);
+  // Sortierungsmodus für DMs: "recent" | "unread" | "name"
+  const [dmSortMode, setDmSortMode] = useState("recent");
   const [currentDmUser, setCurrentDmUser] = useState(null);
   const [dmMessages, setDmMessages] = useState([]);
   const [dmHistoryCursor, setDmHistoryCursor] = useState(null);
@@ -1103,39 +1105,82 @@ export default function MainLayout() {
       ) : view === "dm" ? (
         <>
           <div className="workspace-panel w-[280px] flex flex-col overflow-hidden" data-testid="dm-sidebar">
-            <div className="h-12 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0">
-              <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>{t("server.directMessages")}</h3>
+            {/* Header mit Sortierbutton */}
+            <div className="h-12 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0 gap-2">
+              <h3 className="text-sm font-bold text-white flex-1" style={{ fontFamily: "Manrope" }}>{t("server.directMessages")}</h3>
+              <button
+                onClick={() => setDmSortMode((m) => m === "recent" ? "unread" : m === "unread" ? "name" : "recent")}
+                title={dmSortMode === "recent" ? "Sortierung: Neueste zuerst" : dmSortMode === "unread" ? "Sortierung: Ungelesene zuerst" : "Sortierung: A–Z"}
+                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors relative"
+                data-testid="dm-sort-btn"
+              >
+                <ArrowsDownUp size={14} />
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-cyan-500" style={{ display: dmSortMode !== "recent" ? "block" : "none" }} />
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {dmConversations.map((conversation) => (
-                <button
-                  key={conversation.user.id}
-                  onClick={() => void selectDmUser(conversation.user)}
-                  data-testid={`dm-conv-${conversation.user.username}`}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-colors ${
-                    currentDmUser?.id === conversation.user.id
-                      ? "bg-cyan-500/12 text-white workspace-cyan-glow"
-                      : "text-[#A1A1AA] hover:bg-white/5 hover:text-white"
-                  }`}
-                >
-                  <div className="w-9 h-9 rounded-xl bg-zinc-800/80 flex items-center justify-center text-sm font-bold shrink-0">
-                    {conversation.user.avatar_url ? (
-                      <img src={resolveAssetUrl(conversation.user.avatar_url, config?.assetBase)} alt={conversation.user.display_name || conversation.user.username || "avatar"} className="h-full w-full rounded-xl object-cover" />
-                    ) : (
-                      conversation.user.display_name?.[0]?.toUpperCase() || "?"
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-1" data-testid="dm-conversations-list">
+              {/* Sortierte Konversationen */}
+              {[...dmConversations]
+                .sort((a, b) => {
+                  if (dmSortMode === "unread") {
+                    const diff = (b.unread_count || 0) - (a.unread_count || 0);
+                    if (diff !== 0) return diff;
+                  }
+                  if (dmSortMode === "name") {
+                    return (a.user?.display_name || "").localeCompare(b.user?.display_name || "");
+                  }
+                  // "recent": neueste Nachricht zuerst
+                  const ta = a.last_message?.created_at ? new Date(a.last_message.created_at).getTime() : 0;
+                  const tb = b.last_message?.created_at ? new Date(b.last_message.created_at).getTime() : 0;
+                  return tb - ta;
+                })
+                .map((conversation) => (
+                  <button
+                    key={conversation.user.id}
+                    onClick={() => void selectDmUser(conversation.user)}
+                    data-testid={`dm-conv-${conversation.user.username}`}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-colors ${
+                      currentDmUser?.id === conversation.user.id
+                        ? "bg-cyan-500/12 text-white workspace-cyan-glow"
+                        : "text-[#A1A1AA] hover:bg-white/5 hover:text-white"
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-zinc-800/80 flex items-center justify-center text-sm font-bold shrink-0 overflow-hidden">
+                      {conversation.user.avatar_url ? (
+                        <img src={resolveAssetUrl(conversation.user.avatar_url, config?.assetBase)} alt={conversation.user.display_name || conversation.user.username || "avatar"} className="h-full w-full object-cover" />
+                      ) : (
+                        conversation.user.display_name?.[0]?.toUpperCase() || "?"
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{conversation.user.display_name}</p>
+                      {conversation.last_message ? (
+                        <p className="text-xs text-[#71717A] truncate">{conversation.last_message.content}</p>
+                      ) : (
+                        <p className="text-xs text-[#52525B] italic truncate">Noch keine Nachrichten</p>
+                      )}
+                    </div>
+                    {conversation.unread_count > 0 && (
+                      <span className="bg-cyan-500 text-zinc-950 text-xs rounded-full w-5 h-5 flex items-center justify-center shrink-0 font-bold">
+                        {conversation.unread_count > 9 ? "9+" : conversation.unread_count}
+                      </span>
                     )}
+                  </button>
+                ))
+              }
+
+              {/* Empty State: keine DMs vorhanden */}
+              {dmConversations.length === 0 && (
+                <div className="flex flex-col items-center justify-center gap-3 py-12 px-4" data-testid="dm-empty-state">
+                  <div className="w-12 h-12 rounded-2xl bg-zinc-800/60 flex items-center justify-center">
+                    <ChatCircleDots size={22} weight="duotone" className="text-zinc-500" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{conversation.user.display_name}</p>
-                    <p className="text-xs text-[#71717A] truncate">{conversation.last_message?.content}</p>
-                  </div>
-                  {conversation.unread_count > 0 && (
-                    <span className="bg-cyan-500 text-zinc-950 text-xs rounded-full w-5 h-5 flex items-center justify-center shrink-0 font-bold">
-                      {conversation.unread_count}
-                    </span>
-                  )}
-                </button>
-              ))}
+                  <p className="text-xs text-zinc-600 text-center leading-relaxed">
+                    Noch keine Direktnachrichten.<br />Klick auf ein Mitglied um zu starten.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1219,8 +1264,14 @@ export default function MainLayout() {
               ) : null}
             </div>
           ) : (
-            <div className="workspace-panel flex-1 flex items-center justify-center text-[#71717A]">
-              {t("dm.selectConversation")}
+            <div className="workspace-panel flex-1 flex flex-col items-center justify-center gap-4" data-testid="dm-no-selection">
+              <div className="w-16 h-16 rounded-3xl bg-zinc-800/50 flex items-center justify-center">
+                <ChatCircleDots size={28} weight="duotone" className="text-zinc-600" />
+              </div>
+              <div className="text-center space-y-1">
+                <p className="text-sm font-semibold text-zinc-400">{t("dm.selectConversation")}</p>
+                <p className="text-xs text-zinc-600">Wähle eine Unterhaltung aus oder klick<br />auf ein Mitglied um zu schreiben.</p>
+              </div>
             </div>
           )}
         </>
