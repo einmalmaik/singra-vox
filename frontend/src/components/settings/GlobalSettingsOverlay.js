@@ -587,52 +587,6 @@ export default function GlobalSettingsOverlay({
     }
   };
 
-  const handleInitializeE2EE = async () => {
-    if (recoveryPassphrase.length < 12) {
-      toast.error(t("errors.recoveryPassphraseTooShort"));
-      return;
-    }
-    if (recoveryPassphrase !== confirmRecoveryPassphrase) {
-      toast.error(t("errors.recoveryPassphraseMismatch"));
-      return;
-    }
-    setE2eeSubmitting(true);
-    try {
-      await initializeE2EE({
-        passphrase: recoveryPassphrase,
-        deviceName: e2eeDeviceName.trim() || "Main desktop",
-      });
-      setRecoveryPassphrase("");
-      setConfirmRecoveryPassphrase("");
-      toast.success(t("settings.e2eeInitialized"));
-    } catch (error) {
-      toast.error(formatAppError(t, error, { fallbackKey: "errors.unknown" }));
-    } finally {
-      setE2eeSubmitting(false);
-    }
-  };
-
-  const handleRestoreE2EE = async () => {
-    if (!recoveryPassphrase) {
-      toast.error(t("errors.recoveryPassphraseRequired"));
-      return;
-    }
-    setE2eeSubmitting(true);
-    try {
-      await restoreE2EE({
-        passphrase: recoveryPassphrase,
-        deviceName: e2eeDeviceName.trim() || "Recovered desktop",
-      });
-      setRecoveryPassphrase("");
-      setConfirmRecoveryPassphrase("");
-      toast.success(t("settings.e2eeRestored"));
-    } catch (error) {
-      toast.error(formatAppError(t, error, { fallbackKey: "errors.unknown" }));
-    } finally {
-      setE2eeSubmitting(false);
-    }
-  };
-
   const changePassword = async () => {
     if (newPassword.length < 8) {
       toast.error(t("auth.passwordMinLengthError"));
@@ -1177,98 +1131,84 @@ export default function GlobalSettingsOverlay({
 
       {activeSection === "privacy" && (
         <div className="space-y-6" data-testid="privacy-settings-panel">
+          {/* E2EE – immer aktiv, kein Toggle */}
           <section className="workspace-card p-5">
             <div className="flex items-start gap-3">
-              <ShieldCheck size={20} className="mt-0.5 text-[#22C55E]" />
+              <ShieldCheck size={20} className="mt-0.5 text-emerald-400" />
               <div className="flex-1">
-                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("settings.e2eeSectionTitle")}</h3>
-                <p className="mt-1 text-sm text-[#71717A]">{t("e2ee.title")}</p>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold" style={{ fontFamily: "Manrope" }}>Ende-zu-Ende-Verschlüsselung</h3>
+                  <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">
+                    {e2eeEnabled ? "Aktiv" : e2eeLoading ? "Initialisiere…" : "Wird aktiviert…"}
+                  </span>
+                </div>
 
-                {!isDesktopCapable && !e2eeEnabled && (
-                  <div className="mt-3 rounded-2xl border border-amber-400/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-200">
-                    Schlüssel werden im Browser gespeichert (weniger sicher als Desktop). Nur zum Testen empfohlen.
-                  </div>
-                )}
+                {/* Erklärungstext – warum E2EE standardmäßig aktiv & kein Toggle */}
+                <div className="mt-3 rounded-2xl border border-white/6 bg-zinc-900/40 px-4 py-3 space-y-2 text-xs text-zinc-400">
+                  <p><span className="font-semibold text-zinc-200">Warum immer aktiv?</span> E2EE schützt deine Nachrichten und Dateien so, dass nur du und dein Gesprächspartner sie lesen können – nicht einmal der Server-Betreiber. Deshalb ist sie nicht deaktivierbar.</p>
+                  <p><span className="font-semibold text-zinc-200">Warum nicht sofort beim ersten Start?</span> Die Schlüsselgenerierung (Argon2id / NaCl) läuft einmalig im Hintergrund, 2 Sekunden nach dem Login. Das verhindert, dass die App beim ersten Start einfriert.</p>
+                  <p><span className="font-semibold text-zinc-200">Neues Gerät?</span> Deine gespeicherte Gerät-Passphrase wird automatisch verwendet. Wenn du ein komplett neues Gerät nutzt (ohne lokale Daten), wirst du gebeten, das Gerät manuell zu bestätigen.</p>
+                </div>
 
-                {!e2eeEnabled && (
-                  <div className="mt-5 grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.e2eeDeviceName")}</Label>
-                      <Input value={e2eeDeviceName} onChange={(event) => setE2eeDeviceName(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.recoveryPassphrase")}</Label>
-                      <Input type="password" value={recoveryPassphrase} onChange={(event) => setRecoveryPassphrase(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("settings.recoveryPassphraseConfirm")}</Label>
-                      <Input type="password" value={confirmRecoveryPassphrase} onChange={(event) => setConfirmRecoveryPassphrase(event.target.value)} className="h-12 rounded-2xl border-white/10 bg-zinc-950/75 text-white" />
-                    </div>
-                    <div className="md:col-span-2 flex flex-wrap gap-3">
-                      <Button onClick={handleInitializeE2EE} disabled={e2eeSubmitting} className="rounded-2xl bg-cyan-400 px-5 text-zinc-950 hover:bg-cyan-300">
-                        {e2eeSubmitting ? t("settings.e2eeConfiguring") : t("settings.e2eeEnableDesktop")}
-                      </Button>
-                      <Button type="button" variant="outline" onClick={handleRestoreE2EE} disabled={e2eeSubmitting} className="rounded-2xl border-white/10 bg-zinc-950/60 text-white hover:bg-white/8">
-                        {t("settings.e2eeRestoreAction")}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
+                {/* Status des aktuellen Geräts */}
                 {e2eeEnabled && (
-                  <div className="mt-5 space-y-4">
-                    <div className="rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-4">
+                  <div className="mt-4 space-y-3">
+                    <div className="rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-3">
                       <div className="flex items-center justify-between gap-4">
                         <div>
-                          <p className="text-sm font-semibold text-white">{currentDevice?.device_name || e2eeDeviceName}</p>
-                          <p className="mt-1 text-xs text-[#71717A]">
-                            {e2eeReady ? t("settings.e2eeDeviceVerified") : t("settings.e2eeDevicePending")}
+                          <p className="text-sm font-semibold text-white">{currentDevice?.device_name || "Dieses Gerät"}</p>
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            {e2eeReady ? "Verifiziert – Nachrichten werden verschlüsselt" : "Ausstehend – warte auf Bestätigung durch ein anderes Gerät"}
                           </p>
                         </div>
-                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${e2eeReady ? "bg-[#14532D] text-[#86EFAC]" : "bg-[#3F3F46] text-[#E4E4E7]"}`}>
-                          {e2eeReady ? t("common.ready") : t("common.pending")}
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${e2eeReady ? "bg-emerald-500/15 text-emerald-400" : "bg-zinc-700/50 text-zinc-400"}`}>
+                          {e2eeReady ? "Bereit" : "Ausstehend"}
                         </span>
                       </div>
                       {currentDeviceFingerprint && (
-                        <p className="mt-3 rounded-2xl border border-white/10 bg-zinc-950/75 px-3 py-2 text-xs tracking-[0.18em] text-[#A1A1AA]">
+                        <p className="mt-3 rounded-xl border border-white/6 bg-zinc-950/75 px-3 py-2 text-xs tracking-widest text-zinc-500 font-mono break-all">
                           {currentDeviceFingerprint}
                         </p>
                       )}
                     </div>
 
-                    <div className="rounded-3xl border border-white/10 bg-zinc-950/60 px-4 py-4">
-                      <h4 className="text-sm font-semibold text-white">{t("settings.trustedDevices")}</h4>
-                      <div className="mt-3 space-y-3">
-                        {e2eeLoading && (
-                          <p className="text-sm text-[#71717A]">{t("settings.loadingTrustedDevices")}</p>
-                        )}
-                        {!e2eeLoading && e2eeDevices.map((device) => (
-                          <div key={device.device_id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-zinc-950/75 px-3 py-3">
-                            <div>
-                              <p className="text-sm font-medium text-white">{device.device_name}</p>
-                              <p className="mt-1 text-xs text-[#71717A]">
-                                {device.verified_at
-                                  ? t("settings.deviceVerifiedAt", { value: new Date(device.verified_at).toLocaleString() })
-                                  : t("settings.deviceAwaitingApproval")}
-                              </p>
+                    {/* Vertrauenswürdige Geräte */}
+                    {e2eeDevices.length > 0 && (
+                      <div className="rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-3">
+                        <h4 className="text-sm font-semibold text-white mb-2">Verknüpfte Geräte</h4>
+                        <div className="space-y-2">
+                          {e2eeDevices.map((device) => (
+                            <div key={device.device_id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/6 bg-zinc-950/75 px-3 py-2">
+                              <div>
+                                <p className="text-sm font-medium text-white">{device.device_name}</p>
+                                <p className="text-xs text-zinc-500">
+                                  {device.verified_at ? `Bestätigt: ${new Date(device.verified_at).toLocaleString("de-DE")}` : "Wartet auf Genehmigung"}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                {!device.verified_at && (
+                                  <Button size="sm" onClick={() => approveDevice(device.device_id)} className="rounded-xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300 text-xs h-7">
+                                    Genehmigen
+                                  </Button>
+                                )}
+                                {currentDevice?.device_id !== device.device_id && !device.revoked_at && (
+                                  <Button size="sm" variant="outline" onClick={() => revokeDevice(device.device_id)} className="rounded-xl border-red-500/30 bg-transparent text-red-400 hover:bg-red-900/30 text-xs h-7">
+                                    Entfernen
+                                  </Button>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              {!device.verified_at && (
-                                <Button type="button" size="sm" onClick={() => approveDevice(device.device_id)} className="rounded-2xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300">
-                                  {t("settings.approveDevice")}
-                                </Button>
-                              )}
-                              {currentDevice?.device_id !== device.device_id && !device.revoked_at && (
-                                <Button type="button" size="sm" variant="outline" onClick={() => revokeDevice(device.device_id)} className="border-[#EF4444]/30 bg-transparent text-[#FCA5A5] hover:bg-[#450A0A]">
-                                  {t("settings.revokeDevice")}
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
+                )}
+
+                {!e2eeEnabled && !e2eeLoading && (
+                  <p className="mt-3 text-xs text-zinc-500 animate-pulse">
+                    E2EE wird im Hintergrund initialisiert… (einmalig, ~2 Sekunden)
+                  </p>
                 )}
               </div>
             </div>

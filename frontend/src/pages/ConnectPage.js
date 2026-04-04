@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { DesktopTower, LinkSimple } from "@phosphor-icons/react";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import { saveInstance } from "@/lib/instanceManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,12 @@ export default function ConnectPage() {
 
     try {
       const { status } = await connectToInstance(instanceUrl);
+      // Instanz automatisch in gespeicherten Instanzen speichern
+      try {
+        const url = instanceUrl.trim().replace(/\/+$/, "");
+        const name = new URL(url).hostname;
+        saveInstance({ name, url });
+      } catch { /* URL ungültig – kein Absturz */ }
       navigate(status?.initialized ? "/login" : "/setup");
     } catch (err) {
       setError(formatAppError(t, err, { fallbackKey: "connect.couldNotReach" }));

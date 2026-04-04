@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import api, { setApiSession } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
@@ -24,6 +24,25 @@ import {
 
 const E2EEContext = createContext(null);
 const TRUST_SNAPSHOT_STORAGE_KEY = "singravox:e2ee:trust-snapshots";
+const E2EE_AUTO_PASSPHRASE_KEY = "singravox.e2ee.device_passphrase";
+
+// Generiert oder lädt eine gerätespezifische Passphrase für die Auto-Init.
+// Die Passphrase wird lokal gespeichert und nie dem Nutzer gezeigt.
+function getOrCreateAutoPassphrase() {
+  try {
+    let pp = window.localStorage.getItem(E2EE_AUTO_PASSPHRASE_KEY);
+    if (!pp) {
+      pp = crypto.randomUUID() + "-" + crypto.randomUUID();
+      window.localStorage.setItem(E2EE_AUTO_PASSPHRASE_KEY, pp);
+    }
+    return pp;
+  } catch { return "singravox-e2ee-fallback-passphrase-001"; }
+}
+
+function getStoredAutoPassphrase() {
+  try { return window.localStorage.getItem(E2EE_AUTO_PASSPHRASE_KEY) || null; }
+  catch { return null; }
+}
 
 function readTrustSnapshots() {
   if (typeof window === "undefined") {
@@ -96,6 +115,7 @@ export function E2EEProvider({ children }) {
   const [identity, setIdentity] = useState(null);
   const [state, setState] = useState({ enabled: false, account: null, devices: [], current_device: null });
   const [loading, setLoading] = useState(true);
+  const autoInitRef = useRef(false);  // verhindert mehrfache Auto-Init
 
   const applyDeviceHeader = useCallback((deviceId) => {
     setApiSession({ deviceId: deviceId || null });
@@ -209,6 +229,47 @@ export function E2EEProvider({ children }) {
     await refreshState();
     return nextIdentity;
   }, [applyDeviceHeader, config, identity, refreshState]);
+
+  // Auto-Init E2EE nach Login (2 s verzögert damit UI zuerst rendert)
+  useEffect(() => {
+    if (loading || !user || state.enabled || identity || autoInitRef.current) return;
+    autoInitRef.current = true;
+
+    const timer = setTimeout(async () => {
+      try {
+        const passphrase = getOrCreateAutoPassphrase();
+        const deviceName =
+          (typeof navigator !== "undefined" && navigator.platform ? navigator.platform : "Gerät") +
+          " (Auto)";
+        await initializeE2EE({ passphrase, deviceName });
+      } catch {
+        autoInitRef.current = false; // Bei Fehler nächstes Mal erneut versuchen
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [loading, user, state.enabled, identity, initializeE2EE]);
+
+  // Auto-Restore E2EE auf neuem Gerät (E2EE aktiv, aber keine lokale Identity)
+  useEffect(() => {
+    if (loading || !user || !state.enabled || identity || autoInitRef.current) return;
+    autoInitRef.current = true;
+
+    const timer = setTimeout(async () => {
+      const storedPp = getStoredAutoPassphrase();
+      if (!storedPp) return; // Kein Passwort gespeichert → manuelles Restore nötig
+      try {
+        const deviceName =
+          (typeof navigator !== "undefined" && navigator.platform ? navigator.platform : "Gerät") +
+          " (Auto)";
+        await restoreE2EE({ passphrase: storedPp, deviceName });
+      } catch {
+        autoInitRef.current = false;
+      }
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [loading, user, state.enabled, identity, restoreE2EE]);
 
   const approveDevice = useCallback(async (deviceId) => {
     await api.post(`/e2ee/devices/${deviceId}/approve`);

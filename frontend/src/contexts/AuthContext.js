@@ -101,6 +101,7 @@ export function AuthProvider({ children }) {
           }
         }
       } else {
+        // Web: Cookie-basierte Auth
         setApiSession({
           authMode: "cookie",
           accessToken: null,
@@ -121,15 +122,26 @@ export function AuthProvider({ children }) {
           });
           setApiSession({ accessToken: res.data.access_token });
         }
-      } catch {
-        if (!cancelled) {
+      } catch (err) {
+        // Wenn 401 (Token abgelaufen) → Refresh versuchen (Web: Cookie, Desktop: schon oben behandelt)
+        const isExpired = err?.response?.status === 401;
+        if (isExpired && !config.isDesktop) {
+          try {
+            await api.post("/auth/refresh");
+            const retryRes = await api.get("/auth/me");
+            if (!cancelled) {
+              setUser(retryRes.data);
+              setToken(retryRes.data.access_token || null);
+            }
+          } catch {
+            if (!cancelled) { setUser(null); setToken(null); }
+          }
+        } else if (!cancelled) {
           setUser(null);
           setToken(null);
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     })();
 
