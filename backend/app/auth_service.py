@@ -15,8 +15,8 @@ from fastapi import HTTPException, Request, Response
 
 
 JWT_ALG = "HS256"
-ACCESS_TOKEN_TTL = timedelta(days=30)  # Dauerhaft eingeloggt bis manuell abmelden
-REFRESH_TOKEN_TTL = timedelta(days=90)
+ACCESS_TOKEN_TTL = timedelta(days=30)   # Dauerhaft eingeloggt bis manuell abmelden
+REFRESH_TOKEN_TTL = timedelta(days=90)  # Refresh-Token läuft nach 90 Tagen ab
 CLIENT_PLATFORM_HEADER = "X-Singra-Client-Platform"
 
 password_hasher = PasswordHasher(
