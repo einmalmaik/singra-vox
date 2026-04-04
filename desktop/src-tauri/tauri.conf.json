@@ -59,7 +59,7 @@
       }
     },
     "updater": {
-      "pubkey": "",
+      "pubkey": "RWQppVVhbeZPpInv3S8HHnYNkRapC3pe7RY27Rjlnh6WcfNJ++8RJv26",
       "endpoints": [
         "https://github.com/GITHUB_OWNER/singra-vox/releases/latest/download/latest.json"
       ],
