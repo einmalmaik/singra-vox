@@ -1,26 +1,32 @@
+// Sync mit: /app/schema/permissions.json (Single Source of Truth)
+// Sync mit: /app/backend/app/permissions.py DEFAULT_PERMISSIONS
 const DEFAULT_SERVER_PERMISSIONS = {
+  // ── Server-Verwaltung ─────────────────────────────────────────────────────
   manage_server: false,
   manage_channels: false,
   manage_roles: false,
   manage_members: false,
   kick_members: false,
   ban_members: false,
-  send_messages: true,
+  manage_webhooks: false,
+  manage_emojis: false,
+  create_invites: true,
+  // ── Kanal / Nachrichten ───────────────────────────────────────────────────
+  view_channels: true,         // War bisher fehlend – sync mit backend
   read_messages: true,
   read_message_history: true,
-  manage_messages: false,
+  send_messages: true,
   attach_files: true,
   mention_everyone: false,
+  manage_messages: false,
+  pin_messages: false,
+  // ── Voice / Video ─────────────────────────────────────────────────────────
   join_voice: true,
   speak: true,
   stream: true,
   mute_members: false,
   deafen_members: false,
   priority_speaker: false,
-  create_invites: true,
-  pin_messages: false,
-  manage_emojis: false,
-  manage_webhooks: false,
 };
 
 const ALL_SERVER_PERMISSIONS = Object.fromEntries(
@@ -60,6 +66,7 @@ export function buildServerCapabilities({ user, server, viewerContext, channelId
   return {
     permissions,
     canCreateServer: canCreateServer(user),
+    canViewChannels: Boolean(permissions.view_channels),
     canManageServer: Boolean(permissions.manage_server),
     canManageChannels: Boolean(permissions.manage_channels),
     canManageRoles: Boolean(permissions.manage_roles),

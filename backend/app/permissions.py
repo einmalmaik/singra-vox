@@ -102,21 +102,26 @@ def _normalize_override_permissions(permissions: Optional[dict]) -> dict:
 
 
 def _apply_override_layer(base_permissions: Dict[str, bool], overrides: Iterable[dict]) -> Dict[str, bool]:
-    next_permissions = {**base_permissions}
-    deny_values = {}
-    allow_values = {}
+    """Wendet eine Override-Ebene via Set-Arithmetik an.
+
+    Explizite *Allow*-Einträge gewinnen immer über *Deny*-Einträge innerhalb
+    derselben Ebene – spiegelt das Verhalten von ``resolve_server_permissions``.
+    """
+    allow_set: set[str] = set()
+    deny_set: set[str] = set()
+
     for override in overrides:
         for permission, value in _normalize_override_permissions(override.get("permissions")).items():
-            if value:
-                allow_values[permission] = True
-            else:
-                deny_values[permission] = False
+            (allow_set if value else deny_set).add(permission)
 
-    for permission in deny_values:
-        next_permissions[permission] = False
-    for permission in allow_values:
-        next_permissions[permission] = True
-    return next_permissions
+    result = {**base_permissions}
+    # Denials zuerst (niedrigere Priorität) – nur wenn kein explizites Allow vorhanden
+    for p in deny_set - allow_set:
+        result[p] = False
+    # Explizite Allows gewinnen immer (additiv)
+    for p in allow_set:
+        result[p] = True
+    return result
 
 
 def _private_channel_allows_member(*, channel: dict, member: Optional[dict], server_owner_id: Optional[str], user_id: str, access_entries: Iterable[dict]) -> bool:

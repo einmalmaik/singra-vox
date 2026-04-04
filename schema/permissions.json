@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Single Source of Truth für alle Berechtigungen. Wird von backend/app/permissions.py und frontend/src/lib/serverPermissions.js referenziert.",
+  "permissions": {
+    "manage_server":         { "default": false, "group": "server",  "label": "Server verwalten" },
+    "manage_channels":       { "default": false, "group": "server",  "label": "Kanäle verwalten" },
+    "manage_roles":          { "default": false, "group": "server",  "label": "Rollen verwalten" },
+    "manage_members":        { "default": false, "group": "server",  "label": "Mitglieder verwalten" },
+    "kick_members":          { "default": false, "group": "server",  "label": "Mitglieder kicken" },
+    "ban_members":           { "default": false, "group": "server",  "label": "Mitglieder sperren" },
+    "manage_webhooks":       { "default": false, "group": "server",  "label": "Webhooks verwalten" },
+    "manage_emojis":         { "default": false, "group": "server",  "label": "Emojis verwalten" },
+    "create_invites":        { "default": true,  "group": "server",  "label": "Einladungen erstellen" },
+    "view_channels":         { "default": true,  "group": "channel", "label": "Kanäle sehen" },
+    "read_messages":         { "default": true,  "group": "channel", "label": "Nachrichten lesen" },
+    "read_message_history":  { "default": true,  "group": "channel", "label": "Nachrichtenverlauf lesen" },
+    "send_messages":         { "default": true,  "group": "channel", "label": "Nachrichten senden" },
+    "attach_files":          { "default": true,  "group": "channel", "label": "Dateien hochladen" },
+    "mention_everyone":      { "default": false, "group": "channel", "label": "@everyone verwenden" },
+    "manage_messages":       { "default": false, "group": "channel", "label": "Nachrichten verwalten" },
+    "pin_messages":          { "default": false, "group": "channel", "label": "Nachrichten anpinnen" },
+    "join_voice":            { "default": true,  "group": "voice",   "label": "Voice beitreten" },
+    "speak":                 { "default": true,  "group": "voice",   "label": "Mikrofon nutzen" },
+    "stream":                { "default": true,  "group": "voice",   "label": "Bildschirm teilen" },
+    "mute_members":          { "default": false, "group": "voice",   "label": "Andere stummschalten" },
+    "deafen_members":        { "default": false, "group": "voice",   "label": "Andere taubstumm schalten" },
+    "priority_speaker":      { "default": false, "group": "voice",   "label": "Prioritätssprecher" }
+  }
+}

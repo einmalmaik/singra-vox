@@ -14,6 +14,14 @@ import re
 import secrets
 import uuid
 
+# ── Grace-Period für Voice-State-Cleanup nach WS-Disconnect ─────────────────
+# Wenn die App-WebSocket-Verbindung kurz abbricht (Netzwerk-Flackern, Browser
+# Tab-Wechsel, etc.) soll der Voice-State NICHT sofort gelöscht werden.
+# LiveKit läuft unabhängig und der Nutzer bleibt im Voice-Channel verbunden.
+# Erst nach VOICE_CLEANUP_GRACE_SECONDS ohne WS-Verbindung wird der State bereinigt.
+VOICE_CLEANUP_GRACE_SECONDS = 30
+_pending_voice_cleanups: dict = {}
+
 from dotenv import load_dotenv
 from fastapi import (
     APIRouter,
@@ -3306,6 +3314,9 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: 
         return
     
     connection_id = await ws_mgr.connect(websocket, uid, platform, p["sid"])
+
+    # Offenen deferred Voice-Cleanup cancelln (Reconnect vor Ablauf der Grace-Period)
+    _cancel_pending_voice_cleanup(uid)
     
     # Initialize user servers and presence
     if uid not in ws_mgr.user_servers:
@@ -3346,8 +3357,38 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: 
         if remaining_connections == 0:
             await db.users.update_one({"id": uid}, {"$set": {"status": "offline", "last_seen": now_utc()}})
             await log_status_history(uid, "offline")
-            await clear_voice_membership(uid)
             await broadcast_presence_update(uid)
+            # Verzögerter Voice-Cleanup mit Grace-Period:
+            # Kurze WS-Drops (Netzwerk, Browser-Tab) sollen den Voice-State
+            # nicht sofort löschen – LiveKit-Verbindung läuft unabhängig weiter.
+            _schedule_deferred_voice_cleanup(uid)
+
+# ── Deferred Voice-Cleanup Helpers ───────────────────────────────────────────
+
+def _cancel_pending_voice_cleanup(uid: str) -> None:
+    """Bricht einen ausstehenden Voice-Cleanup-Task ab (z.B. bei Reconnect)."""
+    task = _pending_voice_cleanups.pop(uid, None)
+    if task and not task.done():
+        task.cancel()
+
+
+def _schedule_deferred_voice_cleanup(uid: str) -> None:
+    """Plant einen Voice-Cleanup mit VOICE_CLEANUP_GRACE_SECONDS Verzögerung."""
+    _cancel_pending_voice_cleanup(uid)
+
+    async def _do_cleanup():
+        try:
+            await asyncio.sleep(VOICE_CLEANUP_GRACE_SECONDS)
+            # Nur bereinigen wenn der User tatsächlich noch keine WS-Verbindung hat
+            if uid not in ws_mgr.conns:
+                await clear_voice_membership(uid)
+        except asyncio.CancelledError:
+            pass  # Reconnect hat den Task abgebrochen – kein Cleanup nötig
+        finally:
+            _pending_voice_cleanups.pop(uid, None)
+
+    _pending_voice_cleanups[uid] = asyncio.create_task(_do_cleanup())
+
 
 # ============================================================
 # Startup

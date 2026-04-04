@@ -175,15 +175,18 @@ fn encode_frame_to_rgba(frame: crabgrab::prelude::VideoFrame) -> Result<LatestCa
         FrameBitmap::BgraUnorm8x4(bitmap) => {
             let width = bitmap.width as u32;
             let height = bitmap.height as u32;
-            let mut rgba_bytes = Vec::with_capacity((width * height * 4) as usize);
-            for pixel in bitmap.data.as_ref() {
-                // CrabGrab delivers BGRA pixels. The frontend paints RGBA
-                // frames directly into a canvas, so swap red/blue and keep
-                // alpha without any lossy intermediate encoding.
-                rgba_bytes.push(pixel[2]);
-                rgba_bytes.push(pixel[1]);
-                rgba_bytes.push(pixel[0]);
-                rgba_bytes.push(pixel[3]);
+            let pixel_count = (width * height) as usize;
+
+            // Pre-allokierter Ausgabepuffer (verhindert ständige Re-Allokationen via .push)
+            let mut rgba_bytes = vec![0u8; pixel_count * 4];
+
+            // chunks_exact + zip: LLVM/SIMD-Vektorisierung (AVX2 auf x86, NEON auf ARM)
+            // Statt 4× push() pro Pixel → direkter Speicherzugriff auf vorallokierten Buffer
+            for (bgra, rgba) in bitmap.data.as_ref().iter().zip(rgba_bytes.chunks_exact_mut(4)) {
+                rgba[0] = bgra[2]; // R ← B (BGRA → RGBA Swap)
+                rgba[1] = bgra[1]; // G bleibt
+                rgba[2] = bgra[0]; // B ← R (BGRA → RGBA Swap)
+                rgba[3] = bgra[3]; // A bleibt
             }
 
             Ok(LatestCaptureFrame {
