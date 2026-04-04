@@ -828,10 +828,12 @@ export default function MainLayout() {
     let cancelled = false;
     (async () => {
       try {
+        // Brief delay – let the workspace fully render before showing the browser permission dialog
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (cancelled) return;
+
         const nextPreferences = await getNotificationPreferences();
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
         notificationPreferencesRef.current = nextPreferences;
 
         const notificationsEnabled = config?.isDesktop
@@ -841,9 +843,31 @@ export default function MainLayout() {
           return;
         }
 
-        const granted = await requestNotificationPermission();
+        // Skip if already granted – just (re-)register the subscription silently
+        const currentPermission = !config?.isDesktop && "Notification" in window
+          ? Notification.permission
+          : "default";
+
+        if (currentPermission === "denied") {
+          // User blocked notifications – show a subtle hint once per session
+          toast.info("Benachrichtigungen sind blockiert. Erlaube sie in den Browser-Einstellungen.", {
+            duration: 6000,
+            id: "push-denied",
+          });
+          return;
+        }
+
+        const granted = currentPermission === "granted"
+          ? true
+          : await requestNotificationPermission();
+
         if (!granted || cancelled) {
           return;
+        }
+
+        if (currentPermission !== "granted") {
+          // First-time grant – let the user know
+          toast.success("Benachrichtigungen aktiviert!", { duration: 3000, id: "push-granted" });
         }
 
         if (!config?.isDesktop) {

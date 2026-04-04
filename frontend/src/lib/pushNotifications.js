@@ -3,6 +3,10 @@ import { isDesktopApp } from "./desktop";
 
 let cachedPublicKey = null;
 
+export function clearVapidKeyCache() {
+  cachedPublicKey = null;
+}
+
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -59,6 +63,20 @@ export async function subscribeToPush() {
   try {
     const registration = await navigator.serviceWorker.ready;
     let subscription = await registration.pushManager.getSubscription();
+
+    // If an existing subscription uses a different key (e.g. after key rotation), re-subscribe
+    if (subscription) {
+      const existingKey = subscription.options?.applicationServerKey;
+      const newKeyBytes = urlBase64ToUint8Array(publicKey);
+      const existingBase64 = existingKey
+        ? btoa(String.fromCharCode(...new Uint8Array(existingKey)))
+        : null;
+      const newBase64 = btoa(String.fromCharCode(...newKeyBytes));
+      if (existingBase64 !== newBase64) {
+        await subscription.unsubscribe();
+        subscription = null;
+      }
+    }
 
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
