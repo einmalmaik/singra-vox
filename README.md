@@ -131,17 +131,16 @@ Port `7880` (TCP) und `7882` (UDP) in der Firewall öffnen.
 
 ## E2EE-Datei-Uploads (MinIO / S3)
 
-Verschlüsselte Datei-Uploads werden in einem S3-kompatiblen Speicher abgelegt.
+Der Installer fragt automatisch nach dem Speicher-Modus. Basierend auf dem erkannten RAM wird ein Vorschlag gemacht:
 
-**Standard (selbst-gehostet, MinIO):**
-```env
-S3_ENDPOINT_URL=http://minio:9000
-S3_ACCESS_KEY=singravox
-S3_SECRET_KEY=sicheres-passwort
-S3_BUCKET=singravox-e2ee
-S3_REGION=us-east-1
-S3_FORCE_PATH_STYLE=true
-```
+| Modus | RAM-Bedarf | Wann nutzen |
+|-------|-----------|-------------|
+| **Lite** (lokales Dateisystem) | ~50 MB | VPS mit 1–2 GB RAM |
+| **Voll** (MinIO S3) | ~200 MB | Server mit ≥4 GB RAM |
+
+**Lite-Modus** speichert verschlüsselte Dateien direkt auf dem Dateisystem und liefert sie über Caddy/nginx aus. Keine MinIO-Abhängigkeit.
+
+**Voll-Modus** nutzt MinIO für S3-kompatiblen Blob-Storage. Ermöglicht externe S3-Provider (AWS S3, Backblaze B2).
 
 **Extern (z.B. AWS S3, Backblaze B2):**
 ```env
@@ -151,6 +150,21 @@ S3_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 S3_BUCKET=mein-bucket
 S3_REGION=eu-central-1
 S3_FORCE_PATH_STYLE=false
+```
+
+## Backend-Performance (Self-Hosting)
+
+Der Installer erkennt automatisch die CPU-Kerne und setzt die optimale Worker-Anzahl:
+
+| CPU-Kerne | Workers | RAM-Verbrauch ca. |
+|-----------|---------|------------------|
+| 1 | 1 | ~150 MB |
+| 2–3 | 1 | ~150 MB |
+| 4+ | 2 | ~280 MB |
+
+Manuell überschreiben in `.env`:
+```env
+WORKERS=2
 ```
 
 ---

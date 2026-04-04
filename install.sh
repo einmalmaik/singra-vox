@@ -699,6 +699,34 @@ main() {
     warn "Nicht root und nicht in der Docker-Gruppe. Einige Befehle könnten sudo benötigen."
   fi
 
+  # ── Storage Mode (Lite vs Full) ──────────────────────────────────────────
+  echo ""
+  header "Speicher-Modus (E2EE Datei-Uploads)"
+  local total_ram_mb; total_ram_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)
+  echo ""
+  echo "  ${BOLD}1) Lite-Modus${RESET}  — Lokales Dateisystem (kein MinIO, ~50 MB RAM)"
+  echo "     Ideal für: VPS mit 1-2 GB RAM, kleine Instanzen"
+  echo ""
+  echo "  ${BOLD}2) Voll-Modus${RESET}  — MinIO S3-kompatibler Storage (~200 MB RAM)"
+  echo "     Ideal für: Server mit ≥4 GB RAM, große Instanzen, S3-Backups"
+  echo ""
+  if [[ $total_ram_mb -lt 3000 ]]; then
+    warn "Erkannter RAM: ${total_ram_mb} MB → Lite-Modus empfohlen"
+    local storage_default="1"
+  else
+    info "Erkannter RAM: ${total_ram_mb} MB"
+    local storage_default="2"
+  fi
+  local storage_mode; storage_mode=$(ask "Speicher-Modus" "$storage_default")
+
+  # ── Worker-Anzahl (CPU-basiert) ────────────────────────────────────────────
+  local cpu_cores; cpu_cores=$(nproc 2>/dev/null || echo 1)
+  local workers=1
+  if [[ $cpu_cores -ge 4 ]]; then
+    workers=2
+  fi
+  info "CPU-Kerne: ${cpu_cores} → Backend-Workers: ${workers}"
+
   # ── Mode Selection ───────────────────────────────────────────────────────────
   header "Installations-Modus"
   echo ""
@@ -816,6 +844,17 @@ main() {
     "$smtp_host" "$smtp_port" "$smtp_user" "$smtp_pass" "$smtp_tls" "$smtp_ssl" "$smtp_from" \
     "$vapid_private" "$vapid_public" "${admin_email}" \
     "$s3_key" "$s3_secret"
+
+  # Storage-Modus und Worker-Anzahl in .env eintragen
+  if [[ "$storage_mode" == "1" ]]; then
+    echo "STORAGE_MODE=local" >> "$DATA_DIR/.env"
+    echo "S3_ENDPOINT_URL=" >> "$DATA_DIR/.env"
+    info "Lite-Modus: Lokaler Speicher aktiviert (kein MinIO)"
+  else
+    echo "STORAGE_MODE=s3" >> "$DATA_DIR/.env"
+    info "Voll-Modus: MinIO S3-Storage aktiviert"
+  fi
+  echo "WORKERS=${workers}" >> "$DATA_DIR/.env"
 
   write_livekit_config "$livekit_key" "$livekit_secret"
 

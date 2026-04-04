@@ -3,6 +3,7 @@ import { Room, RoomEvent, Track, createLocalScreenTracks, createLocalVideoTrack 
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
 import { getDesktopCaptureFrame, startDesktopCapture, stopDesktopCapture } from "@/lib/desktop";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
+import { AudioAnalyzer } from "@/lib/AudioAnalyzer";
 
 function clampVolume(value, min = 0, max = 200) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
@@ -12,6 +13,7 @@ function clampUnit(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 }
 
+// Legacy shim – kept for the synthetic video track helper below
 function getAudioContextCtor() {
   if (typeof window === "undefined") return null;
   return window.AudioContext || window.webkitAudioContext || null;
