@@ -163,6 +163,7 @@ export default function MainLayout() {
   const currentServerRef = useRef(null);
   const currentChannelRef = useRef(null);
   const currentDmUserRef = useRef(null);
+  const userStatusRef = useRef(user?.status);
   const latestChannelLoadRef = useRef(0);
   const notificationPreferencesRef = useRef({
     web_push_enabled: true,
@@ -216,6 +217,9 @@ export default function MainLayout() {
   useEffect(() => {
     currentDmUserRef.current = currentDmUser;
   }, [currentDmUser]);
+  useEffect(() => {
+    userStatusRef.current = user?.status;
+  }, [user?.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -750,13 +754,13 @@ export default function MainLayout() {
       case "voice_join":
         setChannels((previous) => upsertVoiceState(previous, data.channel_id, data.state));
         // Beitrittston nur für andere Nutzer, nicht im DND-Modus
-        if (data.state?.user_id !== user?.id && user?.status !== "dnd") playVoiceTone(audioCtxRef, "join");
+        if (data.state?.user_id !== user?.id && userStatusRef.current !== "dnd") playVoiceTone(audioCtxRef, "join");
         break;
 
       case "voice_leave":
         setChannels((previous) => removeVoiceUser(previous, data.user_id, data.channel_id));
         // Abgangston nur für andere Nutzer, nicht im DND-Modus
-        if (data.user_id !== user?.id && user?.status !== "dnd") playVoiceTone(audioCtxRef, "leave");
+        if (data.user_id !== user?.id && userStatusRef.current !== "dnd") playVoiceTone(audioCtxRef, "leave");
         break;
 
       case "voice_state_update":
@@ -782,7 +786,7 @@ export default function MainLayout() {
       case "notification":
         pushNotification(data.notification);
         // Keine UI-Benachrichtigungen im DND-Modus
-        if (user?.status === "dnd") break;
+        if (userStatusRef.current === "dnd") break;
         toast(data.notification.title, {
           description: data.notification.body,
           action: data.notification.link ? {
@@ -817,7 +821,7 @@ export default function MainLayout() {
       default:
         break;
     }
-  }, [clearAuthState, config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id, user?.status]);
+  }, [clearAuthState, config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id]);
 
   const connectWs = useCallback(() => {
     if (!token || !config?.wsBase || sessionInvalidatedRef.current) return;

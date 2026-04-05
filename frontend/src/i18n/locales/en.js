@@ -588,6 +588,8 @@ const en = {
     keyLabel: "Key: {{key}}",
     keySet: "PTT key set to {{key}}.",
     audioDeviceChanged: "Audio device changed.",
+    statusUpdated: "Status updated.",
+    statusUpdateFailed: "Could not update status.",
     audioDeviceFailed: "Failed to switch device.",
     microphone: "Microphone {{id}}",
   },

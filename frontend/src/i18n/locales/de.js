@@ -588,6 +588,8 @@
     keyLabel: "Taste: {{key}}",
     keySet: "PTT-Taste auf {{key}} gesetzt.",
     audioDeviceChanged: "Audiogerät geändert.",
+    statusUpdated: "Status aktualisiert.",
+    statusUpdateFailed: "Status konnte nicht aktualisiert werden.",
     audioDeviceFailed: "Audiogerät konnte nicht gewechselt werden.",
     microphone: "Mikrofon {{id}}",
   },
