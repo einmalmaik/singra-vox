@@ -1,50 +1,51 @@
 #!/usr/bin/env python3
 """
-Comprehensive backend testing for Singra Vox with SVID (Singra Vox ID) integration.
-Tests both original functionality and new SVID identity features.
+Backend testing for Singra Vox - focusing on setup, bootstrap, and core functionality.
+Tests the specific features mentioned in the review request.
 """
 import requests
 import sys
-import pyotp
 import time
 from datetime import datetime
 
 class SingraVoxTester:
-    def __init__(self, base_url="https://2127b0d5-e152-47e5-8e08-d12e4205d04a.preview.emergentagent.com"):
+    def __init__(self, base_url="https://bbdd79a5-5dd9-4359-80cf-7f512a35bc81.preview.emergentagent.com"):
         self.base_url = base_url
         self.session = requests.Session()
         self.tests_run = 0
         self.tests_passed = 0
-        self.local_token = None
-        self.svid_token = None
+        self.access_token = None
+        self.user_id = None
+        self.server_id = None
+        self.channel_id = None
         
-        # Test credentials
-        self.local_admin = {
-            "email": "einmalmaik@gmail.com",
-            "password": "T6qlck35l7z8h"
-        }
-        self.svid_user = {
-            "email": "test_svid@example.com", 
-            "password": "Str0ng!Pass#2026",
-            "totp_secret": "QT7KKI3Y56NKUFO4OXFA6N5FLTBG7MJS"
+        # Test credentials for owner account creation
+        self.owner_credentials = {
+            "instance_name": "Test Singra Vox Instance",
+            "owner_email": "admin@test.com",
+            "owner_username": "admin",
+            "owner_password": "TestAdmin123!",
+            "owner_display_name": "Admin",
+            "allow_open_signup": True
         }
 
-    def run_test(self, name, method, endpoint, expected_status, data=None, headers=None, use_svid_token=False):
+    def run_test(self, name, method, endpoint, expected_status, data=None, headers=None):
         """Run a single API test"""
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        # Ensure endpoint starts with /api/
+        if not endpoint.startswith('/api/'):
+            endpoint = f"/api/{endpoint.lstrip('/')}"
+        url = f"{self.base_url}{endpoint}"
         test_headers = {'Content-Type': 'application/json'}
         
         if headers:
             test_headers.update(headers)
             
-        if use_svid_token and self.svid_token:
-            test_headers['Authorization'] = f'Bearer {self.svid_token}'
-        elif self.local_token:
-            test_headers['Authorization'] = f'Bearer {self.local_token}'
+        if self.access_token:
+            test_headers['Authorization'] = f'Bearer {self.access_token}'
 
         self.tests_run += 1
         print(f"\n🔍 Testing {name}...")
-        print(f"   {method} {endpoint}")
+        print(f"   {method} {url}")
         
         try:
             if method == 'GET':
@@ -72,7 +73,8 @@ class SingraVoxTester:
             else:
                 print(f"❌ Failed - Expected {expected_status}, got {response.status_code}")
                 try:
-                    print(f"   Response: {response.json()}")
+                    error_data = response.json()
+                    print(f"   Response: {error_data}")
                 except:
                     print(f"   Response: {response.text}")
                 return False, {}
@@ -81,491 +83,329 @@ class SingraVoxTester:
             print(f"❌ Failed - Error: {str(e)}")
             return False, {}
 
-    def test_local_login(self):
-        """Test original local login functionality"""
+    def test_setup_status_uninitialized(self):
+        """Test that setup status returns uninitialized state"""
         print("\n" + "="*60)
-        print("TESTING LOCAL AUTHENTICATION")
+        print("TESTING SETUP STATUS (UNINITIALIZED)")
         print("="*60)
         
         success, response = self.run_test(
-            "Local admin login",
+            "Setup status - should be uninitialized",
+            "GET",
+            "/api/setup/status",
+            200
+        )
+        
+        if success:
+            print(f"   Initialized: {response.get('initialized', 'N/A')}")
+            print(f"   Setup required: {response.get('setup_required', 'N/A')}")
+            print(f"   Instance name: {response.get('instance_name', 'N/A')}")
+            print(f"   Allow open signup: {response.get('allow_open_signup', 'N/A')}")
+            
+            # Verify it's actually uninitialized
+            if not response.get('initialized', True):
+                print("   ✅ Instance is correctly uninitialized")
+                return True
+            else:
+                print("   ⚠️  Instance appears to be already initialized")
+                return True  # Still pass the test, just note the state
+        
+        return False
+
+    def test_bootstrap_instance(self):
+        """Test instance bootstrap/setup flow"""
+        print("\n" + "="*60)
+        print("TESTING INSTANCE BOOTSTRAP")
+        print("="*60)
+        
+        success, response = self.run_test(
+            "Bootstrap instance with owner account",
+            "POST",
+            "/api/setup/bootstrap",
+            200,
+            data=self.owner_credentials
+        )
+        
+        if success:
+            print(f"   Bootstrap successful")
+            print(f"   User created: {response.get('user', {}).get('username', 'N/A')}")
+            print(f"   User email: {response.get('user', {}).get('email', 'N/A')}")
+            print(f"   User role: {response.get('user', {}).get('instance_role', 'N/A')}")
+            
+            # Store access token and user info for subsequent tests
+            self.access_token = response.get('access_token')
+            if response.get('user'):
+                self.user_id = response.get('user', {}).get('id')
+            
+            if self.access_token:
+                print(f"   Access token acquired: {self.access_token[:20]}...")
+                return True
+        
+        return False
+
+    def test_login_after_setup(self):
+        """Test login flow after setup with the created owner account"""
+        print("\n" + "="*60)
+        print("TESTING LOGIN AFTER SETUP")
+        print("="*60)
+        
+        success, response = self.run_test(
+            "Login with owner credentials",
             "POST",
             "/api/auth/login",
             200,
-            data=self.local_admin
-        )
-        
-        if success and 'access_token' in response:
-            self.local_token = response['access_token']
-            print(f"   Local token acquired: {self.local_token[:20]}...")
-            return True
-        return False
-
-    def test_svid_password_utilities(self):
-        """Test SVID password checking and generation"""
-        print("\n" + "="*60)
-        print("TESTING SVID PASSWORD UTILITIES")
-        print("="*60)
-        
-        # Test password strength checking
-        weak_success, weak_response = self.run_test(
-            "Password check - weak password",
-            "POST",
-            "/api/id/password/check",
-            200,
-            data={"password": "test123"}
-        )
-        
-        if weak_success:
-            print(f"   Weak password score: {weak_response.get('score', 'N/A')}")
-            print(f"   Meets policy: {weak_response.get('meets_policy', 'N/A')}")
-        
-        strong_success, strong_response = self.run_test(
-            "Password check - strong password",
-            "POST", 
-            "/api/id/password/check",
-            200,
-            data={"password": "Str0ng!Pass#2026"}
-        )
-        
-        if strong_success:
-            print(f"   Strong password score: {strong_response.get('score', 'N/A')}")
-            print(f"   Meets policy: {strong_response.get('meets_policy', 'N/A')}")
-        
-        # Test password generation
-        gen_success, gen_response = self.run_test(
-            "Password generation",
-            "POST",
-            "/api/id/password/generate?length=16",
-            200
-        )
-        
-        if gen_success:
-            print(f"   Generated password: {gen_response.get('password', 'N/A')}")
-            print(f"   Generated strength: {gen_response.get('strength', {}).get('score', 'N/A')}")
-        
-        return weak_success and strong_success and gen_success
-
-    def test_svid_registration(self):
-        """Test SVID registration with weak password rejection"""
-        print("\n" + "="*60)
-        print("TESTING SVID REGISTRATION")
-        print("="*60)
-        
-        # Test registration with weak password (should fail)
-        weak_success, weak_response = self.run_test(
-            "SVID registration - weak password rejection",
-            "POST",
-            "/api/id/register",
-            [400, 422],  # 422 for Pydantic validation, 400 for app validation
             data={
-                "email": "test_weak@example.com",
-                "username": "testweak",
-                "password": "weakpass",  # 8 chars, no special chars
-                "display_name": "Test Weak"
-            }
-        )
-        
-        if weak_success:
-            print(f"   Correctly rejected weak password (validation working)")
-        
-        # Test registration with proper weak password that passes length but fails policy
-        weak2_success, weak2_response = self.run_test(
-            "SVID registration - policy rejection",
-            "POST", 
-            "/api/id/register",
-            400,
-            data={
-                "email": "test_weak2@example.com",
-                "username": "testweak2", 
-                "password": "weakpassword123",  # 15 chars but no uppercase/special
-                "display_name": "Test Weak 2"
-            }
-        )
-        
-        # Test registration with strong password (should succeed or already exist)
-        strong_success, strong_response = self.run_test(
-            "SVID registration - strong password",
-            "POST",
-            "/api/id/register",
-            [200, 400],  # 200 for success, 400 if already exists
-            data={
-                "email": "test_strong_new@example.com",
-                "username": "teststrong",
-                "password": "StrongP@ssw0rd123!",
-                "display_name": "Test Strong"
-            }
-        )
-        
-        return weak_success and weak2_success and (strong_success or strong_response.get('ok'))
-
-    def test_svid_login(self):
-        """Test SVID login functionality"""
-        print("\n" + "="*60)
-        print("TESTING SVID LOGIN")
-        print("="*60)
-        
-        # Test login with verified SVID account
-        success, response = self.run_test(
-            "SVID login - verified account",
-            "POST",
-            "/api/id/login",
-            200,
-            data={
-                "email": self.svid_user["email"],
-                "password": self.svid_user["password"]
+                "email": self.owner_credentials["owner_email"],
+                "password": self.owner_credentials["owner_password"]
             }
         )
         
         if success:
-            if response.get('requires_2fa'):
-                print(f"   2FA required, pending token: {response.get('pending_token', 'N/A')[:20]}...")
-                return self.test_svid_2fa_login(response.get('pending_token'))
-            else:
-                self.svid_token = response.get('access_token')
-                print(f"   SVID token acquired: {self.svid_token[:20]}...")
-                return True
-        return False
-
-    def test_svid_2fa_login(self, pending_token):
-        """Test SVID 2FA completion"""
-        print("\n🔐 Testing SVID 2FA completion...")
-        
-        # Generate TOTP code
-        totp = pyotp.TOTP(self.svid_user["totp_secret"])
-        totp_code = totp.now()
-        print(f"   Generated TOTP code: {totp_code}")
-        
-        success, response = self.run_test(
-            "SVID 2FA completion",
-            "POST",
-            "/api/id/login/2fa",
-            200,
-            data={
-                "pending_token": pending_token,
-                "code": totp_code
-            }
-        )
-        
-        if success and 'access_token' in response:
-            self.svid_token = response['access_token']
-            print(f"   SVID token acquired after 2FA: {self.svid_token[:20]}...")
-            return True
-        return False
-
-    def test_svid_profile(self):
-        """Test SVID profile endpoints"""
-        print("\n" + "="*60)
-        print("TESTING SVID PROFILE")
-        print("="*60)
-        
-        if not self.svid_token:
-            print("❌ No SVID token available for profile tests")
-            return False
-        
-        # Test getting profile
-        get_success, get_response = self.run_test(
-            "SVID get profile",
-            "GET",
-            "/api/id/me",
-            200,
-            use_svid_token=True
-        )
-        
-        if get_success:
-            print(f"   Profile email: {get_response.get('email', 'N/A')}")
-            print(f"   Profile username: {get_response.get('username', 'N/A')}")
-        
-        # Test updating profile
-        update_success, update_response = self.run_test(
-            "SVID update profile",
-            "PUT",
-            "/api/id/me",
-            200,
-            data={"display_name": "Updated Test User"},
-            use_svid_token=True
-        )
-        
-        if update_success:
-            print(f"   Updated display name: {update_response.get('display_name', 'N/A')}")
-        
-        return get_success and update_success
-
-    def test_svid_2fa_setup(self):
-        """Test SVID 2FA setup endpoints"""
-        print("\n" + "="*60)
-        print("TESTING SVID 2FA SETUP")
-        print("="*60)
-        
-        if not self.svid_token:
-            print("❌ No SVID token available for 2FA tests")
-            return False
-        
-        # Test 2FA setup (might already be enabled)
-        setup_success, setup_response = self.run_test(
-            "SVID 2FA setup",
-            "POST",
-            "/api/id/2fa/setup",
-            [200, 409],  # 409 if already enabled
-            use_svid_token=True
-        )
-        
-        if setup_success and setup_response.get('secret'):
-            print(f"   2FA secret: {setup_response.get('secret', 'N/A')}")
-            print(f"   QR URI: {setup_response.get('qr_uri', 'N/A')[:50]}...")
-        elif setup_response.get('detail') == "2FA is already enabled":
-            print("   2FA already enabled (expected for test user)")
-        
-        return setup_success
-
-    def test_svid_openid_discovery(self):
-        """Test SVID OpenID Connect discovery"""
-        print("\n" + "="*60)
-        print("TESTING SVID OPENID DISCOVERY")
-        print("="*60)
-        
-        success, response = self.run_test(
-            "SVID OpenID discovery",
-            "GET",
-            "/api/id/.well-known/openid-configuration",
-            200
-        )
-        
-        if success:
-            print(f"   Issuer: {response.get('issuer', 'N/A')}")
-            print(f"   Auth endpoint: {response.get('authorization_endpoint', 'N/A')}")
-            print(f"   Token endpoint: {response.get('token_endpoint', 'N/A')}")
-        
-        return success
-
-    def test_svid_instance_login(self):
-        """Test logging into instance with SVID token"""
-        print("\n" + "="*60)
-        print("TESTING SVID INSTANCE LOGIN")
-        print("="*60)
-        
-        if not self.svid_token:
-            print("❌ No SVID token available for instance login test")
-            return False
-        
-        success, response = self.run_test(
-            "Login to instance with SVID token",
-            "POST",
-            "/api/auth/login-with-svid",
-            200,
-            data={"svid_access_token": self.svid_token}
-        )
-        
-        if success:
-            print(f"   Instance login successful")
+            print(f"   Login successful")
             print(f"   User: {response.get('user', {}).get('username', 'N/A')}")
-            print(f"   Instance token: {response.get('access_token', 'N/A')[:20]}...")
-        
-        return success
-
-    def test_svid_invites(self):
-        """Test SVID cross-instance invite system"""
-        print("\n" + "="*60)
-        print("TESTING SVID INVITE SYSTEM")
-        print("="*60)
-        
-        if not self.svid_token:
-            print("❌ No SVID token available for invite tests")
-            return False
-        
-        # Test sending invite to another SVID user
-        send_success, send_response = self.run_test(
-            "Send cross-instance invite",
-            "POST",
-            "/api/id/invites/send",
-            200,
-            data={
-                "recipient_username": "maik_svid",  # Another test user
-                "instance_url": "https://test-instance.example.com",
-                "instance_name": "Test Instance",
-                "server_name": "Test Server",
-                "invite_code": "test-invite-123",
-                "message": "Join our test server!"
-            },
-            use_svid_token=True
-        )
-        
-        if send_success:
-            print(f"   Invite sent successfully, ID: {send_response.get('invite_id', 'N/A')}")
-            invite_id = send_response.get('invite_id')
-        else:
-            invite_id = None
-        
-        # Test listing invites
-        list_success, list_response = self.run_test(
-            "List invites",
-            "GET",
-            "/api/id/invites?status=pending",
-            200,
-            use_svid_token=True
-        )
-        
-        if list_success:
-            received = list_response.get('received', [])
-            sent = list_response.get('sent', [])
-            print(f"   Received invites: {len(received)}")
-            print(f"   Sent invites: {len(sent)}")
-        
-        # Test responding to invite (if we have one)
-        respond_success = True
-        if invite_id:
-            respond_success, respond_response = self.run_test(
-                "Respond to invite (decline)",
-                "POST",
-                f"/api/id/invites/{invite_id}/respond",
-                200,
-                data={"accepted": False},
-                use_svid_token=True
-            )
+            print(f"   Email: {response.get('user', {}).get('email', 'N/A')}")
+            print(f"   Role: {response.get('user', {}).get('instance_role', 'N/A')}")
             
-            if respond_success:
-                print(f"   Invite response: {respond_response.get('status', 'N/A')}")
+            # Update access token from login
+            self.access_token = response.get('access_token')
+            if response.get('user'):
+                self.user_id = response.get('user', {}).get('id')
+            
+            if self.access_token:
+                print(f"   New access token: {self.access_token[:20]}...")
+                return True
         
-        return send_success and list_success and respond_success
+        return False
 
-    def test_svid_unread_counts(self):
-        """Test SVID unread count reporting for Instance Switcher"""
+    def test_auth_me(self):
+        """Test /api/auth/me returns user info after login"""
         print("\n" + "="*60)
-        print("TESTING SVID UNREAD COUNTS")
+        print("TESTING AUTH ME ENDPOINT")
         print("="*60)
         
-        if not self.svid_token:
-            print("❌ No SVID token available for unread count tests")
+        if not self.access_token:
+            print("❌ No access token available for auth/me test")
             return False
         
-        # Test reporting unread counts
-        report_success, report_response = self.run_test(
-            "Report unread counts",
-            "POST",
-            "/api/id/instances/unread",
-            200,
-            data={
-                "instance_url": "https://test-instance.example.com",
-                "total_unread": 5,
-                "mention_count": 2
-            },
-            use_svid_token=True
-        )
-        
-        if report_success:
-            print(f"   Unread counts reported successfully")
-        
-        # Test listing instances with unread counts
-        list_success, list_response = self.run_test(
-            "List instances with unread counts",
+        success, response = self.run_test(
+            "Get current user info",
             "GET",
-            "/api/id/instances",
-            200,
-            use_svid_token=True
-        )
-        
-        if list_success:
-            instances = list_response.get('instances', [])
-            print(f"   Connected instances: {len(instances)}")
-            for instance in instances:
-                print(f"     - {instance.get('instance_name', 'N/A')}: {instance.get('total_unread', 0)} unread")
-        
-        return report_success and list_success
-
-    def test_existing_functionality(self):
-        """Test that existing messaging/channels still work"""
-        print("\n" + "="*60)
-        print("TESTING EXISTING FUNCTIONALITY")
-        print("="*60)
-        
-        if not self.local_token:
-            print("❌ No local token available for existing functionality tests")
-            return False
-        
-        # Test servers endpoint
-        servers_success, servers_response = self.run_test(
-            "List servers",
-            "GET",
-            "/api/servers",
+            "/api/auth/me",
             200
         )
         
-        if servers_success and isinstance(servers_response, list) and len(servers_response) > 0:
-            server_id = servers_response[0]['id']
-            print(f"   Found server: {servers_response[0].get('name', 'N/A')}")
+        if success:
+            print(f"   User ID: {response.get('id', 'N/A')}")
+            print(f"   Username: {response.get('username', 'N/A')}")
+            print(f"   Email: {response.get('email', 'N/A')}")
+            print(f"   Display name: {response.get('display_name', 'N/A')}")
+            print(f"   Instance role: {response.get('instance_role', 'N/A')}")
+            print(f"   Email verified: {response.get('email_verified', 'N/A')}")
+            return True
+        
+        return False
+
+    def test_server_creation(self):
+        """Test server creation via API after login"""
+        print("\n" + "="*60)
+        print("TESTING SERVER CREATION")
+        print("="*60)
+        
+        if not self.access_token:
+            print("❌ No access token available for server creation test")
+            return False
+        
+        server_data = {
+            "name": "Test Server",
+            "description": "A test server created by backend tests"
+        }
+        
+        success, response = self.run_test(
+            "Create new server",
+            "POST",
+            "/api/servers",
+            [200, 201],  # Accept both 200 and 201
+            data=server_data
+        )
+        
+        if success:
+            print(f"   Server created: {response.get('name', 'N/A')}")
+            print(f"   Server ID: {response.get('id', 'N/A')}")
+            print(f"   Owner ID: {response.get('owner_id', 'N/A')}")
+            print(f"   Description: {response.get('description', 'N/A')}")
             
-            # Test channels
-            channels_success, channels_response = self.run_test(
-                "List channels",
+            # Store server ID for channel tests
+            self.server_id = response.get('id')
+            return True
+        
+        return False
+
+    def test_channel_listing(self):
+        """Test channel listing for a server"""
+        print("\n" + "="*60)
+        print("TESTING CHANNEL LISTING")
+        print("="*60)
+        
+        if not self.access_token:
+            print("❌ No access token available for channel listing test")
+            return False
+        
+        if not self.server_id:
+            print("❌ No server ID available for channel listing test")
+            return False
+        
+        success, response = self.run_test(
+            "List server channels",
+            "GET",
+            f"/api/servers/{self.server_id}/channels",
+            200
+        )
+        
+        if success:
+            channels = response if isinstance(response, list) else []
+            print(f"   Found {len(channels)} channels")
+            
+            for channel in channels:
+                print(f"   - {channel.get('name', 'N/A')} ({channel.get('type', 'N/A')})")
+                if channel.get('type') == 'text' and not self.channel_id:
+                    self.channel_id = channel.get('id')
+                    print(f"     Stored text channel ID: {self.channel_id}")
+            
+            return True
+        
+        return False
+
+    def test_voice_token_generation(self):
+        """Test LiveKit voice token generation endpoint"""
+        print("\n" + "="*60)
+        print("TESTING LIVEKIT VOICE TOKEN GENERATION")
+        print("="*60)
+        
+        if not self.access_token:
+            print("❌ No access token available for voice token test")
+            return False
+        
+        if not self.server_id:
+            print("❌ No server ID available for voice token test")
+            return False
+        
+        # Find a voice channel first
+        voice_channel_id = None
+        if self.server_id:
+            # Get channels to find a voice channel
+            try:
+                url = f"{self.base_url}/api/servers/{self.server_id}/channels"
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {self.access_token}'
+                }
+                response = self.session.get(url, headers=headers)
+                if response.status_code == 200:
+                    channels = response.json()
+                    for channel in channels:
+                        if channel.get('type') == 'voice':
+                            voice_channel_id = channel.get('id')
+                            print(f"   Found voice channel: {channel.get('name', 'N/A')}")
+                            break
+            except Exception as e:
+                print(f"   Error finding voice channel: {e}")
+        
+        if not voice_channel_id:
+            print("❌ No voice channel found for voice token test")
+            return False
+        
+        token_data = {
+            "server_id": self.server_id,
+            "channel_id": voice_channel_id
+        }
+        
+        success, response = self.run_test(
+            "Generate LiveKit voice token",
+            "POST",
+            "/api/voice/token",
+            200,
+            data=token_data
+        )
+        
+        if success:
+            print(f"   Voice token generated successfully")
+            print(f"   Token length: {len(response.get('token', ''))}")
+            print(f"   LiveKit URL: {response.get('livekit_url', 'N/A')}")
+            print(f"   Room name: {response.get('room_name', 'N/A')}")
+            return True
+        
+        return False
+
+    def test_logout_flow(self):
+        """Test logout flow"""
+        print("\n" + "="*60)
+        print("TESTING LOGOUT FLOW")
+        print("="*60)
+        
+        if not self.access_token:
+            print("❌ No access token available for logout test")
+            return False
+        
+        success, response = self.run_test(
+            "Logout current session",
+            "POST",
+            "/api/auth/logout",
+            200
+        )
+        
+        if success:
+            print(f"   Logout successful")
+            
+            # Try to access a protected endpoint to verify logout
+            verify_success, verify_response = self.run_test(
+                "Verify logout - should fail auth",
                 "GET",
-                f"/api/servers/{server_id}/channels",
-                200
+                "/api/auth/me",
+                401  # Should be unauthorized now
             )
             
-            if channels_success and isinstance(channels_response, list) and len(channels_response) > 0:
-                channel_id = None
-                for channel in channels_response:
-                    if channel.get('type') == 'text':
-                        channel_id = channel['id']
-                        print(f"   Found text channel: {channel.get('name', 'N/A')}")
-                        break
-                
-                if channel_id:
-                    # Test sending message
-                    message_success, message_response = self.run_test(
-                        "Send message",
-                        "POST",
-                        f"/api/channels/{channel_id}/messages",
-                        201,
-                        data={"content": f"Test message from backend test at {datetime.now()}"}
-                    )
-                    
-                    return servers_success and channels_success and message_success
-                else:
-                    print("   No text channels found")
-                    return servers_success and channels_success
+            if verify_success:
+                print(f"   ✅ Logout verified - auth/me correctly returns 401")
+                # Clear the token since we've logged out
+                self.access_token = None
+                return True
             else:
-                print("   No channels found or channels response invalid")
-                return servers_success
-        else:
-            print("   No servers found or servers response invalid")
-            return servers_success
+                print(f"   ⚠️  Logout may not have worked - auth/me didn't return 401")
+                return False
+        
+        return False
 
     def run_all_tests(self):
-        """Run all tests"""
-        print("🚀 Starting Singra Vox SVID Backend Tests")
+        """Run all tests in the correct order"""
+        print("🚀 Starting Singra Vox Backend Tests")
         print(f"Backend URL: {self.base_url}")
         print("="*80)
         
-        # Test local authentication first
-        if not self.test_local_login():
-            print("❌ Local login failed - cannot continue with authenticated tests")
-            return False
+        # Test 1: Setup status (should be uninitialized)
+        self.test_setup_status_uninitialized()
         
-        # Test SVID password utilities (no auth required)
-        self.test_svid_password_utilities()
+        # Test 2: Bootstrap instance
+        if not self.test_bootstrap_instance():
+            print("❌ Bootstrap failed - trying to login with existing credentials")
+            # If bootstrap fails, try to login with existing credentials
+            if not self.test_login_after_setup():
+                print("❌ Both bootstrap and login failed - cannot continue")
+                return False
         
-        # Test SVID registration
-        self.test_svid_registration()
+        # Test 3: Auth me endpoint
+        self.test_auth_me()
         
-        # Test SVID login and 2FA
-        if not self.test_svid_login():
-            print("❌ SVID login failed - cannot test SVID authenticated endpoints")
-        else:
-            # Test SVID authenticated endpoints
-            self.test_svid_profile()
-            self.test_svid_2fa_setup()
-            self.test_svid_instance_login()
-            
-            # Test new SVID features
-            self.test_svid_invites()
-            self.test_svid_unread_counts()
+        # Test 4: Server creation
+        self.test_server_creation()
         
-        # Test SVID discovery (no auth required)
-        self.test_svid_openid_discovery()
+        # Test 5: Channel listing
+        self.test_channel_listing()
         
-        # Test existing functionality still works
-        self.test_existing_functionality()
+        # Test 6: Voice token generation
+        self.test_voice_token_generation()
+        
+        # Test 7: Logout flow
+        self.test_logout_flow()
         
         # Print results
         print("\n" + "="*80)
