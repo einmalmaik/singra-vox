@@ -146,26 +146,66 @@ configure_firewall() {
   ufw_confirm="${ufw_confirm:-j}"
 
   if [[ "${ufw_confirm,,}" =~ ^(j|y|ja|yes)$ ]]; then
+    local all_ok=true
     for entry in "${ports[@]}"; do
       local port_num="${entry%%:*}"
       local desc="${entry#*:}"
       local proto="${port_num##*/}"
       local pnum="${port_num%%/*}"
+
+      local ufw_result
       if [[ "$proto" == "$port_num" ]]; then
-        # No protocol specified → allow both tcp/udp
-        ufw allow "$pnum" comment "Singra Vox: $desc" >/dev/null 2>&1
+        ufw_result=$(ufw allow "$pnum" comment "Singra Vox: $desc" 2>&1) || true
       else
-        ufw allow "$port_num" comment "Singra Vox: $desc" >/dev/null 2>&1
+        ufw_result=$(ufw allow "$port_num" comment "Singra Vox: $desc" 2>&1) || true
       fi
-      success "Port $port_num freigegeben (${desc})" >&2
+
+      if echo "$ufw_result" | grep -qi "added\|existing\|updated\|skipping"; then
+        success "Port $port_num freigegeben (${desc})" >&2
+      else
+        warn "Port $port_num konnte nicht freigegeben werden: $ufw_result" >&2
+        all_ok=false
+      fi
     done
-    ufw reload >/dev/null 2>&1
+
+    # Reload UFW to apply changes
+    ufw reload >/dev/null 2>&1 || true
+
+    # Verify: check that the ports are now in UFW rules
+    echo "" >&2
+    info "Überprüfe Firewall-Regeln…" >&2
+    local verify_ok=true
+    for entry in "${ports[@]}"; do
+      local port_num="${entry%%:*}"
+      local pnum="${port_num%%/*}"
+      if ufw status 2>/dev/null | grep -q "$pnum"; then
+        success "Port $pnum ist in UFW freigegeben." >&2
+      else
+        error "Port $pnum ist NICHT in UFW freigegeben!" >&2
+        verify_ok=false
+      fi
+    done
+
+    if [[ "$verify_ok" == "false" ]]; then
+      echo "" >&2
+      warn "Einige Ports konnten nicht freigegeben werden." >&2
+      echo -e "  ${DIM}Mögliche Ursache: Script läuft nicht als root.${RESET}" >&2
+      echo -e "  ${DIM}Lösung: Script mit sudo ausführen: ${BOLD}sudo bash install.sh${RESET}" >&2
+      echo "" >&2
+      printf "  ${BOLD}%s${RESET} (j/n) [j]: " "Trotzdem fortfahren?" >&2
+      read -r skip_confirm
+      skip_confirm="${skip_confirm:-j}"
+      if [[ ! "${skip_confirm,,}" =~ ^(j|y|ja|yes)$ ]]; then
+        error "Installation abgebrochen. Bitte mit sudo ausführen." >&2
+        exit 1
+      fi
+    fi
   else
     warn "Ports nicht freigegeben. Bitte manuell öffnen:" >&2
     for entry in "${ports[@]}"; do
       local port_num="${entry%%:*}"
       local desc="${entry#*:}"
-      echo "    ufw allow $port_num comment 'Singra Vox: $desc'" >&2
+      echo "    sudo ufw allow $port_num comment 'Singra Vox: $desc'" >&2
     done
   fi
 }
