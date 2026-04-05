@@ -1511,8 +1511,16 @@ main() {
   if [[ "$mode" == "2" ]]; then
     echo ""
     header "Domain-Konfiguration"
-    echo "  Stelle sicher, dass deine Domain auf die IP dieses Servers zeigt."
-    echo ""
+    echo "" >&2
+    echo -e "  ${BOLD}Haupt-Domain${RESET} — Über diese URL öffnen Nutzer die App im Browser." >&2
+    echo -e "  ${DIM}Beispiel: chat.deinserver.de${RESET}" >&2
+    echo "" >&2
+    echo -e "  ${BOLD}Voice-Domain${RESET} — Separater Endpunkt für Sprach- & Videoanrufe (LiveKit/WebRTC)." >&2
+    echo -e "  ${DIM}Muss eine eigene Subdomain sein (z.B. rtc.deinserver.de), weil${RESET}" >&2
+    echo -e "  ${DIM}LiveKit eigene Ports (7881/TCP + 7882/UDP) für Medienstreams braucht.${RESET}" >&2
+    echo "" >&2
+    echo -e "  ${YELLOW}Beide Domains müssen per DNS (A-Record) auf die IP dieses Servers zeigen.${RESET}" >&2
+    echo "" >&2
     domain=$(ask "Haupt-Domain (z.B. chat.example.com)" "")
     if [[ -z "$domain" ]]; then error "Domain darf nicht leer sein."; exit 1; fi
     rtc_domain=$(ask "Voice-Domain (z.B. rtc.example.com)" "rtc.${domain#*.}")
