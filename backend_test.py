@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 
 class SingraVoxTester:
-    def __init__(self, base_url="https://config-setup-5.preview.emergentagent.com"):
+    def __init__(self, base_url="https://2127b0d5-e152-47e5-8e08-d12e4205d04a.preview.emergentagent.com"):
         self.base_url = base_url
         self.session = requests.Session()
         self.tests_run = 0

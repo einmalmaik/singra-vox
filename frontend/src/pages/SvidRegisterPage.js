@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,9 +10,9 @@ import { Fingerprint, ArrowLeft, Eye, EyeSlash, ArrowsClockwise, CheckCircle, XC
 import api from "@/lib/api";
 
 const STRENGTH_COLORS = ["#EF4444", "#F97316", "#EAB308", "#22C55E", "#10B981"];
-const STRENGTH_LABELS = ["Very weak", "Weak", "Fair", "Strong", "Very strong"];
+const STRENGTH_LABELS_KEYS = ["svid.strengthVeryWeak", "svid.strengthWeak", "svid.strengthFair", "svid.strengthStrong", "svid.strengthVeryStrong"];
 
-function PasswordStrength({ strength }) {
+function PasswordStrength({ strength, t }) {
   if (!strength) return null;
   return (
     <div className="space-y-1.5" data-testid="password-strength">
@@ -25,7 +26,7 @@ function PasswordStrength({ strength }) {
         ))}
       </div>
       <p className="text-xs" style={{ color: STRENGTH_COLORS[strength.score] }}>
-        {STRENGTH_LABELS[strength.score]}
+        {t(STRENGTH_LABELS_KEYS[strength.score])}
       </p>
       {strength.feedback?.length > 0 && (
         <ul className="space-y-0.5">
@@ -39,7 +40,7 @@ function PasswordStrength({ strength }) {
       )}
       {strength.meets_policy && (
         <p className="flex items-center gap-1.5 text-xs text-emerald-400">
-          <CheckCircle size={12} /> Password meets all requirements
+          <CheckCircle size={12} /> {t("svid.passwordMeetsPolicy")}
         </p>
       )}
     </div>
@@ -47,6 +48,7 @@ function PasswordStrength({ strength }) {
 }
 
 export default function SvidRegisterPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -109,23 +111,22 @@ export default function SvidRegisterPage() {
     return (
       <AuthShell
         eyebrow="SINGRA VOX ID"
-        title="Check your email"
-        subtitle={`We sent a verification code to ${verifyEmail}`}
+        title={t("svid.checkEmail")}
+        subtitle={t("svid.checkEmailSubtitle", { email: verifyEmail })}
         icon={Fingerprint}
         sideTitle="Singra Vox ID"
         sideCopy="One account for all instances."
       >
         <div className="space-y-4" data-testid="svid-verify-sent">
           <p className="text-sm text-zinc-400">
-            Enter the 6-digit code from your email to activate your Singra Vox ID.
-            Then return to the login page to sign in.
+            {t("svid.checkEmailHint")}
           </p>
           <Button
             onClick={() => navigate("/login")}
             data-testid="svid-back-to-login"
             className="h-12 w-full rounded-2xl bg-violet-500 font-semibold text-white transition hover:bg-violet-400"
           >
-            Back to Login
+            {t("svid.backToLoginButton")}
           </Button>
         </div>
       </AuthShell>
@@ -135,15 +136,15 @@ export default function SvidRegisterPage() {
   return (
     <AuthShell
       eyebrow="SINGRA VOX ID"
-      title="Create your Singra Vox ID"
-      subtitle="One account for every Singra Vox instance."
+      title={t("svid.registerTitle")}
+      subtitle={t("svid.registerSubtitle")}
       icon={Fingerprint}
       sideTitle="Singra Vox ID"
-      sideCopy="Register once, use everywhere. Your identity stays with you across all instances."
+      sideCopy={t("svid.registerSideCopy")}
       footer={
         <p className="text-center text-sm text-zinc-400">
-          Already have a Singra Vox ID?{" "}
-          <Link to="/login" className="font-semibold text-violet-300 hover:text-violet-200">Sign in</Link>
+          {t("svid.alreadyHaveSvid")}{" "}
+          <Link to="/login" className="font-semibold text-violet-300 hover:text-violet-200">{t("svid.signIn")}</Link>
         </p>
       }
     >
@@ -152,7 +153,7 @@ export default function SvidRegisterPage() {
           <LocalizedErrorBanner message={error} className="text-red-200" />
 
           <div className="space-y-2">
-            <Label htmlFor="svid-reg-email" className="workspace-section-label">EMAIL</Label>
+            <Label htmlFor="svid-reg-email" className="workspace-section-label">{t("svid.email")}</Label>
             <Input
               id="svid-reg-email" type="email" value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -163,7 +164,7 @@ export default function SvidRegisterPage() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="svid-reg-username" className="workspace-section-label">USERNAME</Label>
+            <Label htmlFor="svid-reg-username" className="workspace-section-label">{t("svid.username")}</Label>
             <Input
               id="svid-reg-username" type="text" value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -171,15 +172,15 @@ export default function SvidRegisterPage() {
               data-testid="svid-reg-username"
               className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-violet-400/50 focus:ring-violet-400/40"
             />
-            <p className="text-xs text-zinc-600">3-32 characters: lowercase, numbers, underscores</p>
+            <p className="text-xs text-zinc-600">{t("svid.usernameHint")}</p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="svid-reg-display" className="workspace-section-label">DISPLAY NAME</Label>
+            <Label htmlFor="svid-reg-display" className="workspace-section-label">{t("svid.displayName")}</Label>
             <Input
               id="svid-reg-display" type="text" value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="How others see you"
+              placeholder={t("svid.displayNamePlaceholder")}
               data-testid="svid-reg-display"
               className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-violet-400/50 focus:ring-violet-400/40"
             />
@@ -187,20 +188,20 @@ export default function SvidRegisterPage() {
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="svid-reg-password" className="workspace-section-label">PASSWORD</Label>
+              <Label htmlFor="svid-reg-password" className="workspace-section-label">{t("svid.password")}</Label>
               <button
                 type="button" onClick={handleGeneratePassword}
                 className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
                 data-testid="svid-generate-password"
               >
-                <ArrowsClockwise size={12} /> Generate
+                <ArrowsClockwise size={12} /> {t("svid.generatePassword")}
               </button>
             </div>
             <div className="relative">
               <Input
                 id="svid-reg-password" type={showPassword ? "text" : "password"} value={password}
                 onChange={(e) => { setPassword(e.target.value); checkStrength(e.target.value); }}
-                placeholder="Min. 10 chars, mixed case, numbers, symbols" required
+                placeholder={t("svid.passwordPlaceholder")} required
                 data-testid="svid-reg-password"
                 className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-violet-400/50 focus:ring-violet-400/40 pr-10"
               />
@@ -211,7 +212,7 @@ export default function SvidRegisterPage() {
                 {showPassword ? <EyeSlash size={18} /> : <Eye size={18} />}
               </button>
             </div>
-            <PasswordStrength strength={strength} />
+            <PasswordStrength strength={strength} t={t} />
           </div>
 
           <Button
@@ -220,14 +221,14 @@ export default function SvidRegisterPage() {
             data-testid="svid-register-submit"
             className="h-12 w-full rounded-2xl bg-violet-500 font-semibold text-white shadow-[0_16px_40px_rgba(139,92,246,0.28)] transition hover:bg-violet-400 disabled:opacity-50"
           >
-            {loading ? "Creating account..." : "Create Singra Vox ID"}
+            {loading ? t("svid.creatingAccount") : t("svid.createAccount")}
           </Button>
 
           <button
             type="button" onClick={() => navigate("/login")}
             className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors pt-1"
           >
-            <ArrowLeft size={12} /> Back to login
+            <ArrowLeft size={12} /> {t("svid.backToLogin")}
           </button>
         </form>
       </div>

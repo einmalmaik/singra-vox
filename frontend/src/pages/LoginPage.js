@@ -137,8 +137,8 @@ export default function LoginPage() {
     return (
       <AuthShell
         eyebrow="TWO-FACTOR"
-        title="Enter 2FA Code"
-        subtitle="Open your authenticator app and enter the 6-digit code."
+        title={t("svid.twoFactorTitle")}
+        subtitle={t("svid.twoFactorSubtitle")}
         icon={Fingerprint}
         sideTitle={setupStatus?.instance_name || "Singra Vox"}
         sideCopy="Privacy-first communication. Self-hosted. No telemetry."
@@ -147,7 +147,7 @@ export default function LoginPage() {
           <form onSubmit={handle2FASubmit} className="space-y-5">
             <LocalizedErrorBanner message={svidError} className="text-red-200" />
             <div className="space-y-2">
-              <Label htmlFor="totp" className="workspace-section-label">AUTHENTICATOR CODE</Label>
+              <Label htmlFor="totp" className="workspace-section-label">{t("svid.authenticatorCode")}</Label>
               <Input
                 id="totp"
                 type="text"
@@ -162,7 +162,7 @@ export default function LoginPage() {
                 data-testid="svid-2fa-input"
                 className="h-14 rounded-2xl border-white/10 bg-zinc-950/70 text-center text-2xl font-mono tracking-[0.3em] text-white placeholder:text-zinc-600 focus:border-cyan-400/50 focus:ring-cyan-400/40"
               />
-              <p className="text-xs text-zinc-500 mt-1">You can also use a backup code.</p>
+              <p className="text-xs text-zinc-500 mt-1">{ t("svid.backupCodeHint")}</p>
             </div>
             <Button
               type="submit"
@@ -170,7 +170,7 @@ export default function LoginPage() {
               data-testid="svid-2fa-submit"
               className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300"
             >
-              {svidLoading ? "Verifying..." : "Verify"}
+              {svidLoading ? t("svid.verifying") : t("svid.verify")}
             </Button>
             <button
               type="button"
@@ -190,8 +190,8 @@ export default function LoginPage() {
     return (
       <AuthShell
         eyebrow="SINGRA VOX ID"
-        title="Sign in with Singra Vox ID"
-        subtitle="Use your central account to sign in to this instance."
+        title={t("svid.signInWithSvid")}
+        subtitle={t("svid.svidLoginSubtitle")}
         icon={Fingerprint}
         sideTitle={setupStatus?.instance_name || "Singra Vox"}
         sideCopy="One account, all instances. Privacy-first."
@@ -200,7 +200,7 @@ export default function LoginPage() {
           <form onSubmit={handleSvidLogin} className="space-y-5">
             <LocalizedErrorBanner message={svidError} className="text-red-200" />
             <div className="space-y-2">
-              <Label htmlFor="svid-email" className="workspace-section-label">SINGRA VOX ID EMAIL</Label>
+              <Label htmlFor="svid-email" className="workspace-section-label">{t("svid.svidEmail")}</Label>
               <Input
                 id="svid-email"
                 type="email"
@@ -214,13 +214,13 @@ export default function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="svid-password" className="workspace-section-label">PASSWORD</Label>
+              <Label htmlFor="svid-password" className="workspace-section-label">{t("svid.svidPassword")}</Label>
               <Input
                 id="svid-password"
                 type="password"
                 value={svidPassword}
                 onChange={(e) => setSvidPassword(e.target.value)}
-                placeholder="Your Singra Vox ID password"
+                placeholder={t("svid.svidPasswordPlaceholder")}
                 required
                 data-testid="svid-password-input"
                 className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-violet-400/50 focus:ring-violet-400/40"
@@ -232,7 +232,7 @@ export default function LoginPage() {
               data-testid="svid-login-submit"
               className="h-12 w-full rounded-2xl bg-violet-500 font-semibold text-white shadow-[0_16px_40px_rgba(139,92,246,0.28)] transition hover:bg-violet-400"
             >
-              {svidLoading ? "Signing in..." : "Sign in with Singra Vox ID"}
+              {svidLoading ? t("svid.signingIn") : t("svid.signInWithSvid")}
             </Button>
             <div className="text-center">
               <Link
@@ -240,7 +240,7 @@ export default function LoginPage() {
                 className="text-sm font-medium text-violet-300 transition-colors hover:text-violet-200"
                 data-testid="svid-register-link"
               >
-                Create Singra Vox ID
+                {t("svid.createSvidId")}
               </Link>
             </div>
             <button
@@ -283,12 +283,12 @@ export default function LoginPage() {
           className="flex items-center justify-center gap-2.5 w-full h-12 rounded-2xl border border-violet-500/40 bg-violet-500/10 text-violet-200 font-semibold text-sm transition-all hover:bg-violet-500/20 hover:border-violet-400/60 hover:text-white mb-5"
         >
           <Fingerprint size={20} weight="bold" />
-          Sign in with Singra Vox ID
+          {t("svid.signInWithSvid")}
         </button>
 
         <div className="flex items-center gap-3 mb-5">
           <div className="h-px flex-1 bg-zinc-800" />
-          <span className="text-xs font-medium text-zinc-600 uppercase tracking-wider">or sign in locally</span>
+          <span className="text-xs font-medium text-zinc-600 uppercase tracking-wider">{t("svid.orSignInLocally")}</span>
           <div className="h-px flex-1 bg-zinc-800" />
         </div>
 
