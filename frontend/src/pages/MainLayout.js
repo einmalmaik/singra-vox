@@ -816,7 +816,7 @@ export default function MainLayout() {
       default:
         break;
     }
-  }, [clearAuthState, config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id]);
+  }, [clearAuthState, config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id, user?.status]);
 
   const connectWs = useCallback(() => {
     if (!token || !config?.wsBase || sessionInvalidatedRef.current) return;

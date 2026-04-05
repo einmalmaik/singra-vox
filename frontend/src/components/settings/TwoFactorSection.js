@@ -29,12 +29,12 @@ export default function TwoFactorSection({ token }) {
   const [loading, setLoading] = useState(false);
   const [showDisable, setShowDisable] = useState(false);
 
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const getHeaders = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
 
   // ── Fetch 2FA status ──
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/auth/2fa/status`, { headers });
+      const res = await fetch(`${API}/api/auth/2fa/status`, { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } });
       const data = await res.json();
       setStatus(data.enabled);
     } catch {
@@ -49,7 +49,7 @@ export default function TwoFactorSection({ token }) {
   const startSetup = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/auth/2fa/setup`, { method: "POST", headers });
+      const res = await fetch(`${API}/api/auth/2fa/setup`, { method: "POST", headers: getHeaders() });
       if (!res.ok) {
         const err = await res.json();
         toast.error(err.detail || "Setup failed");
@@ -71,7 +71,7 @@ export default function TwoFactorSection({ token }) {
     setLoading(true);
     try {
       const res = await fetch(`${API}/api/auth/2fa/confirm`, {
-        method: "POST", headers,
+        method: "POST", headers: getHeaders(),
         body: JSON.stringify({ code: confirmCode }),
       });
       if (!res.ok) {
@@ -97,7 +97,7 @@ export default function TwoFactorSection({ token }) {
     setLoading(true);
     try {
       const res = await fetch(`${API}/api/auth/2fa/disable`, {
-        method: "POST", headers,
+        method: "POST", headers: getHeaders(),
         body: JSON.stringify({ password: disablePassword }),
       });
       if (!res.ok) {
