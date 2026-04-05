@@ -22,38 +22,38 @@ VERSION_FILE="$REPO_DIR/.singravox-version"
 IDENTITY_ENV="$DATA_DIR/.env.identity"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
 
-info()    { echo -e "${CYAN}  →${RESET} $*"; }
-success() { echo -e "${GREEN}  ✓${RESET} $*"; }
-warn()    { echo -e "${YELLOW}  !${RESET} $*"; }
+info()    { echo -e "${CYAN}  →${RESET} $*" >&2; }
+success() { echo -e "${GREEN}  ✓${RESET} $*" >&2; }
+warn()    { echo -e "${YELLOW}  !${RESET} $*" >&2; }
 error()   { echo -e "${RED}  ✗${RESET} $*" >&2; }
-header()  { echo -e "\n${BOLD}${CYAN}$*${RESET}"; }
-divider() { echo -e "${CYAN}────────────────────────────────────────────${RESET}"; }
+header()  { echo -e "\n${BOLD}${CYAN}$*${RESET}" >&2; }
+divider() { echo -e "${CYAN}────────────────────────────────────────────${RESET}" >&2; }
 
 banner() {
-  echo ""
-  echo -e "${BOLD}${CYAN}"
-  echo "   ███████╗██╗███╗   ██╗ ██████╗ ██████╗  █████╗     ██╗   ██╗ ██████╗ ██╗  ██╗"
-  echo "   ██╔════╝██║████╗  ██║██╔════╝ ██╔══██╗██╔══██╗    ██║   ██║██╔═══██╗╚██╗██╔╝"
-  echo "   ███████╗██║██╔██╗ ██║██║  ███╗██████╔╝███████║    ██║   ██║██║   ██║ ╚███╔╝ "
-  echo "   ╚════██║██║██║╚██╗██║██║   ██║██╔══██╗██╔══██║    ╚██╗ ██╔╝██║   ██║ ██╔██╗ "
-  echo "   ███████║██║██║ ╚████║╚██████╔╝██║  ██║██║  ██║     ╚████╔╝ ╚██████╔╝██╔╝ ██╗"
-  echo "   ╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝      ╚═══╝   ╚═════╝ ╚═╝  ╚═╝"
-  echo -e "${RESET}"
-  echo -e "${BOLD}   Self-Hosted Encrypted Chat — Easy Install${RESET}"
+  echo "" >&2
+  echo -e "${BOLD}${CYAN}" >&2
+  echo "   ███████╗██╗███╗   ██╗ ██████╗ ██████╗  █████╗     ██╗   ██╗ ██████╗ ██╗  ██╗" >&2
+  echo "   ██╔════╝██║████╗  ██║██╔════╝ ██╔══██╗██╔══██╗    ██║   ██║██╔═══██╗╚██╗██╔╝" >&2
+  echo "   ███████╗██║██╔██╗ ██║██║  ███╗██████╔╝███████║    ██║   ██║██║   ██║ ╚███╔╝ " >&2
+  echo "   ╚════██║██║██║╚██╗██║██║   ██║██╔══██╗██╔══██║    ╚██╗ ██╔╝██║   ██║ ██╔██╗ " >&2
+  echo "   ███████║██║██║ ╚████║╚██████╔╝██║  ██║██║  ██║     ╚████╔╝ ╚██████╔╝██╔╝ ██╗" >&2
+  echo "   ╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝      ╚═══╝   ╚═════╝ ╚═╝  ╚═╝" >&2
+  echo -e "${RESET}" >&2
+  echo -e "${BOLD}   Self-Hosted Encrypted Chat — Easy Install${RESET}" >&2
   divider
-  echo ""
+  echo "" >&2
 }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 ask() {
   local label="$1" default="${2:-}" result=""
   if [[ -n "$default" ]]; then
-    printf "  ${BOLD}%s${RESET} [%s]: " "$label" "$default"
+    printf "  ${BOLD}%s${RESET} [%s]: " "$label" "$default" >&2
   else
-    printf "  ${BOLD}%s${RESET}: " "$label"
+    printf "  ${BOLD}%s${RESET}: " "$label" >&2
   fi
   read -r result
   echo "${result:-$default}"
@@ -61,14 +61,14 @@ ask() {
 
 ask_secret() {
   local label="$1" result=""
-  printf "  ${BOLD}%s${RESET}: " "$label"
-  read -rs result; echo ""
+  printf "  ${BOLD}%s${RESET}: " "$label" >&2
+  read -rs result; echo "" >&2
   echo "$result"
 }
 
 ask_yes_no() {
   local label="$1" default="${2:-n}" result=""
-  printf "  ${BOLD}%s${RESET} (j/n) [%s]: " "$label" "$default"
+  printf "  ${BOLD}%s${RESET} (j/n) [%s]: " "$label" "$default" >&2
   read -r result
   result="${result:-$default}"
   [[ "${result,,}" =~ ^(j|y|ja|yes)$ ]]
@@ -1203,26 +1203,34 @@ print(json.dumps({
 
 # ── SMTP Configuration ────────────────────────────────────────────────────────
 configure_smtp() {
-  echo ""
-  header "E-Mail Konfiguration"
-  echo "  Singra Vox benötigt E-Mail für Registrierungsbestätigung."
-  echo ""
-  echo -e "  ${BOLD}1)${RESET} Eingebaut (Mailpit) — Alle E-Mails im Browser sichtbar"
-  echo "     Empfohlen für Tests und private Server"
-  echo -e "  ${BOLD}2)${RESET} Extern (Gmail, Mailgun, Resend, etc.) — Echte E-Mails"
-  echo "     Empfohlen für öffentliche Server"
-  echo ""
+  echo "" >&2
+  header "E-Mail Konfiguration" >&2
+  echo "  Singra Vox benötigt E-Mail für Registrierungsbestätigung." >&2
+  echo "" >&2
+  echo -e "  ${BOLD}1)${RESET} Eingebaut (Mailpit) — Alle E-Mails im Browser sichtbar" >&2
+  echo "     Empfohlen für Tests und private Server" >&2
+  echo -e "  ${BOLD}2)${RESET} Extern (Gmail, Mailgun, Resend, etc.) — Echte E-Mails" >&2
+  echo "     Empfohlen für öffentliche Server" >&2
+  echo "" >&2
 
-  local choice; choice=$(ask "Wahl" "1")
+  local choice
+  printf "  ${BOLD}%s${RESET} [%s]: " "Wahl" "1" >&2
+  read -r choice
+  choice="${choice:-1}"
 
   if [[ "$choice" == "2" ]]; then
-    echo ""
+    echo "" >&2
     local smtp_host smtp_port smtp_user smtp_pass smtp_from smtp_tls smtp_ssl
-    smtp_host=$(ask "SMTP Server (z.B. smtp.resend.com)" "")
-    smtp_port=$(ask "SMTP Port" "587")
-    smtp_user=$(ask "SMTP Benutzername / E-Mail" "")
-    smtp_pass=$(ask_secret "SMTP Passwort")
-    smtp_from=$(ask "Absender E-Mail" "$smtp_user")
+    printf "  ${BOLD}%s${RESET}: " "SMTP Server (z.B. smtp.resend.com)" >&2
+    read -r smtp_host
+    printf "  ${BOLD}%s${RESET} [%s]: " "SMTP Port" "587" >&2
+    read -r smtp_port; smtp_port="${smtp_port:-587}"
+    printf "  ${BOLD}%s${RESET}: " "SMTP Benutzername / E-Mail" >&2
+    read -r smtp_user
+    printf "  ${BOLD}%s${RESET}: " "SMTP Passwort" >&2
+    read -rs smtp_pass; echo "" >&2
+    printf "  ${BOLD}%s${RESET} [%s]: " "Absender E-Mail" "$smtp_user" >&2
+    read -r smtp_from; smtp_from="${smtp_from:-$smtp_user}"
     smtp_tls="true"; smtp_ssl="false"
     if [[ "$smtp_port" == "465" ]]; then smtp_ssl="true"; smtp_tls="false"; fi
     echo "$smtp_host|$smtp_port|$smtp_user|$smtp_pass|$smtp_from|$smtp_tls|$smtp_ssl"
