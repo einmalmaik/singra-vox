@@ -148,7 +148,7 @@ export default function GlobalSettingsOverlay({
   pttDebug = null,
 }) {
   const { t, i18n } = useTranslation();
-  const { logoutAll, listSessions, revokeSession } = useAuth();
+  const { logoutAll, listSessions, revokeSession, token } = useAuth();
   const { config, connectToInstance } = useRuntime();
   const {
     loading: e2eeLoading,
@@ -381,8 +381,9 @@ export default function GlobalSettingsOverlay({
   const sectionConfig = useMemo(() => ([
     { ...SECTION_CONFIG[0], label: t("settings.voiceVideo") },
     { ...SECTION_CONFIG[1], label: t("settings.account") },
-    { ...SECTION_CONFIG[2], label: t("settings.privacy") },
-    { ...SECTION_CONFIG[3], label: "Instanzen" },
+    { ...SECTION_CONFIG[2], label: t("settings.security") },
+    { ...SECTION_CONFIG[3], label: t("settings.privacy") },
+    { ...SECTION_CONFIG[4], label: t("settings.instances") },
   ]), [t]);
 
   const statusOptions = useMemo(() => ([

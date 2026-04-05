@@ -36,6 +36,27 @@ export async function requestNotificationPermission() {
   return permission === "granted";
 }
 
+/**
+ * Check the current notification permission state WITHOUT triggering a prompt.
+ * Returns "granted" | "denied" | "default".
+ */
+export async function getNotificationPermissionState() {
+  if (isDesktopApp()) {
+    try {
+      const { isPermissionGranted } = await import("@tauri-apps/plugin-notification");
+      const granted = await isPermissionGranted();
+      return granted ? "granted" : "default";
+    } catch {
+      return "default";
+    }
+  }
+
+  if ("Notification" in window) {
+    return Notification.permission;
+  }
+  return "denied";
+}
+
 async function getVapidPublicKey() {
   if (cachedPublicKey) return cachedPublicKey;
   try {

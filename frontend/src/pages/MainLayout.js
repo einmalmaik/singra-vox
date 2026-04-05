@@ -25,6 +25,7 @@ import {
 } from "@/lib/messageHistory";
 import {
   getNotificationPreferences,
+  getNotificationPermissionState,
   requestNotificationPermission,
   subscribeToPush,
 } from "@/lib/pushNotifications";
@@ -898,7 +899,7 @@ export default function MainLayout() {
     let cancelled = false;
     (async () => {
       try {
-        // Brief delay – let the workspace fully render before showing the browser permission dialog
+        // Brief delay – let the workspace fully render first
         await new Promise((resolve) => setTimeout(resolve, 1500));
         if (cancelled) return;
 
@@ -913,36 +914,35 @@ export default function MainLayout() {
           return;
         }
 
-        // Skip if already granted – just (re-)register the subscription silently
-        const currentPermission = !config?.isDesktop && "Notification" in window
-          ? Notification.permission
-          : "default";
+        // Check current permission state WITHOUT triggering a prompt
+        const currentPermission = await getNotificationPermissionState();
 
         if (currentPermission === "denied") {
-          // User blocked notifications – show a subtle hint once per session
-          toast.info("Benachrichtigungen sind blockiert. Erlaube sie in den Browser-Einstellungen.", {
-            duration: 6000,
-            id: "push-denied",
-          });
+          return; // Silently skip – don't nag the user
+        }
+
+        if (currentPermission === "granted") {
+          // Already granted → just register push subscription silently
+          if (!config?.isDesktop) {
+            await subscribeToPush();
+          }
           return;
         }
 
-        const granted = currentPermission === "granted"
-          ? true
-          : await requestNotificationPermission();
+        // Permission is "default" – request it, but only on web (browser shows native prompt).
+        // On desktop, skip the prompt entirely on startup to avoid blocking the app.
+        // Desktop users can enable notifications from Settings instead.
+        if (config?.isDesktop) {
+          return;
+        }
 
+        const granted = await requestNotificationPermission();
         if (!granted || cancelled) {
           return;
         }
 
-        if (currentPermission !== "granted") {
-          // First-time grant – let the user know
-          toast.success("Benachrichtigungen aktiviert!", { duration: 3000, id: "push-granted" });
-        }
-
-        if (!config?.isDesktop) {
-          await subscribeToPush();
-        }
+        toast.success("Benachrichtigungen aktiviert!", { duration: 3000, id: "push-granted" });
+        await subscribeToPush();
       } catch {
         // Notification setup should never block the workspace bootstrap.
       }
