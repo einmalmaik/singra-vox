@@ -1788,9 +1788,41 @@ main() {
   # ── Start services ─────────────────────────────────────────────────────────
   echo ""
   header "Dienste starten"
-  info "Starte alle Dienste…"
+
+  # Stop any existing Singra Vox containers that might block ports
   cd "$DATA_DIR"
-  $COMPOSE_BIN up -d
+  if $COMPOSE_BIN ps --quiet 2>/dev/null | grep -q .; then
+    info "Stoppe laufende Singra-Vox-Dienste…"
+    $COMPOSE_BIN down --remove-orphans 2>/dev/null || true
+    sleep 2
+  fi
+
+  info "Starte alle Dienste…"
+  if ! $COMPOSE_BIN up -d 2>&1; then
+    # Check if a specific port is blocked
+    local failed_port=""
+    for check_port in 80 443; do
+      if ! is_port_free "$check_port"; then
+        local blocker
+        blocker=$(ss -tlnp 2>/dev/null | grep ":${check_port} " | awk '{print $NF}' | head -1)
+        failed_port="$check_port"
+        error "Port $check_port wird von einem anderen Prozess blockiert: $blocker"
+      fi
+    done
+    if [[ -n "$failed_port" ]]; then
+      echo "" >&2
+      warn "Singra Vox konnte nicht starten, weil Port(s) blockiert sind." >&2
+      echo -e "  ${DIM}Mögliche Lösung:${RESET}" >&2
+      echo "    sudo systemctl stop caddy nginx apache2 2>/dev/null  # Webserver stoppen" >&2
+      echo "    docker stop \$(docker ps -q --filter 'publish=$failed_port')  # Container stoppen" >&2
+      echo "" >&2
+      echo -e "  Danach erneut starten:" >&2
+      echo "    cd $DATA_DIR && $COMPOSE_BIN up -d" >&2
+      exit 1
+    fi
+    error "Dienste konnten nicht gestartet werden. Prüfe: $COMPOSE_BIN logs"
+    exit 1
+  fi
   success "Dienste gestartet"
 
   # ── Wait for API ─────────────────────────────────────────────────────────
