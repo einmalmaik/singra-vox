@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ShieldCheck } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import api from "@/lib/api";
@@ -105,7 +104,6 @@ export default function VerifyEmailPage() {
       eyebrow={t("auth.verifyEmail")}
       title={t("auth.verifyEmail")}
       subtitle={t("auth.verifyEmailSubtitle")}
-      icon={ShieldCheck}
       sideTitle="Singra Vox"
       sideCopy={t("auth.heroSubtitle")}
       footer={(

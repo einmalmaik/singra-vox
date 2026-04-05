@@ -145,7 +145,6 @@ export default function ForgotPasswordPage() {
         eyebrow={t("auth.forgotPassword")}
         title={t("auth.forgotPassword")}
         subtitle={t("auth.forgotPasswordSubtitle")}
-        icon={ShieldCheck}
         sideTitle="Singra Vox"
         sideCopy={t("auth.heroSubtitle")}
         footer={
@@ -188,7 +187,6 @@ export default function ForgotPasswordPage() {
         eyebrow={t("auth.forgotPassword")}
         title={t("auth.chooseAccountType")}
         subtitle={t("auth.chooseAccountSubtitle", { email: email.trim() })}
-        icon={ShieldCheck}
         sideTitle="Singra Vox"
         sideCopy={t("auth.heroSubtitle")}
         footer={
@@ -346,7 +344,6 @@ export default function ForgotPasswordPage() {
       eyebrow={t("auth.resetPassword")}
       title={t("auth.passwordResetComplete")}
       subtitle={t("auth.passwordResetCompleteSubtitle")}
-      icon={ShieldCheck}
       sideTitle="Singra Vox"
       sideCopy={t("auth.heroSubtitle")}
     >

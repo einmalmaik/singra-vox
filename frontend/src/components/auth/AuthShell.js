@@ -1,5 +1,17 @@
-import { ShieldCheck } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+
+function FoxLogo({ size = 26 }) {
+  return (
+    <img
+      src="/favicon-192x192.png"
+      alt="Singra Vox"
+      width={size}
+      height={size}
+      className="object-contain"
+      style={{ imageRendering: "auto" }}
+    />
+  );
+}
 
 export default function AuthShell({
   eyebrow,
@@ -7,7 +19,7 @@ export default function AuthShell({
   subtitle,
   children,
   footer = null,
-  icon: Icon = ShieldCheck,
+  icon: Icon = null,
   sideTitle = "Singra Vox",
   sideCopy = null,
   sideDetails = [],
@@ -27,8 +39,8 @@ export default function AuthShell({
           <section className="relative p-6 sm:p-8 xl:p-10">
             <div className={`mx-auto w-full max-w-md ${contentClassName}`}>
               <div className="mb-8 flex items-center gap-3">
-                <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-cyan-400 to-cyan-600 text-zinc-950 shadow-[0_18px_36px_rgba(34,211,238,0.28)]">
-                  <Icon size={26} weight="fill" />
+                <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-gradient-to-br from-cyan-400/20 to-cyan-600/20 shadow-[0_18px_36px_rgba(34,211,238,0.18)] overflow-hidden">
+                  {Icon ? <Icon size={26} weight="fill" /> : <FoxLogo size={38} />}
                 </div>
                 <div>
                   <p className="workspace-section-label">Singra Vox</p>

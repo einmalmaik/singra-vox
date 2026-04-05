@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import PasswordInput from "@/components/ui/PasswordInput";
 import AuthShell from "@/components/auth/AuthShell";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
-import { ShieldCheck } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 import { rememberPendingVerification } from "@/lib/pendingVerification";
@@ -70,7 +69,6 @@ export default function RegisterPage() {
       eyebrow={t("auth.createAccount")}
       title={t("auth.createAccount")}
       subtitle={t("auth.registerSubtitle", { instance: setupStatus?.instance_name || t("auth.defaultInstanceName") })}
-      icon={ShieldCheck}
       sideTitle={setupStatus?.instance_name || "Singra Vox"}
       sideCopy={t("auth.heroSubtitle")}
       footer={(

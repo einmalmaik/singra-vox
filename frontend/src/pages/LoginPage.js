@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import AuthShell from "@/components/auth/AuthShell";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
-import { ShieldCheck, ArrowLeft, Fingerprint } from "@phosphor-icons/react";
+import { ArrowLeft, Fingerprint } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 import { rememberPendingVerification } from "@/lib/pendingVerification";
@@ -262,7 +262,6 @@ export default function LoginPage() {
       eyebrow={t("auth.signIn")}
       title={t("auth.welcomeBack")}
       subtitle={t("auth.signInSubtitle", { instance: setupStatus?.instance_name || t("setup.selfHostedInstance") })}
-      icon={ShieldCheck}
       sideTitle={setupStatus?.instance_name || "Singra Vox"}
       sideCopy={t("auth.heroSubtitle")}
       footer={setupStatus?.allow_open_signup ? (

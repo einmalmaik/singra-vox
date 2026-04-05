@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="main" x1="100" y1="80" x2="412" y2="490" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#0891b2"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="60" y1="10" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="muzzle" x1="175" y1="300" x2="337" y2="460" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ecfeff"/>
+      <stop offset="100%" stop-color="#cffafe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- LEFT EAR (tall, sharp) -->
+  <polygon points="152,190 30,8 235,148" fill="url(#ear)"/>
+  <polygon points="160,182 78,55 220,152" fill="#155e75"/>
+
+  <!-- RIGHT EAR -->
+  <polygon points="360,190 482,8 277,148" fill="url(#ear)"/>
+  <polygon points="352,182 434,55 292,152" fill="#155e75"/>
+
+  <!-- HEAD (wide cheeks, pointed chin = fox!) -->
+  <path d="
+    M 256 475
+    L 195 440
+    L 130 370
+    L 60 280
+    L 65 220
+    L 128 150
+    L 256 125
+    L 384 150
+    L 447 220
+    L 452 280
+    L 382 370
+    L 317 440
+    Z
+  " fill="url(#main)"/>
+
+  <!-- Forehead V mark -->
+  <path d="M 256 130 L 234 200 L 256 268 L 278 200 Z" fill="#a5f3fc" opacity="0.18"/>
+
+  <!-- MUZZLE (white, fox snout shape — wider top, pointed bottom) -->
+  <path d="
+    M 256 290
+    L 188 320
+    L 175 370
+    L 205 425
+    L 256 450
+    L 307 425
+    L 337 370
+    L 324 320
+    Z
+  " fill="url(#muzzle)"/>
+
+  <!-- LEFT EYE -->
+  <ellipse cx="180" cy="245" rx="42" ry="40" fill="#0c4a6e"/>
+  <ellipse cx="180" cy="249" rx="32" ry="30" fill="#e0f2fe"/>
+  <ellipse cx="187" cy="243" rx="17" ry="19" fill="#0e7490"/>
+  <circle cx="176" cy="236" r="8" fill="#f0fdff"/>
+  <circle cx="193" cy="254" r="4" fill="#f0fdff" opacity="0.5"/>
+
+  <!-- RIGHT EYE -->
+  <ellipse cx="332" cy="245" rx="42" ry="40" fill="#0c4a6e"/>
+  <ellipse cx="332" cy="249" rx="32" ry="30" fill="#e0f2fe"/>
+  <ellipse cx="339" cy="243" rx="17" ry="19" fill="#0e7490"/>
+  <circle cx="328" cy="236" r="8" fill="#f0fdff"/>
+  <circle cx="345" cy="254" r="4" fill="#f0fdff" opacity="0.5"/>
+
+  <!-- NOSE -->
+  <path d="M 256 355 L 241 377 Q 256 388 271 377 Z" fill="#164e63"/>
+
+  <!-- MOUTH -->
+  <path d="M 256 383 Q 241 400 228 392" stroke="#0e7490" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M 256 383 Q 271 400 284 392" stroke="#0e7490" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+</svg>
