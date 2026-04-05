@@ -85,6 +85,92 @@ get_public_ip() {
   echo "$ip"
 }
 
+# ── Port-Verfügbarkeit prüfen ─────────────────────────────────────────────────
+is_port_free() {
+  local port="$1"
+  # Try ss first, then netstat, then a direct connection test
+  if command -v ss &>/dev/null; then
+    ! ss -tlnH 2>/dev/null | awk '{print $4}' | grep -qE ":${port}$"
+  elif command -v netstat &>/dev/null; then
+    ! netstat -tlnp 2>/dev/null | awk '{print $4}' | grep -qE ":${port}$"
+  else
+    # Fallback: try to bind the port briefly
+    (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null && return 1 || return 0
+  fi
+}
+
+find_free_port() {
+  local start_port="$1"
+  local port="$start_port"
+  while ! is_port_free "$port"; do
+    warn "Port $port ist bereits belegt, versuche $((port + 1))…" >&2
+    (( port++ ))
+    if (( port > start_port + 20 )); then
+      error "Kein freier Port im Bereich $start_port–$port gefunden." >&2
+      echo "$start_port"
+      return
+    fi
+  done
+  if (( port != start_port )); then
+    info "Port $port ist frei." >&2
+  fi
+  echo "$port"
+}
+
+# ── UFW Portfreigabe ──────────────────────────────────────────────────────────
+configure_firewall() {
+  local ports=("$@")
+
+  if ! command -v ufw &>/dev/null; then
+    return 0
+  fi
+
+  # Check if UFW is active
+  if ! ufw status 2>/dev/null | grep -qi "active"; then
+    return 0
+  fi
+
+  echo "" >&2
+  header "Firewall (UFW)" >&2
+  info "UFW ist aktiv. Folgende Ports werden für Singra Vox benötigt:" >&2
+  echo "" >&2
+  for entry in "${ports[@]}"; do
+    local port_num="${entry%%:*}"
+    local desc="${entry#*:}"
+    echo -e "  ${BOLD}${port_num}${RESET}  — ${desc}" >&2
+  done
+  echo "" >&2
+
+  printf "  ${BOLD}%s${RESET} (j/n) [j]: " "Ports automatisch in UFW freigeben?" >&2
+  read -r ufw_confirm
+  ufw_confirm="${ufw_confirm:-j}"
+
+  if [[ "${ufw_confirm,,}" =~ ^(j|y|ja|yes)$ ]]; then
+    for entry in "${ports[@]}"; do
+      local port_num="${entry%%:*}"
+      local desc="${entry#*:}"
+      local proto="${port_num##*/}"
+      local pnum="${port_num%%/*}"
+      if [[ "$proto" == "$port_num" ]]; then
+        # No protocol specified → allow both tcp/udp
+        ufw allow "$pnum" comment "Singra Vox: $desc" >/dev/null 2>&1
+      else
+        ufw allow "$port_num" comment "Singra Vox: $desc" >/dev/null 2>&1
+      fi
+      success "Port $port_num freigegeben (${desc})" >&2
+    done
+    ufw reload >/dev/null 2>&1
+  else
+    warn "Ports nicht freigegeben. Bitte manuell öffnen:" >&2
+    for entry in "${ports[@]}"; do
+      local port_num="${entry%%:*}"
+      local desc="${entry#*:}"
+      echo "    ufw allow $port_num comment 'Singra Vox: $desc'" >&2
+    done
+  fi
+}
+
+
 spinner() {
   local pid=$1 msg="$2" i=0
   local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
@@ -1553,17 +1639,21 @@ main() {
   local domain rtc_domain http_port api_url compose_flag
 
   if [[ "$mode" == "2" ]]; then
+    # ── Produktiv-Modus: Domain + SSL ──────────────────────────────────────
+    local public_ip; public_ip=$(get_public_ip)
     echo ""
     header "Domain-Konfiguration"
     echo "" >&2
+    info "Erkannte öffentliche IP dieses Servers: ${BOLD}${public_ip}${RESET}" >&2
+    echo "" >&2
     echo -e "  ${BOLD}Haupt-Domain${RESET} — Über diese URL öffnen Nutzer die App im Browser." >&2
-    echo -e "  ${DIM}Beispiel: chat.deinserver.de${RESET}" >&2
+    echo -e "  ${DIM}Beispiel: chat.deinserver.de — muss per A-Record auf ${public_ip} zeigen.${RESET}" >&2
     echo "" >&2
     echo -e "  ${BOLD}Voice-Domain${RESET} — Separater Endpunkt für Sprach- & Videoanrufe (LiveKit/WebRTC)." >&2
     echo -e "  ${DIM}Muss eine eigene Subdomain sein (z.B. rtc.deinserver.de), weil${RESET}" >&2
     echo -e "  ${DIM}LiveKit eigene Ports (7881/TCP + 7882/UDP) für Medienstreams braucht.${RESET}" >&2
     echo "" >&2
-    echo -e "  ${YELLOW}Beide Domains müssen per DNS (A-Record) auf die IP dieses Servers zeigen.${RESET}" >&2
+    echo -e "  ${YELLOW}Beide Domains müssen per DNS (A-Record) auf ${public_ip} zeigen.${RESET}" >&2
     echo "" >&2
     domain=$(ask "Haupt-Domain (z.B. chat.example.com)" "")
     if [[ -z "$domain" ]]; then error "Domain darf nicht leer sein."; exit 1; fi
@@ -1577,14 +1667,34 @@ main() {
     api_url="https://$domain"
     compose_flag="production"
     http_port="443"
+
+    # Ports prüfen und ggf. UFW konfigurieren
+    local firewall_ports=(
+      "80:HTTP (Caddy / Let's Encrypt)"
+      "443:HTTPS (App & API)"
+      "7881/tcp:LiveKit Signaling"
+      "7882/udp:LiveKit Media (WebRTC)"
+    )
+    configure_firewall "${firewall_ports[@]}"
   else
+    # ── Schnellstart-Modus: IP + HTTP ──────────────────────────────────────
+    local public_ip; public_ip=$(get_public_ip)
     echo ""
     header "Netzwerk-Konfiguration"
-    local public_ip; public_ip=$(get_public_ip)
-    info "Erkannte öffentliche IP: $public_ip"
-    echo ""
-    local public_host; public_host=$(ask "Öffentliche IP oder Domain" "$public_ip")
-    http_port=$(ask "HTTP Port" "8080")
+    echo "" >&2
+    info "Erkannte öffentliche IP: ${BOLD}${public_ip}${RESET}" >&2
+    echo "" >&2
+    echo -e "  Du kannst die App direkt über die IP-Adresse erreichen," >&2
+    echo -e "  oder eine Domain eingeben, die auf diesen Server zeigt." >&2
+    echo "" >&2
+    local public_host; public_host=$(ask "IP-Adresse oder Domain" "$public_ip")
+
+    # Port mit automatischer Kollisionserkennung
+    local default_port="8080"
+    default_port=$(find_free_port "$default_port")
+    http_port=$(ask "HTTP Port" "$default_port")
+    http_port=$(find_free_port "$http_port")
+
     domain="$public_host"
     rtc_domain="$public_host"
 
@@ -1595,6 +1705,17 @@ main() {
     livekit_public="ws://$public_host:7880"
     api_url="http://localhost:$http_port"
     compose_flag="quickstart"
+
+    # LiveKit-Port prüfen
+    local lk_port; lk_port=$(find_free_port 7880)
+
+    # Ports prüfen und ggf. UFW konfigurieren
+    local firewall_ports=(
+      "${http_port}:HTTP (Singra Vox App)"
+      "${lk_port}:LiveKit Signaling"
+      "7882/udp:LiveKit Media (WebRTC)"
+    )
+    configure_firewall "${firewall_ports[@]}"
   fi
 
   # ── SMTP ─────────────────────────────────────────────────────────────────
