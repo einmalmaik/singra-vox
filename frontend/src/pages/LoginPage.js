@@ -23,7 +23,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { login, loginWithSvid } = useAuth();
+  const { login, loginWithSvid, verify2FA } = useAuth();
   const { setupStatus, config, disconnectFromInstance } = useRuntime();
   const navigate = useNavigate();
   const pendingInvite = useMemo(() => loadPendingInvite(), []);
@@ -100,13 +100,25 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await api.post("/auth/2fa/verify", {
-        user_id: localPendingUserId,
-        code: localTotpCode,
-      });
-      // The verify endpoint returns the same auth payload as login
-      // Reload the page to pick up the new session from cookies
-      window.location.href = "/";
+      await verify2FA(localPendingUserId, localTotpCode);
+
+      // Handle pending invite after successful 2FA
+      if (pendingInvite?.code) {
+        try {
+          const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
+          clearPendingInvite();
+          rememberPreferredServer(inviteResponse.data.server_id);
+          toast.success(t("invite.joinedServer"));
+          navigate("/", { replace: true });
+          return;
+        } catch (inviteError) {
+          clearPendingInvite();
+          toast.error(formatAppError(t, inviteError, { fallbackKey: "invite.acceptFailed" }));
+          navigate(`/invite/${pendingInvite.code}`, { replace: true, state: { skipAutoAccept: true } });
+          return;
+        }
+      }
+      navigate("/");
     } catch (err) {
       setError(formatAppError(t, err, { fallbackKey: "auth.invalid2FACode" }));
       setLocalTotpCode("");

@@ -187,8 +187,8 @@ async def delete_account(request: Request) -> dict:
     # 10. Delete TOTP / 2FA secrets and backup codes
     await db.totp_secrets.delete_many({"user_id": uid})
 
-    # 11. Delete sessions
-    await db.sessions.delete_many({"user_id": uid})
+    # 11. Delete sessions (auth_sessions is the actual collection name)
+    await db.auth_sessions.delete_many({"user_id": uid})
 
     # 12. Delete push notification subscriptions
     await db.push_subscriptions.delete_many({"user_id": uid})
@@ -206,6 +206,12 @@ async def delete_account(request: Request) -> dict:
 
     # 16. Delete password reset tokens
     await db.password_resets.delete_many({"user_id": uid})
+
+    # 16b. Delete rate limit records tied to this user's email
+    if user.get("email"):
+        await db.rate_limits.delete_many(
+            {"key": {"$regex": user["email"]}}
+        )
 
     # 17. Delete the user record itself (MUST be last)
     await db.users.delete_one({"id": uid})
@@ -242,6 +248,7 @@ async def delete_account(request: Request) -> dict:
             "notifications": "deleted",
             "svid_links": "deleted",
             "status_history": "deleted",
+            "rate_limits": "deleted",
             "audit_log": "anonymised",
         },
     }

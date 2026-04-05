@@ -193,6 +193,11 @@ export function AuthProvider({ children }) {
     return applyAuthResult(res.data);
   }, [applyAuthResult]);
 
+  const verify2FA = useCallback(async (userId, code) => {
+    const res = await api.post("/auth/2fa/verify", { user_id: userId, code });
+    return applyAuthResult(res.data);
+  }, [applyAuthResult]);
+
   const resendVerification = useCallback(async (email) => {
     const res = await api.post("/auth/resend-verification", { email });
     return res.data;
@@ -251,6 +256,7 @@ export function AuthProvider({ children }) {
     token,
     login,
     loginWithSvid,
+    verify2FA,
     register,
     verifyEmail,
     resendVerification,
@@ -279,6 +285,7 @@ export function AuthProvider({ children }) {
     resetPassword,
     token,
     user,
+    verify2FA,
     verifyEmail,
   ]);
 

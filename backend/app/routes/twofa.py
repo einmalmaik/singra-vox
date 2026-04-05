@@ -15,7 +15,7 @@ Routes:
 from datetime import datetime, timezone
 
 import bcrypt
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from app.identity.totp import (
@@ -205,15 +205,18 @@ async def twofa_disable(inp: TwoFADisableInput, request: Request):
 
 
 @router.post("/verify")
-async def twofa_verify(inp: TwoFAVerifyInput, request: Request):
+async def twofa_verify(inp: TwoFAVerifyInput, request: Request, response: Response):
     """
     Verify a TOTP code during login.
     Called by the login flow when the user has 2FA enabled.
     Accepts both TOTP codes and backup codes.
     On success, issues a full auth token (completes login).
+
+    The response parameter is injected by FastAPI so that
+    ``issue_auth_response`` can set HttpOnly auth cookies on the
+    *actual* outgoing HTTP response – critical for cookie-based web auth.
     """
     db = await _get_db()
-    from fastapi.responses import JSONResponse
 
     totp_record = await db.totp_secrets.find_one(
         {"user_id": inp.user_id, "confirmed": True},
@@ -264,7 +267,8 @@ async def twofa_verify(inp: TwoFAVerifyInput, request: Request):
     user["status"] = restore_status
     await log_status_history(user["id"], restore_status)
 
-    auth_payload = await issue_auth_response(user, request, JSONResponse(content={}))
+    # Pass the real Response so cookies are set on the actual HTTP response
+    auth_payload = await issue_auth_response(user, request, response)
     await broadcast_presence_update(user["id"])
 
     result = {**auth_payload}
