@@ -1438,16 +1438,6 @@ main() {
   echo -e "  ${DIM}Der Name, der in der App und bei Einladungen angezeigt wird.${RESET}"
   local instance_name; instance_name=$(ask "Name deiner Singra-Vox-Instanz" "Mein Singra Vox")
 
-  # ── Open Signup ───────────────────────────────────────────────────────────
-  echo ""
-  local allow_signup="true"
-  if ask_yes_no "Soll sich jeder selbst registrieren dürfen?" "j"; then
-    allow_signup="true"
-  else
-    allow_signup="false"
-    info "Nur der Admin kann weitere Accounts anlegen (Einladungs-Links)"
-  fi
-
   # ── Mode-specific config ──────────────────────────────────────────────────
   local frontend_url cors_origins cookie_secure
   local livekit_internal livekit_public
@@ -1475,7 +1465,7 @@ main() {
     header "Netzwerk-Konfiguration"
     local public_ip; public_ip=$(get_public_ip)
     info "Erkannte öffentliche IP: $public_ip"
-
+    echo ""
     local public_host; public_host=$(ask "Öffentliche IP oder Domain" "$public_ip")
     http_port=$(ask "HTTP Port" "8080")
     domain="$public_host"
@@ -1534,7 +1524,6 @@ main() {
     info "Voll-Modus: MinIO S3-Storage aktiviert"
   fi
   echo "WORKERS=${workers}" >> "$DATA_DIR/.env"
-  echo "ALLOW_OPEN_SIGNUP=${allow_signup}" >> "$DATA_DIR/.env"
 
   write_livekit_config "$livekit_key" "$livekit_secret"
 
