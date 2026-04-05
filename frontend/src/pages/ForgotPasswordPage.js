@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PasswordInput from "@/components/ui/PasswordInput";
 import AuthShell from "@/components/auth/AuthShell";
 import { formatAppError } from "@/lib/appErrors";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
@@ -304,17 +305,15 @@ export default function ForgotPasswordPage() {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label className="workspace-section-label">{t("auth.newPassword")}</Label>
-            <Input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder={t("auth.passwordMinLength")}
-              data-testid="reset-new-password"
-              className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
-            />
-          </div>
+          <PasswordInput
+            value={newPassword}
+            onChange={setNewPassword}
+            label={t("auth.newPassword")}
+            showStrength={true}
+            showGenerate={true}
+            autoFocus={false}
+            testId="reset-new-password"
+          />
 
           <div className="space-y-2">
             <Label className="workspace-section-label">{t("auth.confirmPassword")}</Label>

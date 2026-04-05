@@ -8,6 +8,7 @@ import { formatAppError } from "@/lib/appErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import PasswordInput from "@/components/ui/PasswordInput";
 import AuthShell from "@/components/auth/AuthShell";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { ShieldCheck } from "@phosphor-icons/react";
@@ -123,18 +124,14 @@ export default function RegisterPage() {
               className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
             />
           </div>
-          <div className="space-y-2">
-            <Label className="workspace-section-label">{t("auth.password")}</Label>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={t("auth.passwordMinLength")}
-              required
-              data-testid="register-password-input"
-              className="h-12 rounded-2xl border-white/10 bg-zinc-950/70 text-white placeholder:text-zinc-500 focus:border-cyan-400/50 focus:ring-cyan-400/40"
-            />
-          </div>
+          <PasswordInput
+            value={password}
+            onChange={setPassword}
+            label={t("auth.password")}
+            showStrength={true}
+            showGenerate={true}
+            testId="register-password"
+          />
           <Button
             type="submit"
             disabled={loading}
