@@ -1152,8 +1152,12 @@ async def login(inp: LoginInput, request: Request, response: Response):
             {"$set": {"password_hash": upgraded_hash}},
         )
         user["password_hash"] = upgraded_hash
-    await db.users.update_one({"id": user["id"]}, {"$set": {"status": "online", "preferred_status": "online", "last_seen": now_utc()}})
-    await log_status_history(user["id"], "online")
+    # Bevorzugten Status wiederherstellen (nicht immer auf "online" setzen)
+    preferred = user.get("preferred_status", "online")
+    restore_status = preferred if preferred != "offline" else "online"
+    await db.users.update_one({"id": user["id"]}, {"$set": {"status": restore_status, "last_seen": now_utc()}})
+    user["status"] = restore_status
+    await log_status_history(user["id"], restore_status)
     auth_payload = await issue_auth_response(user, request, response)
     await broadcast_presence_update(user["id"])
     return auth_payload
