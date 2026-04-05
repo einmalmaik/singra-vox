@@ -74,6 +74,7 @@ from app.pagination import clamp_page_limit
 from app.rate_limits import enforce_fixed_window_rate_limit
 from app.voice_access import build_voice_capabilities
 from app.ws import ws_mgr
+from app.identity.routes import mount_identity_routes
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
@@ -1392,6 +1393,96 @@ async def refresh(inp: RefreshInput, request: Request, response: Response):
         "refresh_token": refresh_token,
         "session_id": session["session_id"],
     }
+
+
+# ── Login with Singra Vox ID ────────────────────────────────────────────────
+
+class SvidLoginToInstanceInput(BaseModel):
+    """Exchange a Singra Vox ID access token for a local instance session."""
+    svid_access_token: str
+
+
+@auth_r.post("/login-with-svid")
+async def login_with_svid(inp: SvidLoginToInstanceInput, request: Request, response: Response):
+    """
+    Authenticate on this instance using a Singra Vox ID token.
+
+    Flow:
+        1. Frontend has a valid Singra Vox ID access token (from /api/id/login)
+        2. Sends it to this endpoint
+        3. Instance validates the token, creates/finds a linked local user
+        4. Returns a normal instance session (same as /api/auth/login)
+    """
+    from app.identity.oauth2 import decode_svid_token
+
+    await require_instance_initialized()
+
+    try:
+        payload = decode_svid_token(inp.svid_access_token)
+    except Exception:
+        raise HTTPException(401, "Invalid Singra Vox ID token")
+
+    svid_account_id = payload.get("sub")
+    svid_email = payload.get("email", "")
+    if not svid_account_id:
+        raise HTTPException(401, "Invalid token payload")
+
+    # Fetch profile from Singra Vox ID (same DB in this deployment)
+    svid_account = await db.svid_accounts.find_one({"id": svid_account_id}, {"_id": 0})
+    if not svid_account:
+        raise HTTPException(404, "Singra Vox ID account not found")
+
+    # Find or create linked local user
+    local_user = await db.users.find_one({"svid_account_id": svid_account_id}, {"_id": 0})
+    if not local_user:
+        # Also check by email for account linking
+        local_user = await db.users.find_one({"email": svid_email.lower().strip()}, {"_id": 0})
+        if local_user:
+            # Link existing local account to Singra Vox ID
+            await db.users.update_one(
+                {"id": local_user["id"]},
+                {"$set": {
+                    "svid_account_id": svid_account_id,
+                    "svid_server": payload.get("iss", ""),
+                }},
+            )
+        else:
+            # Create new local user from Singra Vox ID profile
+            uid = new_id()
+            username = svid_account.get("username", "")
+            # Ensure username uniqueness on this instance
+            if await db.users.find_one({"username": username}, {"_id": 0}):
+                username = f"{username}_{uid[:4]}"
+            local_user = {
+                "id": uid,
+                "email": svid_account["email"],
+                "username": username,
+                "display_name": svid_account.get("display_name", username),
+                "password_hash": "",  # No local password – auth via Singra Vox ID
+                "avatar_url": svid_account.get("avatar_url", ""),
+                "status": "offline",
+                "public_key": "",
+                "role": USER_ROLE,
+                "instance_role": USER_ROLE,
+                "email_verified": True,
+                "email_verified_at": now_utc(),
+                "svid_account_id": svid_account_id,
+                "svid_server": payload.get("iss", ""),
+                "created_at": now_utc(),
+                "last_seen": now_utc(),
+            }
+            await db.users.insert_one(local_user)
+
+    # Issue normal instance session
+    await db.users.update_one(
+        {"id": local_user["id"]},
+        {"$set": {"status": "online", "last_seen": now_utc()}},
+    )
+    await log_status_history(local_user["id"], "online")
+    auth_payload = await issue_auth_response(local_user, request, response)
+    await broadcast_presence_update(local_user["id"])
+    return auth_payload
+
 
 # ============================================================
 # E2EE ROUTES
@@ -3220,6 +3311,9 @@ app.include_router(emojis_router)
 app.include_router(webhooks_router)
 app.include_router(bots_router)
 app.include_router(files_router)
+
+# ── Singra Vox ID (Central Identity) ────────────────────────────────────────
+mount_identity_routes(app, db)
 
 
 async def migrate_legacy_instance_state():

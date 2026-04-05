@@ -171,6 +171,11 @@ export function AuthProvider({ children }) {
     return applyAuthResult(res.data);
   }, [applyAuthResult]);
 
+  const loginWithSvid = useCallback(async (svidAccessToken) => {
+    const res = await api.post("/auth/login-with-svid", { svid_access_token: svidAccessToken });
+    return applyAuthResult(res.data);
+  }, [applyAuthResult]);
+
   const register = useCallback(async (email, username, password, display_name) => {
     const res = await api.post("/auth/register", { email, username, password, display_name });
     if (res.data?.verification_required) {
@@ -241,6 +246,7 @@ export function AuthProvider({ children }) {
     loading,
     token,
     login,
+    loginWithSvid,
     register,
     verifyEmail,
     resendVerification,
@@ -260,6 +266,7 @@ export function AuthProvider({ children }) {
     loading,
     listSessions,
     login,
+    loginWithSvid,
     logout,
     logoutAll,
     register,
