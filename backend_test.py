@@ -363,6 +363,115 @@ class SingraVoxTester:
         
         return success
 
+    def test_svid_invites(self):
+        """Test SVID cross-instance invite system"""
+        print("\n" + "="*60)
+        print("TESTING SVID INVITE SYSTEM")
+        print("="*60)
+        
+        if not self.svid_token:
+            print("❌ No SVID token available for invite tests")
+            return False
+        
+        # Test sending invite to another SVID user
+        send_success, send_response = self.run_test(
+            "Send cross-instance invite",
+            "POST",
+            "/api/id/invites/send",
+            200,
+            data={
+                "recipient_username": "maik_svid",  # Another test user
+                "instance_url": "https://test-instance.example.com",
+                "instance_name": "Test Instance",
+                "server_name": "Test Server",
+                "invite_code": "test-invite-123",
+                "message": "Join our test server!"
+            },
+            use_svid_token=True
+        )
+        
+        if send_success:
+            print(f"   Invite sent successfully, ID: {send_response.get('invite_id', 'N/A')}")
+            invite_id = send_response.get('invite_id')
+        else:
+            invite_id = None
+        
+        # Test listing invites
+        list_success, list_response = self.run_test(
+            "List invites",
+            "GET",
+            "/api/id/invites?status=pending",
+            200,
+            use_svid_token=True
+        )
+        
+        if list_success:
+            received = list_response.get('received', [])
+            sent = list_response.get('sent', [])
+            print(f"   Received invites: {len(received)}")
+            print(f"   Sent invites: {len(sent)}")
+        
+        # Test responding to invite (if we have one)
+        respond_success = True
+        if invite_id:
+            respond_success, respond_response = self.run_test(
+                "Respond to invite (decline)",
+                "POST",
+                f"/api/id/invites/{invite_id}/respond",
+                200,
+                data={"accepted": False},
+                use_svid_token=True
+            )
+            
+            if respond_success:
+                print(f"   Invite response: {respond_response.get('status', 'N/A')}")
+        
+        return send_success and list_success and respond_success
+
+    def test_svid_unread_counts(self):
+        """Test SVID unread count reporting for Instance Switcher"""
+        print("\n" + "="*60)
+        print("TESTING SVID UNREAD COUNTS")
+        print("="*60)
+        
+        if not self.svid_token:
+            print("❌ No SVID token available for unread count tests")
+            return False
+        
+        # Test reporting unread counts
+        report_success, report_response = self.run_test(
+            "Report unread counts",
+            "POST",
+            "/api/id/instances/unread",
+            200,
+            data={
+                "instance_url": "https://test-instance.example.com",
+                "total_unread": 5,
+                "mention_count": 2
+            },
+            use_svid_token=True
+        )
+        
+        if report_success:
+            print(f"   Unread counts reported successfully")
+        
+        # Test listing instances with unread counts
+        list_success, list_response = self.run_test(
+            "List instances with unread counts",
+            "GET",
+            "/api/id/instances",
+            200,
+            use_svid_token=True
+        )
+        
+        if list_success:
+            instances = list_response.get('instances', [])
+            print(f"   Connected instances: {len(instances)}")
+            for instance in instances:
+                print(f"     - {instance.get('instance_name', 'N/A')}: {instance.get('total_unread', 0)} unread")
+        
+        return report_success and list_success
+
     def test_existing_functionality(self):
         """Test that existing messaging/channels still work"""
         print("\n" + "="*60)
@@ -447,6 +556,10 @@ class SingraVoxTester:
             self.test_svid_profile()
             self.test_svid_2fa_setup()
             self.test_svid_instance_login()
+            
+            # Test new SVID features
+            self.test_svid_invites()
+            self.test_svid_unread_counts()
         
         # Test SVID discovery (no auth required)
         self.test_svid_openid_discovery()

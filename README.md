@@ -1,265 +1,148 @@
 # Singra Vox
 
-Eine selbst-gehostete, verschlüsselte Chat-Plattform. Wie Discord – nur unter deiner Kontrolle.
+**Privacy-first communication platform.** Self-hosted chat, voice, and encrypted channels – with a central identity system that lets users maintain one account across all instances.
 
-- **Ende-zu-Ende-Verschlüsselung** für Nachrichten und Dateien in privaten Kanälen
-- **Voice & Video** über LiveKit (selbst-gehostet oder LiveKit Cloud)
-- **Desktop-App** für Windows, macOS und Linux (Tauri)
-- **Kein Cloud-Zwang** – läuft komplett auf deinem Server
+## Quick Links
 
----
+| Document | Description |
+|----------|-------------|
+| [Singra Vox ID](docs/singra-vox-id.md) | Central identity system – API reference, architecture, security |
+| [Deployment Guide](docs/deployment-linux.md) | Self-hosting on Linux with Docker or bare-metal |
+| [Identity Server Deployment](docs/deploy-identity-server.md) | Deploy Singra Vox ID as a standalone service |
+| [Architecture](docs/architecture.md) | System architecture and design decisions |
+| [Tauri Desktop Guide](docs/tauri-guide.md) | Building the desktop application |
+| [Docker Setup](docs/docker-setup.md) | Docker Compose development environment |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
+| [Release Process](docs/RELEASING.md) | How to create releases |
 
-## Schnellstart
+## Features
+
+### Communication
+- **Text Channels** – Rich messaging with replies, threads, mentions, pins, attachments
+- **Voice Channels** – Real-time voice via LiveKit with screen sharing and quality presets
+- **Direct Messages** – Private 1:1 and group conversations
+- **End-to-End Encryption** – E2EE for private channels, DMs, and voice (optional)
+
+### Identity & Auth
+- **Singra Vox ID** – One account for all instances (OAuth2/OIDC, self-hostable)
+- **Two-Factor Authentication** – TOTP with Google Authenticator/Authy + backup codes
+- **Local Accounts** – Instance-only accounts still supported (backward compatible)
+- **Cross-Instance Invites** – Invite users by their Singra Vox ID username
+- **Password Security** – Strength scoring, policy enforcement, auto-generator
+
+### Administration
+- **Roles & Permissions** – 23 granular permissions with channel overrides
+- **Server Management** – Create servers, channels, categories
+- **Moderation** – Kick, ban, mute, audit log
+- **Instance Settings** – Open/closed registration, instance name, owner management
+
+### Platform
+- **12 Languages** – EN, DE, FR, ES, IT, NL, PT, PL, SV, DA, NO, FI (auto-detected)
+- **Desktop App** – Tauri-based (Windows, macOS, Linux) with auto-updater
+- **Web App** – Full-featured browser client
+- **Push Notifications** – VAPID web push
+- **Self-Hosted** – Your server, your data, your rules
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Singra Vox ID Server                         │
+│                  (id.singravox.com)                             │
+│                                                                 │
+│  /api/id/register    – Account creation                         │
+│  /api/id/login       – Authentication + 2FA                     │
+│  /api/id/oauth/*     – OAuth2/OIDC for instances                │
+│  /api/id/invites/*   – Cross-instance invitations               │
+│  /api/id/instances   – User's connected instances               │
+└──────────────┬───────────────────────┬──────────────────────────┘
+               │ OAuth2                │ OAuth2
+               ▼                      ▼
+┌──────────────────────┐  ┌──────────────────────┐
+│   Instance A         │  │   Instance B         │
+│   gaming.example.com │  │   work.example.com   │
+│                      │  │                      │
+│   Messages, Voice,   │  │   Messages, Voice,   │
+│   E2EE, Permissions  │  │   E2EE, Permissions  │
+│   (100% local data)  │  │   (100% local data)  │
+└──────────────────────┘  └──────────────────────┘
+```
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Backend | Python 3.11, FastAPI, Motor (async MongoDB) |
+| Frontend | React 19, Tailwind CSS, Radix UI |
+| Database | MongoDB |
+| Voice | LiveKit (WebRTC SFU) |
+| Desktop | Tauri 2 (Rust) |
+| Email | Resend (SMTP) |
+| Auth | JWT, Argon2id, TOTP 2FA, OAuth2/OIDC |
+| E2EE | libsodium (X25519, XChaCha20-Poly1305) |
+
+## Getting Started
+
+### Prerequisites
+- Node.js 18+ and Yarn
+- Python 3.11+
+- MongoDB 6+
+- (Optional) LiveKit server for voice
+
+### Development Setup
 
 ```bash
-git clone https://github.com/einmalmaik/singra-vox.git
-cd singra-vox
-bash install.sh
+# 1. Clone
+git clone https://github.com/your-org/singravox.git
+cd singravox
+
+# 2. Backend
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # Configure MONGO_URL, JWT_SECRET, etc.
+uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+
+# 3. Frontend (new terminal)
+cd frontend
+yarn install
+yarn start  # Runs on port 3000
 ```
 
-Der Installer fragt 5 Dinge und richtet alles ein:
-1. **Modus** – HTTP (Test) oder HTTPS mit eigener Domain
-2. **Server-Name** – z.B. "Mein Singra Vox"
-3. **Admin-E-Mail**
-4. **Admin-Passwort**
-5. **Domain** *(nur bei HTTPS-Modus)*
+### Production Deployment
 
-Danach öffnest du die App im Browser, loggst dich ein und erstellst deinen ersten Server.
+See [Deployment Guide](docs/deployment-linux.md) for full instructions with Docker, nginx, and SSL.
 
-### Voraussetzungen
-- Linux (Ubuntu 22.04+, Debian 12, Rocky Linux 9)
-- Min. 1 GB RAM, 10 GB Freier Speicher
-- Internetverbindung beim ersten Start (Docker-Images)
+For deploying the Singra Vox ID server separately, see [Identity Server Deployment](docs/deploy-identity-server.md).
 
-Docker wird automatisch installiert, falls nicht vorhanden.
+## Environment Variables
 
----
+### Instance Backend (.env)
 
-## Desktop-App
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MONGO_URL` | Yes | MongoDB connection string |
+| `DB_NAME` | Yes | Database name |
+| `JWT_SECRET` | Yes | JWT signing secret |
+| `FRONTEND_URL` | Yes | Frontend URL for CORS |
+| `LIVEKIT_URL` | No | LiveKit server URL |
+| `LIVEKIT_API_KEY` | No | LiveKit API key |
+| `LIVEKIT_API_SECRET` | No | LiveKit API secret |
+| `SMTP_HOST` | No | SMTP server for emails |
+| `SMTP_PASSWORD` | No | SMTP password / API key |
+| `SMTP_FROM_EMAIL` | No | Sender email address |
+| `SVID_ISSUER` | No | Singra Vox ID server URL |
+| `SVID_JWT_SECRET` | No | SVID JWT signing secret |
 
-Für Windows, macOS und Linux unter [Releases](../../releases) herunterladbar.
+## Contributing
 
-Die App verbindet sich zu deinem selbst-gehosteten Server. Beim ersten Start gibst du die Server-URL ein (z.B. `https://chat.beispiel.de`).
+Singra Vox is open source. Contributions are welcome.
 
-**Aktualisierungen** werden automatisch beim App-Start erkannt und können mit einem Klick installiert werden – ohne Datenverlust oder erneutes Einloggen.
+- Code should be readable by human developers, not just AI
+- Keep modules independent and well-documented
+- Follow existing patterns (FastAPI routers, React contexts, i18n keys)
+- Test with multiple users before submitting
 
-### Installer bauen (GitHub Actions)
+## License
 
-Beim Pushen eines Tags wird automatisch ein Release gebaut:
-
-```bash
-git tag v0.3.0
-git push origin v0.3.0
-```
-
-GitHub Actions baut dann:
-- **Windows** – `.msi` + `.exe` (NSIS)
-- **Linux** – `.deb` + `.AppImage`
-- **macOS** – `.dmg` (Intel + Apple Silicon)
-
-Voraussetzung: Im GitHub-Repository unter `Settings → Secrets` folgende Secrets hinterlegen:
-- `TAURI_SIGNING_PRIVATE_KEY` – Signierungsschlüssel (mit `tauri signer generate` erzeugen)
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` – Passwort des Schlüssels
-
----
-
-## Updates (Server)
-
-```bash
-bash install.sh --update
-```
-
-Bestehende Konfiguration und Daten bleiben erhalten. Aktive Sessions werden nicht unterbrochen.
-
----
-
-## E-Mail-Konfiguration (Resend)
-
-Singra Vox unterstützt transaktionale E-Mails über **Resend** (Verifizierungs-Codes, Passwort-Reset).
-
-**Einrichtung:**
-1. Account bei [resend.com](https://resend.com) erstellen
-2. API-Key generieren
-3. Optional: eigene Domain verifizieren (empfohlen für Produktion)
-
-`.env` Variablen:
-
-```env
-SMTP_HOST=smtp.resend.com
-SMTP_PORT=465
-SMTP_USERNAME=resend
-SMTP_PASSWORD=re_DEIN_API_KEY
-SMTP_FROM_EMAIL=noreply@deine-domain.de
-SMTP_FROM_NAME=Singra Vox
-SMTP_USE_TLS=false
-SMTP_USE_SSL=true
-```
-
-> Ohne verifizierte Domain kann nur von `onboarding@resend.dev` gesendet werden.
-> Ohne SMTP-Konfiguration werden neue User automatisch verifiziert (nur für Entwicklung).
-
----
-
-## Voice & Video (LiveKit)
-
-Singra Vox unterstützt zwei LiveKit-Betriebsmodi:
-
-### Option A: LiveKit Cloud (empfohlen)
-
-1. Account bei [livekit.io](https://livekit.io) → Cloud-Projekt erstellen
-2. API-Key und Secret aus dem Dashboard kopieren
-
-```env
-LIVEKIT_URL=wss://dein-projekt.livekit.cloud
-LIVEKIT_PUBLIC_URL=wss://dein-projekt.livekit.cloud
-LIVEKIT_API_KEY=APIxxxxxxxxxxxx
-LIVEKIT_API_SECRET=dein-api-secret
-```
-
-### Option B: Selbst-gehostet (Docker)
-
-```env
-LIVEKIT_URL=ws://livekit:7880
-LIVEKIT_PUBLIC_URL=wss://rtc.deine-domain.de
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=min-32-zeichen-langes-secret!!
-```
-
-Port `7880` (TCP) und `7882` (UDP) in der Firewall öffnen.
-
----
-
-## E2EE-Datei-Uploads (MinIO / S3)
-
-Der Installer fragt automatisch nach dem Speicher-Modus. Basierend auf dem erkannten RAM wird ein Vorschlag gemacht:
-
-| Modus | RAM-Bedarf | Wann nutzen |
-|-------|-----------|-------------|
-| **Lite** (lokales Dateisystem) | ~50 MB | VPS mit 1–2 GB RAM |
-| **Voll** (MinIO S3) | ~200 MB | Server mit ≥4 GB RAM |
-
-**Lite-Modus** speichert verschlüsselte Dateien direkt auf dem Dateisystem und liefert sie über Caddy/nginx aus. Keine MinIO-Abhängigkeit.
-
-**Voll-Modus** nutzt MinIO für S3-kompatiblen Blob-Storage. Ermöglicht externe S3-Provider (AWS S3, Backblaze B2).
-
-**Extern (z.B. AWS S3, Backblaze B2):**
-```env
-S3_ENDPOINT_URL=https://s3.amazonaws.com
-S3_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE
-S3_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-S3_BUCKET=mein-bucket
-S3_REGION=eu-central-1
-S3_FORCE_PATH_STYLE=false
-```
-
-## Backend-Performance (Self-Hosting)
-
-Der Installer erkennt automatisch die CPU-Kerne und setzt die optimale Worker-Anzahl:
-
-| CPU-Kerne | Workers | RAM-Verbrauch ca. |
-|-----------|---------|------------------|
-| 1 | 1 | ~150 MB |
-| 2–3 | 1 | ~150 MB |
-| 4+ | 2 | ~280 MB |
-
-Manuell überschreiben in `.env`:
-```env
-WORKERS=2
-```
-
----
-
-## Architektur
-
-```
-Browser / Desktop-App
-        ↓  HTTPS
-    nginx / Caddy  ──→  Frontend (React, Port 80)
-        ↓  /api/
-    FastAPI Backend (Port 8001)
-        ├── MongoDB         (Daten)
-        ├── MinIO / S3      (verschlüsselte Dateien)
-        ├── LiveKit Cloud   (Voice/Video)
-        └── Resend / SMTP   (E-Mail-Verifikation)
-```
-
-Alle Services laufen in Docker-Containern und werden von `docker compose` verwaltet.
-
-Technischer Überblick: [`docs/architecture.md`](docs/architecture.md)
-
----
-
-## Firewall-Ports
-
-| Port     | Protokoll | Zweck                                       |
-|----------|-----------|---------------------------------------------|
-| 80       | TCP       | HTTP (Weiterleitung auf HTTPS)              |
-| 443      | TCP/UDP   | HTTPS + HTTP/3                              |
-| 8080     | TCP       | Quickstart-Modus (HTTP)                     |
-| 7880     | TCP       | LiveKit Voice-Signaling (nur selbst-gehostet) |
-| 7882     | UDP       | LiveKit Voice-Daten (nur selbst-gehostet)   |
-
-> Bei Nutzung von **LiveKit Cloud** sind keine zusätzlichen Ports nötig.
-
----
-
-## Wichtige Befehle
-
-```bash
-cd /opt/singravox
-
-docker compose logs -f          # Live-Logs
-docker compose restart backend  # Backend neu starten
-docker compose down             # Stoppen
-docker compose up -d            # Starten
-bash install.sh --update        # Update
-```
-
----
-
-## Konfiguration
-
-Alle Einstellungen in `/opt/singravox/.env`. Nach Änderungen:
-
-```bash
-cd /opt/singravox && docker compose restart backend
-```
-
-Wichtige Variablen:
-
-| Variable | Bedeutung |
-|----------|-----------|
-| `SMTP_HOST` | SMTP-Server (z.B. `smtp.resend.com`) |
-| `SMTP_PASSWORD` | SMTP-Passwort / API-Key |
-| `LIVEKIT_URL` | LiveKit WebSocket URL (Cloud oder selbst-gehostet) |
-| `LIVEKIT_API_KEY` | LiveKit API-Key |
-| `LIVEKIT_API_SECRET` | LiveKit API-Secret (aus Dashboard) |
-| `S3_ENDPOINT_URL` | S3-kompatibler Storage |
-| `JWT_SECRET` | Wird beim Install automatisch generiert – nicht ändern! |
-
----
-
-## Dokumentation
-
-| Datei | Inhalt |
-|-------|--------|
-| [`docs/architecture.md`](docs/architecture.md) | Code-Struktur, Services, Datenmodelle |
-| [`docs/deployment-linux.md`](docs/deployment-linux.md) | VPS-Setup, Firewall, Domain |
-| [`docs/docker-setup.md`](docs/docker-setup.md) | Docker-Services, Volumes, Netzwerk |
-| [`docs/tauri-guide.md`](docs/tauri-guide.md) | Desktop-App bauen und veröffentlichen |
-| [`docs/RELEASING.md`](docs/RELEASING.md) | Release-Prozess, Signing, GitHub Actions |
-
----
-
-## Mitwirken
-
-Pull Requests sind willkommen. Bitte:
-- Neue Features mit Tests absichern (pytest für Backend, Jest für Frontend)
-- Permissions über `backend/app/permissions.py` prüfen
-- Kein direktes Commit auf `main` – Feature-Branch + PR
-
----
-
-## Lizenz
-
-MIT – siehe `LICENSE`
+Open Source – see LICENSE file.

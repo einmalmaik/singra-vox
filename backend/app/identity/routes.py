@@ -51,6 +51,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 import jwt as pyjwt
+from pydantic import BaseModel, Field
 
 from app.identity.config import (
     SVID_JWT_SECRET,
@@ -878,3 +879,158 @@ async def svid_list_instances(request: Request):
         {"_id": 0, "account_id": 0},
     ).sort("last_connected", -1).to_list(100)
     return {"instances": instances}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CROSS-INSTANCE INVITES
+# ═════════════════════════════════════════════════════════════════════════════
+
+class SvidInviteInput(BaseModel):
+    """Send a cross-instance invite to a Singra Vox ID user."""
+    recipient_username: str
+    instance_url: str
+    instance_name: str = ""
+    server_name: str = ""
+    invite_code: str
+    message: str = ""
+
+
+class SvidInviteRespondInput(BaseModel):
+    accepted: bool
+
+
+@router.post("/invites/send")
+async def svid_send_invite(inp: SvidInviteInput, request: Request):
+    """
+    Send a cross-instance invite to another Singra Vox ID user.
+
+    The invite is stored on the ID server and delivered to the recipient
+    the next time they check their notifications.  The recipient can accept
+    or decline from any instance or the ID dashboard.
+
+    Security:
+        - Sender must be authenticated with a valid Singra Vox ID
+        - Recipient must exist on THIS ID server (same trust domain)
+        - Spam protection: max 10 pending invites per sender
+    """
+    sender = await _get_current_account(request)
+
+    # Find recipient by username on this ID server
+    recipient = await _db.svid_accounts.find_one(
+        {"username": inp.recipient_username.lower().strip()},
+        {"_id": 0, "id": 1, "username": 1, "display_name": 1},
+    )
+    if not recipient:
+        raise HTTPException(404, "User not found on this Singra Vox ID server")
+    if recipient["id"] == sender["id"]:
+        raise HTTPException(400, "Cannot invite yourself")
+
+    # Spam protection: max 10 pending invites per sender
+    pending_count = await _db.svid_invites.count_documents({
+        "sender_id": sender["id"], "status": "pending",
+    })
+    if pending_count >= 10:
+        raise HTTPException(429, "Too many pending invites. Wait for responses.")
+
+    # Prevent duplicate invites to same user for same instance+server
+    existing = await _db.svid_invites.find_one({
+        "sender_id": sender["id"],
+        "recipient_id": recipient["id"],
+        "invite_code": inp.invite_code,
+        "status": "pending",
+    }, {"_id": 0})
+    if existing:
+        return {"ok": True, "invite_id": existing["id"], "already_sent": True}
+
+    invite_id = _new_id()
+    await _db.svid_invites.insert_one({
+        "id": invite_id,
+        "sender_id": sender["id"],
+        "sender_username": sender.get("username", ""),
+        "sender_display_name": sender.get("display_name", ""),
+        "recipient_id": recipient["id"],
+        "recipient_username": recipient["username"],
+        "instance_url": inp.instance_url.rstrip("/"),
+        "instance_name": inp.instance_name,
+        "server_name": inp.server_name,
+        "invite_code": inp.invite_code,
+        "message": (inp.message or "")[:500],
+        "status": "pending",
+        "created_at": _now(),
+    })
+    return {"ok": True, "invite_id": invite_id}
+
+
+@router.get("/invites")
+async def svid_list_invites(request: Request, status: str = "pending"):
+    """List invites for the current user (received + sent)."""
+    account = await _get_current_account(request)
+    received = await _db.svid_invites.find(
+        {"recipient_id": account["id"], "status": status},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(50)
+    sent = await _db.svid_invites.find(
+        {"sender_id": account["id"], "status": status},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(50)
+    return {"received": received, "sent": sent}
+
+
+@router.post("/invites/{invite_id}/respond")
+async def svid_respond_invite(invite_id: str, inp: SvidInviteRespondInput, request: Request):
+    """Accept or decline a cross-instance invite."""
+    account = await _get_current_account(request)
+    invite = await _db.svid_invites.find_one(
+        {"id": invite_id, "recipient_id": account["id"], "status": "pending"},
+        {"_id": 0},
+    )
+    if not invite:
+        raise HTTPException(404, "Invite not found or already responded")
+
+    new_status = "accepted" if inp.accepted else "declined"
+    await _db.svid_invites.update_one(
+        {"id": invite_id},
+        {"$set": {"status": new_status, "responded_at": _now()}},
+    )
+    return {
+        "ok": True,
+        "status": new_status,
+        "instance_url": invite["instance_url"],
+        "invite_code": invite["invite_code"] if inp.accepted else None,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# UNREAD COUNTS (for Instance Switcher)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class SvidUnreadReportInput(BaseModel):
+    """Report unread counts from an instance to the ID server."""
+    instance_url: str
+    total_unread: int = 0
+    mention_count: int = 0
+
+
+@router.post("/instances/unread")
+async def svid_report_unread(inp: SvidUnreadReportInput, request: Request):
+    """
+    Instance clients report their unread counts to the ID server.
+
+    This is called by the frontend periodically so the Instance Switcher
+    can show "3 unread messages on gaming.xyz" without server-to-server
+    communication.  The data is per-user and ephemeral.
+    """
+    account = await _get_current_account(request)
+    await _db.svid_user_instances.update_one(
+        {"account_id": account["id"], "instance_url": inp.instance_url.rstrip("/")},
+        {"$set": {
+            "account_id": account["id"],
+            "instance_url": inp.instance_url.rstrip("/"),
+            "total_unread": max(0, inp.total_unread),
+            "mention_count": max(0, inp.mention_count),
+            "unread_updated_at": _now(),
+        }, "$setOnInsert": {"first_connected": _now(), "instance_name": "", "client_id": ""}},
+        upsert=True,
+    )
+    return {"ok": True}
+
