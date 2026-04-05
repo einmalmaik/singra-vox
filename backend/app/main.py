@@ -79,6 +79,15 @@ from app.identity.routes import mount_identity_routes
 ROOT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
+# Import encryption AFTER dotenv so environment variables are available
+from app.core.encryption import (
+    encryption_enabled,
+    encrypt_channel_content,
+    decrypt_channel_content,
+    encrypt_dm_content,
+    decrypt_dm_content,
+)
+
 # ============================================================
 # Configuration
 # ============================================================
@@ -2786,6 +2795,9 @@ async def get_messages(channel_id: str, request: Request, before: str = None, li
     for msg in messages:
         author = await db.users.find_one({"id": msg["author_id"]}, {"_id": 0, "password_hash": 0})
         msg["author"] = author
+        # Decrypt at-rest encryption for authorized users
+        if msg.get("encrypted_at_rest") and not msg.get("is_e2ee"):
+            msg["content"] = decrypt_channel_content(channel_id, msg["content"])
         await hydrate_message_mentions(msg)
     next_before = messages[0]["created_at"] if messages else None
     return {
@@ -2851,9 +2863,11 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
             "key_envelopes": inp.key_envelopes,
         }
     else:
+        # Encrypt content at rest – DB never stores plaintext
+        stored_content = encrypt_channel_content(channel_id, inp.content)
         msg = {
             "id": new_id(), "channel_id": channel_id, "author_id": user["id"],
-            "content": inp.content, "type": "text",
+            "content": stored_content, "type": "text",
             "attachments": inp.attachments, "edited_at": None,
             "is_deleted": False, "reactions": {},
             "reply_to_id": inp.reply_to_id, "mention_ids": mention_data["mentioned_user_ids"],
@@ -2861,11 +2875,14 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
             "mentioned_role_ids": mention_data["mentioned_role_ids"],
             "mentions_everyone": mention_data["mentions_everyone"],
             "thread_id": None, "thread_count": 0, "created_at": now_utc(),
-            "is_e2ee": False,
+            "is_e2ee": False, "encrypted_at_rest": encryption_enabled(),
         }
     await db.messages.insert_one(msg)
     msg.pop("_id", None)
     msg["author"] = user
+    # Decrypt for WebSocket broadcast and API response (client sees plaintext)
+    if msg.get("encrypted_at_rest") and not msg.get("is_e2ee"):
+        msg["content"] = decrypt_channel_content(channel_id, msg["content"])
     await hydrate_message_mentions(msg)
     
     try:
@@ -3048,6 +3065,9 @@ async def get_dm_messages(other_user_id: str, request: Request, before: str = No
     for msg in messages:
         sender = await db.users.find_one({"id": msg["sender_id"]}, {"_id": 0, "password_hash": 0})
         msg["sender"] = sender
+        # Decrypt at-rest encryption for DMs
+        if msg.get("encrypted_at_rest") and not msg.get("is_e2ee"):
+            msg["content"] = decrypt_dm_content(msg["sender_id"], msg["receiver_id"], msg["content"])
     next_before = messages[0]["created_at"] if messages else None
     return {
         "messages": messages,
@@ -3072,14 +3092,19 @@ async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
         if inp.sender_device_id != device["device_id"]:
             raise HTTPException(400, "Encrypted messages must originate from the active E2EE device")
 
+    # Encrypt DM content at rest (in addition to E2EE when enabled)
+    dm_plaintext = inp.content if not use_e2ee else "[encrypted]"
+    stored_dm_content = encrypt_dm_content(user["id"], other_user_id, dm_plaintext) if not use_e2ee else dm_plaintext
+
     msg = {
         "id": new_id(),
         "sender_id": user["id"],
         "receiver_id": other_user_id,
-        "content": inp.content if not use_e2ee else "[encrypted]",
+        "content": stored_dm_content,
         "encrypted_content": inp.encrypted_content or inp.ciphertext or "",
         "is_encrypted": inp.is_encrypted or use_e2ee,
         "is_e2ee": use_e2ee,
+        "encrypted_at_rest": encryption_enabled() and not use_e2ee,
         "nonce": inp.nonce or "",
         "attachments": inp.attachments,
         "sender_device_id": inp.sender_device_id or None,
@@ -3091,6 +3116,9 @@ async def send_dm(other_user_id: str, inp: DMCreateInput, request: Request):
     }
     await db.direct_messages.insert_one(msg)
     msg.pop("_id", None)
+    # Decrypt for WebSocket/response
+    if msg.get("encrypted_at_rest") and not msg.get("is_e2ee"):
+        msg["content"] = decrypt_dm_content(user["id"], other_user_id, msg["content"])
     msg["sender"] = {k: v for k, v in user.items() if k != "password_hash"}
     await ws_mgr.send(other_user_id, {"type": "dm_message", "message": msg})
     # DM notification

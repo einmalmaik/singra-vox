@@ -1397,7 +1397,21 @@ export default function GlobalSettingsOverlay({
                     </button>
                     <DesktopTower size={15} className={isActive ? "text-cyan-400" : "text-zinc-500"} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">{inst.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-white truncate">{inst.name}</p>
+                        {!isActive && inst.totalUnread > 0 && (
+                          <span
+                            className="shrink-0 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold"
+                            style={{
+                              background: inst.mentionCount > 0 ? "#EF4444" : "#6366F1",
+                              color: "#fff",
+                            }}
+                            data-testid={`instance-unread-badge-${inst.id}`}
+                          >
+                            {inst.totalUnread > 99 ? "99+" : inst.totalUnread}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-zinc-500 truncate">{inst.url}</p>
                       {inst.email && <p className="text-xs text-zinc-600 truncate">{inst.email}</p>}
                       {inst.lastUsedAt && (
