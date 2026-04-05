@@ -59,47 +59,59 @@ Jeder kann eine eigene Instanz hosten.  Alle Daten bleiben auf deinem Server.
 
 ## Schnellstart
 
-### 1. Repository klonen
+### Option A: Automatischer Installer (empfohlen)
+
 ```bash
 git clone https://github.com/einmalmaik/singra-vox.git
 cd singra-vox
+bash install.sh
 ```
 
-### 2. Backend einrichten
+Der Installer führt dich durch alles:
+- Docker-Installation (automatisch falls nötig)
+- Datenbank, Verschlüsselungsschlüssel, Secrets (auto-generiert)
+- Speicher-Modus (Lite/Voll), Installations-Modus (HTTP/HTTPS)
+- Admin-Account, SMTP, LiveKit
+- Optional: Singra Vox ID, automatische Updates
+
+**Nach der Installation:**
 ```bash
+bash install.sh --status          # System-Status & Diagnose
+bash install.sh --repair          # Konfiguration prüfen & reparieren
+bash install.sh --update          # Auf neueste Version aktualisieren
+bash install.sh --identity        # Singra Vox ID einrichten
+bash install.sh --auto-update-on  # Tägliche Auto-Updates aktivieren
+```
+
+### Option B: Manuelle Installation
+
+```bash
+# 1. Clone
+git clone https://github.com/einmalmaik/singra-vox.git
+cd singra-vox
+
+# 2. Backend
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 3. Backend `.env` erstellen
-```bash
 cp .env.example .env
 # Jede Variable konfigurieren (siehe Abschnitt "Umgebungsvariablen")
-```
 
-### 4. Frontend einrichten
-```bash
+# 3. Frontend
 cd ../frontend
 yarn install
-```
+cp .env.example .env
 
-### 5. Frontend `.env` erstellen
-```bash
-echo "REACT_APP_BACKEND_URL=https://deine-domain.de" > .env
-```
-
-### 6. Starten
-```bash
-# Backend
+# 4. Starten
+# Backend (Terminal 1):
 cd backend && uvicorn server:app --host 0.0.0.0 --port 8001
 
-# Frontend (separates Terminal)
+# Frontend (Terminal 2):
 cd frontend && yarn start
 ```
 
-### 7. Ersteinrichtung
+### 5. Ersteinrichtung
 Öffne `https://deine-domain.de` im Browser.  Du siehst den **Setup-Wizard**.
 - Instanzname wählen
 - Owner-Account erstellen
@@ -459,11 +471,30 @@ Daten werden sonst unlesbar.  Plane Schlüssel-Migration nur mit einem
 dezidierten Re-Encryption-Skript.
 
 ### Updates
+
+**Automatisch (empfohlen):**
+```bash
+bash install.sh --auto-update-on    # Tägliche Updates um 04:00 aktivieren
+```
+
+**Manuell via Installer:**
+```bash
+bash install.sh --update
+```
+
+**Manuell ohne Installer:**
 ```bash
 git pull
 cd backend && pip install -r requirements.txt
 cd ../frontend && yarn install
 # Backend und Frontend neustarten
+```
+
+### Diagnose & Reparatur
+
+```bash
+bash install.sh --status     # Zeigt: Container-Status, Konfiguration, Speicher, API-Health
+bash install.sh --repair     # Prüft & repariert: fehlende Secrets, Berechtigungen, Container
 ```
 
 ---

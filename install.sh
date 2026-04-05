@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # =============================================================================
-#   Singra Vox – Self-Hosted Installer
+#   Singra Vox – Self-Hosted Installer & Manager
 #   Works on any Linux VPS (Hetzner, Netcup, Contabo, Ionos, etc.)
-#   Just run:  bash install.sh
+#
+#   Usage:
+#     bash install.sh              # Fresh install or repair
+#     bash install.sh --update     # Pull latest code & rebuild
+#     bash install.sh --status     # Health check & diagnostics
+#     bash install.sh --repair     # Detect & fix broken config
+#     bash install.sh --identity   # Set up Singra Vox ID server
+#     bash install.sh --auto-update-on   # Enable automatic updates
+#     bash install.sh --auto-update-off  # Disable automatic updates
 # =============================================================================
 set -euo pipefail
 
@@ -10,10 +18,12 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$REPO_DIR/deploy"
 DATA_DIR="/opt/singravox"
 COMPOSE_BIN=""
+VERSION_FILE="$REPO_DIR/.singravox-version"
+IDENTITY_ENV="$DATA_DIR/.env.identity"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 
 info()    { echo -e "${CYAN}  →${RESET} $*"; }
 success() { echo -e "${GREEN}  ✓${RESET} $*"; }
@@ -93,12 +103,23 @@ wait_for_api() {
     if (( elapsed >= max_seconds )); then
       error "API antwortet nicht nach ${max_seconds}s."
       error "Logs prüfen:  $COMPOSE_BIN logs backend"
-      exit 1
+      return 1
     fi
     printf "."
   done
   echo ""
   success "API ist bereit"
+}
+
+detect_compose() {
+  if docker compose version &>/dev/null 2>&1; then
+    COMPOSE_BIN="docker compose"
+  elif command -v docker-compose &>/dev/null; then
+    COMPOSE_BIN="docker-compose"
+  else
+    return 1
+  fi
+  return 0
 }
 
 # ── Docker ────────────────────────────────────────────────────────────────────
@@ -143,6 +164,609 @@ print(b64(priv) + ' ' + b64(pub))
 " 2>/dev/null || echo "placeholder_private placeholder_public"
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#   --status : Health Check & Diagnostics
+# ═══════════════════════════════════════════════════════════════════════════════
+run_status() {
+  banner
+  header "Singra Vox – System-Status"
+  echo ""
+
+  local ok=0 warn_count=0 fail=0
+
+  # ── Installation vorhanden?
+  if [[ -d "$DATA_DIR" ]]; then
+    success "Installation gefunden: $DATA_DIR"
+    (( ok++ ))
+  else
+    error "Keine Installation gefunden in $DATA_DIR"
+    echo -e "  ${DIM}Tipp: bash install.sh ausführen${RESET}"
+    exit 1
+  fi
+
+  # ── .env vorhanden?
+  if [[ -f "$DATA_DIR/.env" ]]; then
+    success ".env Konfiguration vorhanden"
+    (( ok++ ))
+  else
+    error ".env fehlt in $DATA_DIR"
+    (( fail++ ))
+  fi
+
+  # ── Docker / Compose?
+  if command -v docker &>/dev/null; then
+    success "Docker: $(docker --version | cut -d' ' -f3 | tr -d ',')"
+    (( ok++ ))
+  else
+    error "Docker nicht installiert"
+    (( fail++ ))
+  fi
+
+  if detect_compose; then
+    success "Docker Compose verfügbar"
+    (( ok++ ))
+  else
+    error "Docker Compose nicht gefunden"
+    (( fail++ ))
+  fi
+
+  # ── Container-Status
+  echo ""
+  header "Container-Status"
+  if detect_compose && [[ -f "$DATA_DIR/docker-compose.yml" ]]; then
+    cd "$DATA_DIR"
+    local running stopped
+    running=$($COMPOSE_BIN ps --status running -q 2>/dev/null | wc -l)
+    stopped=$($COMPOSE_BIN ps --status exited -q 2>/dev/null | wc -l)
+
+    echo ""
+    $COMPOSE_BIN ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || \
+      $COMPOSE_BIN ps 2>/dev/null || \
+      warn "Konnte Container-Status nicht abfragen"
+
+    echo ""
+    if [[ "$running" -gt 0 ]]; then
+      success "$running Container laufen"
+      (( ok++ ))
+    fi
+    if [[ "$stopped" -gt 0 ]]; then
+      warn "$stopped Container gestoppt"
+      (( warn_count++ ))
+    fi
+  else
+    warn "Keine docker-compose.yml gefunden"
+    (( warn_count++ ))
+  fi
+
+  # ── Konfiguration prüfen
+  echo ""
+  header "Konfigurations-Check"
+  if [[ -f "$DATA_DIR/.env" ]]; then
+    local missing_vars=()
+
+    # Pflicht-Variablen prüfen
+    for var in DB_NAME JWT_SECRET FRONTEND_URL; do
+      local val
+      val=$(grep "^${var}=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+      if [[ -z "$val" ]]; then
+        missing_vars+=("$var")
+      fi
+    done
+
+    # Encryption Secret
+    local enc_secret
+    enc_secret=$(grep "^INSTANCE_ENCRYPTION_SECRET=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+    if [[ -n "$enc_secret" && ${#enc_secret} -ge 32 ]]; then
+      success "INSTANCE_ENCRYPTION_SECRET konfiguriert (${#enc_secret} Zeichen)"
+      (( ok++ ))
+    elif [[ -n "$enc_secret" ]]; then
+      warn "INSTANCE_ENCRYPTION_SECRET zu kurz (${#enc_secret} Zeichen, min. 32)"
+      (( warn_count++ ))
+    else
+      warn "INSTANCE_ENCRYPTION_SECRET fehlt – Daten werden unverschlüsselt gespeichert!"
+      (( warn_count++ ))
+    fi
+
+    # LiveKit
+    local lk_url
+    lk_url=$(grep "^LIVEKIT_URL=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+    if [[ -n "$lk_url" ]]; then
+      success "LiveKit konfiguriert: $lk_url"
+      (( ok++ ))
+    else
+      info "LiveKit nicht konfiguriert (Voice/Video deaktiviert)"
+    fi
+
+    # SMTP
+    local smtp_host
+    smtp_host=$(grep "^SMTP_HOST=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+    if [[ -n "$smtp_host" ]]; then
+      success "SMTP konfiguriert: $smtp_host"
+      (( ok++ ))
+    else
+      warn "SMTP nicht konfiguriert – E-Mail-Verifizierung deaktiviert"
+      (( warn_count++ ))
+    fi
+
+    # SVID
+    local svid_issuer
+    svid_issuer=$(grep "^SVID_ISSUER=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+    if [[ -n "$svid_issuer" ]]; then
+      success "Singra Vox ID konfiguriert: $svid_issuer"
+      (( ok++ ))
+    else
+      info "Singra Vox ID nicht konfiguriert (nur lokale Accounts)"
+    fi
+
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+      for var in "${missing_vars[@]}"; do
+        error "Pflicht-Variable fehlt: $var"
+        (( fail++ ))
+      done
+    fi
+  fi
+
+  # ── API Health Check
+  echo ""
+  header "API Health Check"
+  local frontend_url
+  frontend_url=$(grep "^FRONTEND_URL=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+  if [[ -n "$frontend_url" ]]; then
+    local health_response
+    health_response=$(curl -s --max-time 5 "$frontend_url/api/health" 2>/dev/null) || true
+    if echo "$health_response" | grep -q "ok\|healthy" 2>/dev/null; then
+      success "API erreichbar: $frontend_url/api/health"
+      (( ok++ ))
+    else
+      warn "API nicht erreichbar unter $frontend_url/api/health"
+      (( warn_count++ ))
+    fi
+
+    # Frontend Check
+    local frontend_check
+    frontend_check=$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" "$frontend_url" 2>/dev/null) || true
+    if [[ "$frontend_check" == "200" ]]; then
+      success "Frontend erreichbar: $frontend_url"
+      (( ok++ ))
+    else
+      warn "Frontend nicht erreichbar (HTTP $frontend_check)"
+      (( warn_count++ ))
+    fi
+  fi
+
+  # ── Disk Space
+  echo ""
+  header "Speicherplatz"
+  local disk_avail
+  disk_avail=$(df -h "$DATA_DIR" 2>/dev/null | tail -1 | awk '{print $4}')
+  local disk_percent
+  disk_percent=$(df "$DATA_DIR" 2>/dev/null | tail -1 | awk '{print $5}' | tr -d '%')
+  if [[ -n "$disk_percent" ]]; then
+    if [[ "$disk_percent" -lt 80 ]]; then
+      success "Speicherplatz: $disk_avail frei (${disk_percent}% belegt)"
+      (( ok++ ))
+    elif [[ "$disk_percent" -lt 95 ]]; then
+      warn "Speicherplatz: $disk_avail frei (${disk_percent}% belegt) – Bitte aufräumen"
+      (( warn_count++ ))
+    else
+      error "Speicherplatz kritisch: $disk_avail frei (${disk_percent}% belegt)"
+      (( fail++ ))
+    fi
+  fi
+
+  # ── Auto-Update Status
+  echo ""
+  header "Auto-Update"
+  if crontab -l 2>/dev/null | grep -q "singravox.*install.sh.*--update"; then
+    success "Auto-Update ist aktiviert"
+    local cron_schedule
+    cron_schedule=$(crontab -l 2>/dev/null | grep "singravox.*install.sh.*--update" | awk '{print $1,$2,$3,$4,$5}')
+    info "Zeitplan: $cron_schedule"
+    (( ok++ ))
+  else
+    info "Auto-Update ist nicht aktiviert"
+    echo -e "  ${DIM}Aktivieren: bash install.sh --auto-update-on${RESET}"
+  fi
+
+  # ── Summary
+  echo ""
+  divider
+  echo ""
+  echo -e "  ${GREEN}✓ $ok OK${RESET}   ${YELLOW}! $warn_count Warnung(en)${RESET}   ${RED}✗ $fail Fehler${RESET}"
+  echo ""
+
+  if [[ "$fail" -gt 0 ]]; then
+    echo -e "  ${BOLD}Empfehlung:${RESET} bash install.sh --repair"
+  elif [[ "$warn_count" -gt 0 ]]; then
+    echo -e "  ${BOLD}Hinweis:${RESET} Einige Warnungen gefunden. Prüfe die Details oben."
+  else
+    echo -e "  ${BOLD}${GREEN}Alles in Ordnung!${RESET}"
+  fi
+  echo ""
+  divider
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   --repair : Detect and fix broken configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+run_repair() {
+  banner
+  header "Singra Vox – Reparatur-Modus"
+  echo ""
+  echo "  Prüfe bestehende Installation und behebe Probleme automatisch…"
+  echo ""
+
+  local fixed=0 skipped=0
+
+  # ── Prüfe ob Installation existiert
+  if [[ ! -d "$DATA_DIR" ]]; then
+    error "Keine Installation gefunden in $DATA_DIR"
+    echo -e "  ${DIM}Bitte zuerst installieren: bash install.sh${RESET}"
+    exit 1
+  fi
+
+  # ── Docker prüfen
+  header "1/7 Docker prüfen"
+  ensure_docker
+
+  # ── .env prüfen & reparieren
+  header "2/7 Konfiguration prüfen"
+  if [[ ! -f "$DATA_DIR/.env" ]]; then
+    error ".env fehlt. Kann nicht automatisch erstellt werden."
+    echo -e "  ${DIM}Bitte neu installieren: bash install.sh${RESET}"
+    exit 1
+  fi
+
+  # JWT_SECRET prüfen
+  local jwt_val
+  jwt_val=$(grep "^JWT_SECRET=" "$DATA_DIR/.env" | cut -d'=' -f2-)
+  if [[ -z "$jwt_val" || ${#jwt_val} -lt 16 ]]; then
+    warn "JWT_SECRET fehlt oder zu kurz. Generiere neuen…"
+    local new_jwt; new_jwt=$(gen_secret)
+    if grep -q "^JWT_SECRET=" "$DATA_DIR/.env"; then
+      sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$new_jwt|" "$DATA_DIR/.env"
+    else
+      echo "JWT_SECRET=$new_jwt" >> "$DATA_DIR/.env"
+    fi
+    success "JWT_SECRET generiert"
+    (( fixed++ ))
+  else
+    success "JWT_SECRET OK"
+    (( skipped++ ))
+  fi
+
+  # INSTANCE_ENCRYPTION_SECRET prüfen
+  local enc_val
+  enc_val=$(grep "^INSTANCE_ENCRYPTION_SECRET=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+  if [[ -z "$enc_val" ]]; then
+    warn "INSTANCE_ENCRYPTION_SECRET fehlt. Generiere…"
+    local new_enc; new_enc=$(gen_secret)
+    echo "INSTANCE_ENCRYPTION_SECRET=$new_enc" >> "$DATA_DIR/.env"
+    success "INSTANCE_ENCRYPTION_SECRET generiert"
+    warn "WICHTIG: Diesen Schlüssel SICHER aufbewahren! Ohne ihn sind alle Daten verloren."
+    echo -e "  ${BOLD}$new_enc${RESET}"
+    (( fixed++ ))
+  else
+    success "INSTANCE_ENCRYPTION_SECRET OK"
+    (( skipped++ ))
+  fi
+
+  # DB_NAME prüfen
+  local db_val
+  db_val=$(grep "^DB_NAME=" "$DATA_DIR/.env" | cut -d'=' -f2-)
+  if [[ -z "$db_val" ]]; then
+    echo "DB_NAME=singravox" >> "$DATA_DIR/.env"
+    success "DB_NAME gesetzt: singravox"
+    (( fixed++ ))
+  else
+    success "DB_NAME OK: $db_val"
+    (( skipped++ ))
+  fi
+
+  # ── Docker Compose Datei prüfen
+  header "3/7 Docker Compose prüfen"
+  if [[ -f "$DATA_DIR/docker-compose.yml" ]]; then
+    success "docker-compose.yml vorhanden"
+    (( skipped++ ))
+  else
+    warn "docker-compose.yml fehlt"
+    echo -e "  ${DIM}Bitte neu installieren: bash install.sh${RESET}"
+    (( fixed++ ))
+  fi
+
+  # ── LiveKit Config prüfen
+  header "4/7 LiveKit-Konfiguration prüfen"
+  local lk_key lk_secret
+  lk_key=$(grep "^LIVEKIT_API_KEY=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+  lk_secret=$(grep "^LIVEKIT_API_SECRET=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+  if [[ -n "$lk_key" && -n "$lk_secret" ]]; then
+    # Prüfe ob livekit.yaml existiert und konsistent ist
+    if [[ -f "$DATA_DIR/livekit.yaml" ]]; then
+      if grep -q "$lk_key" "$DATA_DIR/livekit.yaml"; then
+        success "LiveKit-Konfiguration konsistent"
+        (( skipped++ ))
+      else
+        warn "livekit.yaml passt nicht zu .env – regeneriere…"
+        write_livekit_config "$lk_key" "$lk_secret"
+        success "livekit.yaml aktualisiert"
+        (( fixed++ ))
+      fi
+    else
+      info "livekit.yaml fehlt – erstelle…"
+      write_livekit_config "$lk_key" "$lk_secret"
+      success "livekit.yaml erstellt"
+      (( fixed++ ))
+    fi
+  else
+    info "LiveKit nicht konfiguriert (Voice/Video deaktiviert)"
+    (( skipped++ ))
+  fi
+
+  # ── Berechtigungen prüfen
+  header "5/7 Dateiberechtigungen prüfen"
+  if [[ -f "$DATA_DIR/.env" ]]; then
+    local env_perms
+    env_perms=$(stat -c '%a' "$DATA_DIR/.env" 2>/dev/null)
+    if [[ "$env_perms" == "600" ]]; then
+      success ".env Berechtigungen OK (600)"
+      (( skipped++ ))
+    else
+      chmod 600 "$DATA_DIR/.env"
+      success ".env Berechtigungen korrigiert: $env_perms → 600"
+      (( fixed++ ))
+    fi
+  fi
+
+  # ── Container starten falls gestoppt
+  header "6/7 Container prüfen"
+  if [[ -f "$DATA_DIR/docker-compose.yml" ]]; then
+    cd "$DATA_DIR"
+    local running
+    running=$($COMPOSE_BIN ps --status running -q 2>/dev/null | wc -l)
+    if [[ "$running" -eq 0 ]]; then
+      warn "Keine Container laufen. Starte…"
+      $COMPOSE_BIN up -d 2>&1 | tail -5
+      success "Container gestartet"
+      (( fixed++ ))
+    else
+      success "$running Container laufen"
+      (( skipped++ ))
+
+      # Prüfe ob wichtige Container fehlen
+      local expected_services=("mongodb" "backend" "frontend")
+      for svc in "${expected_services[@]}"; do
+        if $COMPOSE_BIN ps "$svc" 2>/dev/null | grep -q "running\|Up"; then
+          success "$svc läuft"
+        else
+          warn "$svc nicht gestartet – versuche Neustart…"
+          $COMPOSE_BIN up -d "$svc" 2>&1 | tail -3
+          (( fixed++ ))
+        fi
+      done
+    fi
+  fi
+
+  # ── Source-Dateien aktuell?
+  header "7/7 Build-Kontext prüfen"
+  if [[ -d "$DATA_DIR/backend_src" ]]; then
+    success "Backend Source vorhanden"
+    (( skipped++ ))
+  else
+    warn "Backend Source fehlt – kopiere…"
+    prepare_build_context
+    (( fixed++ ))
+  fi
+
+  # ── Ergebnis
+  echo ""
+  divider
+  echo ""
+  if [[ "$fixed" -gt 0 ]]; then
+    echo -e "  ${GREEN}✓ $fixed Problem(e) behoben${RESET}, $skipped bereits OK"
+    echo ""
+    echo -e "  ${BOLD}Empfehlung:${RESET} Container neu starten für volle Wirkung:"
+    echo -e "  ${DIM}cd $DATA_DIR && $COMPOSE_BIN restart${RESET}"
+  else
+    echo -e "  ${GREEN}${BOLD}Alles in Ordnung!${RESET} Keine Reparaturen nötig."
+  fi
+  echo ""
+  divider
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   --identity : Set up Singra Vox ID (optional)
+# ═══════════════════════════════════════════════════════════════════════════════
+run_identity_setup() {
+  banner
+  header "Singra Vox ID – Identity Server einrichten"
+  echo ""
+  echo "  Singra Vox ID ermöglicht EIN Konto über ALLE Instanzen hinweg."
+  echo "  Ähnlich wie 'Login mit Google' – aber komplett selbst gehostet."
+  echo ""
+  echo "  ${BOLD}Zwei Optionen:${RESET}"
+  echo ""
+  echo "  ${BOLD}1) Integriert${RESET} – Teil deiner bestehenden Singra Vox Instanz"
+  echo "     → Einfachste Option: SVID läuft auf dem gleichen Server"
+  echo "     → Nutzer können sich mit Singra Vox ID auf DEINER Instanz registrieren"
+  echo "     → Andere Instanzen können deine als ID-Server nutzen"
+  echo ""
+  echo "  ${BOLD}2) Standalone${RESET} – Eigener Server nur für Identity"
+  echo "     → Empfohlen für: Mehrere Instanzen, zentraler ID-Server"
+  echo "     → Braucht eigene Domain (z.B. id.deine-domain.de)"
+  echo "     → Minimale Ressourcen (512 MB RAM)"
+  echo ""
+
+  local choice; choice=$(ask "Option wählen" "1")
+
+  if [[ "$choice" == "1" ]]; then
+    # ── Integrierter Modus
+    echo ""
+    header "Integrierter Identity Server"
+
+    if [[ ! -f "$DATA_DIR/.env" ]]; then
+      error "Keine bestehende Installation gefunden. Bitte zuerst installieren."
+      exit 1
+    fi
+
+    local current_issuer
+    current_issuer=$(grep "^SVID_ISSUER=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+    local current_frontend
+    current_frontend=$(grep "^FRONTEND_URL=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+
+    if [[ -n "$current_issuer" ]]; then
+      success "SVID bereits konfiguriert: $current_issuer"
+      if ! ask_yes_no "Neu konfigurieren?" "n"; then
+        echo ""; info "Keine Änderungen vorgenommen."; return
+      fi
+    fi
+
+    local svid_url
+    svid_url=$(ask "Öffentliche URL deiner Instanz (wird der SVID Issuer)" "$current_frontend")
+
+    local svid_secret
+    svid_secret=$(gen_secret)
+
+    # In .env eintragen
+    if grep -q "^SVID_ISSUER=" "$DATA_DIR/.env"; then
+      sed -i "s|^SVID_ISSUER=.*|SVID_ISSUER=$svid_url|" "$DATA_DIR/.env"
+    else
+      echo "SVID_ISSUER=$svid_url" >> "$DATA_DIR/.env"
+    fi
+
+    if grep -q "^SVID_JWT_SECRET=" "$DATA_DIR/.env"; then
+      # Nur überschreiben wenn leer
+      local existing_svid_secret
+      existing_svid_secret=$(grep "^SVID_JWT_SECRET=" "$DATA_DIR/.env" | cut -d'=' -f2-)
+      if [[ -z "$existing_svid_secret" ]]; then
+        sed -i "s|^SVID_JWT_SECRET=.*|SVID_JWT_SECRET=$svid_secret|" "$DATA_DIR/.env"
+      else
+        svid_secret="$existing_svid_secret"
+        info "Bestehender SVID_JWT_SECRET beibehalten"
+      fi
+    else
+      echo "SVID_JWT_SECRET=$svid_secret" >> "$DATA_DIR/.env"
+    fi
+
+    echo ""
+    success "Singra Vox ID konfiguriert!"
+    echo ""
+    echo -e "  ${BOLD}SVID Issuer:${RESET}      $svid_url"
+    echo -e "  ${BOLD}SVID JWT Secret:${RESET}  ${svid_secret:0:8}…"
+    echo ""
+    echo -e "  ${BOLD}Nächster Schritt:${RESET}"
+    echo "  Backend neu starten, damit die Änderungen wirksam werden:"
+    echo -e "  ${DIM}cd $DATA_DIR && $COMPOSE_BIN restart backend${RESET}"
+    echo ""
+    echo "  Danach können Nutzer sich unter /svid-register mit Singra Vox ID"
+    echo "  registrieren, und andere Instanzen können deine als ID-Server nutzen."
+
+  elif [[ "$choice" == "2" ]]; then
+    # ── Standalone Modus
+    echo ""
+    header "Standalone Identity Server"
+    echo ""
+    echo "  Für einen dedizierten Identity Server auf einem eigenen Server"
+    echo "  folge der Anleitung in: docs/deploy-identity-server.md"
+    echo ""
+    echo "  ${BOLD}Kurzfassung:${RESET}"
+    echo ""
+    echo "  1. Auf dem ID-Server:"
+    echo "     git clone https://github.com/einmalmaik/singra-vox.git"
+    echo "     cd singra-vox/backend"
+    echo "     python3 -m venv .venv && source .venv/bin/activate"
+    echo "     pip install -r requirements.txt"
+    echo ""
+    echo "  2. .env erstellen mit:"
+    echo "     MONGO_URL=mongodb://localhost:27017"
+    echo "     DB_NAME=singravox_id"
+    echo "     SVID_ISSUER=https://id.deine-domain.de"
+    echo "     SVID_JWT_SECRET=$(gen_secret)"
+    echo "     (+ SMTP-Konfiguration für E-Mail-Verifizierung)"
+    echo ""
+    echo "  3. Starten:"
+    echo "     uvicorn identity_server:app --host 0.0.0.0 --port 8002 --workers 2"
+    echo ""
+    echo "  4. Reverse Proxy (Caddy/nginx) mit SSL einrichten"
+    echo ""
+    echo "  5. Auf jeder Instanz in .env eintragen:"
+    echo "     SVID_ISSUER=https://id.deine-domain.de"
+    echo "     SVID_JWT_SECRET=<gleicher-schlüssel-wie-id-server>"
+    echo ""
+
+    if [[ -f "$DATA_DIR/.env" ]] && ask_yes_no "Soll ich die SVID_ISSUER URL jetzt in deine Instanz eintragen?" "j"; then
+      local standalone_url
+      standalone_url=$(ask "URL des Identity Servers" "https://id.deine-domain.de")
+      local standalone_secret
+      standalone_secret=$(ask_secret "SVID JWT Secret (muss identisch mit ID-Server sein)")
+
+      if grep -q "^SVID_ISSUER=" "$DATA_DIR/.env"; then
+        sed -i "s|^SVID_ISSUER=.*|SVID_ISSUER=$standalone_url|" "$DATA_DIR/.env"
+      else
+        echo "SVID_ISSUER=$standalone_url" >> "$DATA_DIR/.env"
+      fi
+
+      if grep -q "^SVID_JWT_SECRET=" "$DATA_DIR/.env"; then
+        sed -i "s|^SVID_JWT_SECRET=.*|SVID_JWT_SECRET=$standalone_secret|" "$DATA_DIR/.env"
+      else
+        echo "SVID_JWT_SECRET=$standalone_secret" >> "$DATA_DIR/.env"
+      fi
+
+      success "Instanz mit Identity Server verbunden: $standalone_url"
+      echo -e "  ${DIM}Backend neu starten: cd $DATA_DIR && $COMPOSE_BIN restart backend${RESET}"
+    fi
+  fi
+
+  echo ""
+  divider
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   --auto-update-on / --auto-update-off
+# ═══════════════════════════════════════════════════════════════════════════════
+run_auto_update_on() {
+  banner
+  header "Auto-Update aktivieren"
+  echo ""
+  echo "  Das Auto-Update prüft täglich um 04:00 Uhr auf neue Versionen"
+  echo "  und aktualisiert automatisch. Deine Konfiguration bleibt erhalten."
+  echo ""
+
+  local schedule
+  schedule=$(ask "Cron-Zeitplan (Standard: täglich 04:00)" "0 4 * * *")
+
+  # Sicherstellen dass kein alter Eintrag existiert
+  local tmpfile
+  tmpfile=$(mktemp)
+  crontab -l 2>/dev/null | grep -v "singravox.*install.sh.*--update" > "$tmpfile" || true
+  echo "$schedule cd $REPO_DIR && bash install.sh --update >> /var/log/singravox-update.log 2>&1 # singravox-auto-update" >> "$tmpfile"
+  crontab "$tmpfile"
+  rm -f "$tmpfile"
+
+  success "Auto-Update aktiviert!"
+  echo ""
+  echo -e "  ${BOLD}Zeitplan:${RESET}   $schedule"
+  echo -e "  ${BOLD}Log-Datei:${RESET}  /var/log/singravox-update.log"
+  echo ""
+  echo -e "  ${DIM}Deaktivieren: bash install.sh --auto-update-off${RESET}"
+  echo ""
+  divider
+}
+
+run_auto_update_off() {
+  banner
+  header "Auto-Update deaktivieren"
+
+  local tmpfile
+  tmpfile=$(mktemp)
+  crontab -l 2>/dev/null | grep -v "singravox.*install.sh.*--update" > "$tmpfile" || true
+  crontab "$tmpfile"
+  rm -f "$tmpfile"
+
+  success "Auto-Update deaktiviert."
+  echo ""
+  divider
+}
+
 # ── Write config files ────────────────────────────────────────────────────────
 write_env() {
   local mode="$1"
@@ -157,11 +781,13 @@ write_env() {
   local vapid_private="${18}"  vapid_public="${19}"  vapid_email="${20}"
   local s3_key="${21}"  s3_secret="${22}"
   local jwt_secret; jwt_secret="$(gen_secret)"
+  local encryption_secret; encryption_secret="$(gen_secret)"
 
   mkdir -p "$DATA_DIR"
   cat > "$DATA_DIR/.env" <<EOF
 DB_NAME=singravox
 JWT_SECRET=$jwt_secret
+INSTANCE_ENCRYPTION_SECRET=$encryption_secret
 COOKIE_SECURE=$cookie_secure
 FRONTEND_URL=$frontend_url
 CORS_ORIGINS=$cors_origins
@@ -192,6 +818,14 @@ S3_FORCE_PATH_STYLE=true
 MAX_E2EE_BLOB_BYTES=52428800
 EOF
   chmod 600 "$DATA_DIR/.env"
+
+  # INSTANCE_ENCRYPTION_SECRET Warnung
+  echo ""
+  warn "WICHTIG: Verschlüsselungsschlüssel sicher aufbewahren!"
+  echo -e "  ${BOLD}INSTANCE_ENCRYPTION_SECRET:${RESET}"
+  echo -e "  ${DIM}$encryption_secret${RESET}"
+  echo -e "  ${RED}Ohne diesen Schlüssel sind alle Daten unwiderruflich verloren!${RESET}"
+  echo ""
 }
 
 write_livekit_config() {
@@ -480,7 +1114,6 @@ prepare_build_context() {
 
   mkdir -p "$DATA_DIR/backend_src" "$DATA_DIR/frontend_src"
 
-  # Copy source files (exclude git, node_modules, .env files)
   rsync -a --exclude='.git' --exclude='node_modules' --exclude='__pycache__' \
     --exclude='*.pyc' --exclude='.env' --exclude='storage/' \
     "$REPO_DIR/backend/" "$DATA_DIR/backend_src/" 2>/dev/null \
@@ -491,7 +1124,6 @@ prepare_build_context() {
     "$REPO_DIR/frontend/" "$DATA_DIR/frontend_src/" 2>/dev/null \
     || cp -r "$REPO_DIR/frontend/." "$DATA_DIR/frontend_src/"
 
-  # Write Dockerfiles that use the copied source dirs
   cat > "$DATA_DIR/backend.Dockerfile" <<'DOCKERFILE_EOF'
 FROM python:3.11-slim
 LABEL maintainer="Singra Vox"
@@ -577,7 +1209,7 @@ configure_smtp() {
   echo ""
   echo "  ${BOLD}1)${RESET} Eingebaut (Mailpit) — Alle E-Mails im Browser sichtbar"
   echo "     Empfohlen für Tests und private Server"
-  echo "  ${BOLD}2)${RESET} Extern (Gmail, Mailgun, etc.) — Echte E-Mails"
+  echo "  ${BOLD}2)${RESET} Extern (Gmail, Mailgun, Resend, etc.) — Echte E-Mails"
   echo "     Empfohlen für öffentliche Server"
   echo ""
 
@@ -586,7 +1218,7 @@ configure_smtp() {
   if [[ "$choice" == "2" ]]; then
     echo ""
     local smtp_host smtp_port smtp_user smtp_pass smtp_from smtp_tls smtp_ssl
-    smtp_host=$(ask "SMTP Server (z.B. smtp.gmail.com)" "")
+    smtp_host=$(ask "SMTP Server (z.B. smtp.resend.com)" "")
     smtp_port=$(ask "SMTP Port" "587")
     smtp_user=$(ask "SMTP Benutzername / E-Mail" "")
     smtp_pass=$(ask_secret "SMTP Passwort")
@@ -595,7 +1227,6 @@ configure_smtp() {
     if [[ "$smtp_port" == "465" ]]; then smtp_ssl="true"; smtp_tls="false"; fi
     echo "$smtp_host|$smtp_port|$smtp_user|$smtp_pass|$smtp_from|$smtp_tls|$smtp_ssl"
   else
-    # Built-in Mailpit
     echo "mailpit|1025|||no-reply@singravox.local|false|false"
   fi
 }
@@ -620,21 +1251,14 @@ run_update() {
   info "Konfiguration (.env) wird beibehalten – alle Einstellungen bleiben erhalten."
   echo ""
 
-  # Detect compose binary
-  if docker compose version &>/dev/null 2>&1; then
-    COMPOSE_BIN="docker compose"
-  elif command -v docker-compose &>/dev/null; then
-    COMPOSE_BIN="docker-compose"
-  else
+  if ! detect_compose; then
     error "Docker Compose nicht gefunden."
     exit 1
   fi
 
   # Determine which compose file is in use
-  local compose_file="docker-compose.yml"
   if [[ -f "$DATA_DIR/Caddyfile" ]]; then
     info "Produktions-Setup erkannt (Caddy/HTTPS)"
-    compose_file="docker-compose.yml"
   else
     info "Quickstart-Setup erkannt (HTTP)"
   fi
@@ -643,9 +1267,28 @@ run_update() {
   if [[ -d "$REPO_DIR/.git" ]]; then
     info "Lade neuesten Code von GitHub…"
     cd "$REPO_DIR"
+    local current_hash new_hash
+    current_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
     git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD)" 2>/dev/null \
       || warn "git pull fehlgeschlagen. Fahre mit lokalem Code fort."
-    success "Code aktuell"
+    new_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+
+    if [[ "$current_hash" == "$new_hash" ]]; then
+      info "Bereits auf dem neuesten Stand ($current_hash)"
+    else
+      success "Code aktualisiert: ${current_hash:0:8} → ${new_hash:0:8}"
+    fi
+  fi
+
+  # Check if INSTANCE_ENCRYPTION_SECRET exists (repair on update)
+  local enc_val
+  enc_val=$(grep "^INSTANCE_ENCRYPTION_SECRET=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+  if [[ -z "$enc_val" ]]; then
+    warn "INSTANCE_ENCRYPTION_SECRET fehlt – generiere neuen Schlüssel…"
+    local new_enc; new_enc=$(gen_secret)
+    echo "INSTANCE_ENCRYPTION_SECRET=$new_enc" >> "$DATA_DIR/.env"
+    success "INSTANCE_ENCRYPTION_SECRET generiert"
+    warn "WICHTIG: Schlüssel sicher aufbewahren: $new_enc"
   fi
 
   # Re-prepare build context with updated source
@@ -666,6 +1309,11 @@ run_update() {
   # Ensure all services running
   $COMPOSE_BIN up -d 2>&1 | tail -5
 
+  # Save version
+  if [[ -d "$REPO_DIR/.git" ]]; then
+    git rev-parse HEAD > "$VERSION_FILE" 2>/dev/null || true
+  fi
+
   echo ""
   success "Update abgeschlossen! Alle bestehenden Sessions bleiben aktiv."
   echo ""
@@ -678,16 +1326,60 @@ run_update() {
   divider
 }
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Main Install
+# ═══════════════════════════════════════════════════════════════════════════════
 main() {
-  # ── Update-Flag erkennen ─────────────────────────────────────────────────────
+  # ── Flag-Erkennung ─────────────────────────────────────────────────────────
   for arg in "$@"; do
-    if [[ "$arg" == "--update" || "$arg" == "update" ]]; then
-      run_update
-      return
-    fi
+    case "$arg" in
+      --update|update)        run_update; return ;;
+      --status|status)        run_status; return ;;
+      --repair|repair)        run_repair; return ;;
+      --identity|identity)    run_identity_setup; return ;;
+      --auto-update-on)       run_auto_update_on; return ;;
+      --auto-update-off)      run_auto_update_off; return ;;
+      --help|-h|help)
+        echo ""
+        echo "  Singra Vox Installer"
+        echo ""
+        echo "  Verwendung: bash install.sh [OPTION]"
+        echo ""
+        echo "  Optionen:"
+        echo "    (ohne)              Neu-Installation oder Re-Installation"
+        echo "    --update            Update auf neueste Version"
+        echo "    --status            System-Status & Diagnose"
+        echo "    --repair            Konfiguration prüfen & reparieren"
+        echo "    --identity          Singra Vox ID einrichten (optional)"
+        echo "    --auto-update-on    Automatische Updates aktivieren"
+        echo "    --auto-update-off   Automatische Updates deaktivieren"
+        echo "    --help              Diese Hilfe anzeigen"
+        echo ""
+        return
+        ;;
+    esac
   done
+
   banner
+
+  # ── Bestehende Installation erkennen
+  if [[ -d "$DATA_DIR" && -f "$DATA_DIR/.env" && -f "$DATA_DIR/docker-compose.yml" ]]; then
+    echo ""
+    warn "Bestehende Installation erkannt in $DATA_DIR"
+    echo ""
+    echo "  ${BOLD}1)${RESET} Neu installieren (Konfiguration wird überschrieben!)"
+    echo "  ${BOLD}2)${RESET} Reparieren (Konfiguration bleibt erhalten)"
+    echo "  ${BOLD}3)${RESET} Update (Konfiguration bleibt erhalten, neuster Code)"
+    echo "  ${BOLD}4)${RESET} Abbrechen"
+    echo ""
+    local reinstall_choice; reinstall_choice=$(ask "Wahl" "2")
+    case "$reinstall_choice" in
+      2) run_repair; return ;;
+      3) run_update; return ;;
+      4) info "Abgebrochen."; return ;;
+      1) warn "Fahre mit Neuinstallation fort…" ;;
+    esac
+  fi
 
   # ── OS Check ────────────────────────────────────────────────────────────────
   if [[ "$(uname -s)" != "Linux" ]]; then
@@ -708,7 +1400,7 @@ main() {
   echo "     Ideal für: VPS mit 1-2 GB RAM, kleine Instanzen"
   echo ""
   echo "  ${BOLD}2) Voll-Modus${RESET}  — MinIO S3-kompatibler Storage (~200 MB RAM)"
-  echo "     Ideal für: Server mit ≥4 GB RAM, große Instanzen, S3-Backups"
+  echo "     Ideal für: Server mit 4+ GB RAM, große Instanzen, S3-Backups"
   echo ""
   if [[ $total_ram_mb -lt 3000 ]]; then
     warn "Erkannter RAM: ${total_ram_mb} MB → Lite-Modus empfohlen"
@@ -773,7 +1465,6 @@ main() {
   local domain rtc_domain http_port api_url compose_flag
 
   if [[ "$mode" == "2" ]]; then
-    # ── Production mode ───────────────────────────────────────────────────
     echo ""
     header "Domain-Konfiguration"
     echo "  Stelle sicher, dass deine Domain auf die IP dieses Servers zeigt."
@@ -791,7 +1482,6 @@ main() {
     compose_flag="production"
     http_port="443"
   else
-    # ── Quickstart mode ───────────────────────────────────────────────────
     echo ""
     header "Netzwerk-Konfiguration"
     local public_ip; public_ip=$(get_public_ip)
@@ -899,6 +1589,31 @@ main() {
     "$admin_email" "$admin_user" "$admin_pass" "$admin_display" \
     "$allow_signup"
 
+  # ── Save version info ────────────────────────────────────────────────────
+  if [[ -d "$REPO_DIR/.git" ]]; then
+    git -C "$REPO_DIR" rev-parse HEAD > "$VERSION_FILE" 2>/dev/null || true
+  fi
+
+  # ── Optional: Singra Vox ID? ─────────────────────────────────────────────
+  echo ""
+  if ask_yes_no "Möchtest du Singra Vox ID (Identity Server) einrichten?" "n"; then
+    run_identity_setup
+  else
+    info "Singra Vox ID übersprungen. Jederzeit nachholen: bash install.sh --identity"
+  fi
+
+  # ── Optional: Auto-Update? ──────────────────────────────────────────────
+  echo ""
+  if ask_yes_no "Automatische Updates aktivieren? (täglich um 04:00)" "j"; then
+    local tmpfile
+    tmpfile=$(mktemp)
+    crontab -l 2>/dev/null | grep -v "singravox.*install.sh.*--update" > "$tmpfile" || true
+    echo "0 4 * * * cd $REPO_DIR && bash install.sh --update >> /var/log/singravox-update.log 2>&1 # singravox-auto-update" >> "$tmpfile"
+    crontab "$tmpfile"
+    rm -f "$tmpfile"
+    success "Auto-Update aktiviert (täglich 04:00)"
+  fi
+
   # ── Done! ─────────────────────────────────────────────────────────────────
   echo ""
   divider
@@ -923,11 +1638,14 @@ main() {
   echo "  2. Ersten Server erstellen"
   echo "  3. Freunde per Einladungs-Link einladen"
   echo ""
-  echo -e "  ${BOLD}Updates:${RESET}"
-  echo "  bash install.sh --update   # Auf neuste Version aktualisieren"
-  echo "  (Deine Konfiguration + Daten bleiben dabei vollständig erhalten)"
+  echo -e "  ${BOLD}Verwaltung:${RESET}"
+  echo "  bash install.sh --status          Status & Diagnose"
+  echo "  bash install.sh --repair          Probleme reparieren"
+  echo "  bash install.sh --update          Manuell aktualisieren"
+  echo "  bash install.sh --identity        Singra Vox ID einrichten"
+  echo "  bash install.sh --auto-update-on  Automatische Updates aktivieren"
   echo ""
-  echo -e "  ${CYAN}Befehle:${RESET}"
+  echo -e "  ${CYAN}Docker-Befehle:${RESET}"
   echo "  cd $DATA_DIR"
   echo "  $COMPOSE_BIN logs -f           # Live-Logs"
   echo "  $COMPOSE_BIN restart backend   # Backend neu starten"

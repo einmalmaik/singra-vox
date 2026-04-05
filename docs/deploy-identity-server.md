@@ -6,7 +6,17 @@ The Singra Vox ID server can run as:
 1. **Integrated** – Part of an existing Singra Vox instance (default, simplest)
 2. **Standalone** – As its own service on a dedicated server/domain (recommended for production)
 
-This guide covers option 2: deploying it as `id.singravox.com` (or your own domain).
+### Quick Setup via Installer
+
+If you already have a running Singra Vox instance, the easiest way to enable Singra Vox ID:
+
+```bash
+bash install.sh --identity
+```
+
+This guides you through choosing integrated or standalone mode and configures everything automatically.
+
+For manual setup or standalone deployment on a separate server, read on.
 
 ## What You Need
 
