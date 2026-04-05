@@ -1,9 +1,11 @@
 """
 Mail delivery helpers for transactional Singra Vox emails.
 
-The backend keeps email templating and SMTP transport in one small module so
-auth flows can reuse it without sprinkling connection details across route
-handlers.
+The backend keeps SMTP transport in this small module so auth flows can reuse
+it without sprinkling connection details across route handlers.
+
+Templates are defined in email_templates.py (central, reusable, branded).
+This module only handles: settings, message assembly, SMTP delivery.
 """
 from __future__ import annotations
 
@@ -16,6 +18,17 @@ import smtplib
 from typing import Tuple
 
 logger = logging.getLogger(__name__)
+
+# ── Re-export render functions so existing imports keep working ────────────────
+# Routes that do `from app.emailing import render_verification_email` will
+# continue to work without changes.
+from app.email_templates import (  # noqa: F401
+    render_verification_email,
+    render_password_reset_email,
+    render_welcome_email,
+    render_invite_email,
+    render_security_alert_email,
+)
 
 
 @dataclass(frozen=True)
@@ -40,86 +53,6 @@ def load_mail_settings() -> MailSettings:
         from_name=os.environ.get("SMTP_FROM_NAME", "Singra Vox").strip(),
         use_tls=os.environ.get("SMTP_USE_TLS", "false").lower() == "true",
         use_ssl=os.environ.get("SMTP_USE_SSL", "false").lower() == "true",
-    )
-
-
-def _render_code_email(
-    *,
-    app_name: str,
-    instance_name: str,
-    title: str,
-    intro: str,
-    code: str,
-    expires_minutes: int,
-    outro: str,
-) -> Tuple[str, str, str]:
-    subject = f"{app_name}: {title}"
-    text_body = (
-        f"{title} for {instance_name or app_name}\n\n"
-        f"{intro}\n\n"
-        f"Your code is: {code}\n\n"
-        f"This code expires in {expires_minutes} minutes.\n"
-        f"{outro}"
-    )
-    html_body = f"""
-    <html>
-      <body style="font-family: Arial, sans-serif; background: #0a0a0a; color: #ffffff; padding: 24px;">
-        <div style="max-width: 520px; margin: 0 auto; background: #121212; border: 1px solid #27272A; border-radius: 16px; padding: 24px;">
-          <p style="margin: 0 0 12px; color: #A1A1AA; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;">
-            {app_name}
-          </p>
-          <h1 style="margin: 0 0 12px; font-size: 24px;">{title}</h1>
-          <p style="margin: 0 0 18px; color: #D4D4D8; line-height: 1.6;">
-            {intro}
-            <strong>{instance_name or app_name}</strong>.
-          </p>
-          <div style="margin: 0 0 18px; padding: 18px; border-radius: 14px; background: #18181B; border: 1px solid #27272A; text-align: center;">
-            <span style="font-size: 34px; letter-spacing: 0.28em; font-weight: 700;">{code}</span>
-          </div>
-          <p style="margin: 0 0 8px; color: #A1A1AA;">This code expires in {expires_minutes} minutes.</p>
-          <p style="margin: 0; color: #71717A; font-size: 13px;">
-            {outro}
-          </p>
-        </div>
-      </body>
-    </html>
-    """.strip()
-    return subject, text_body, html_body
-
-
-def render_verification_email(
-    *,
-    app_name: str,
-    instance_name: str,
-    code: str,
-    expires_minutes: int,
-) -> Tuple[str, str, str]:
-    return _render_code_email(
-        app_name=app_name,
-        instance_name=instance_name,
-        title="Verify your email",
-        intro="Use the following code to finish setting up your account for",
-        code=code,
-        expires_minutes=expires_minutes,
-        outro="If you did not create this account, you can ignore this message.",
-    )
-
-
-def render_password_reset_email(
-    *,
-    app_name: str,
-    instance_name: str,
-    code: str,
-    expires_minutes: int,
-) -> Tuple[str, str, str]:
-    return _render_code_email(
-        app_name=app_name,
-        instance_name=instance_name,
-        title="Reset your password",
-        intro="Use the following code to reset the password for",
-        code=code,
-        expires_minutes=expires_minutes,
-        outro="If you did not request a password reset, you can ignore this message.",
     )
 
 
@@ -160,6 +93,6 @@ async def send_email(
 
     try:
         await asyncio.to_thread(_deliver_message, message, settings)
-    except Exception as exc:  # pragma: no cover - exercised through API smoke.
+    except Exception as exc:
         logger.exception("Failed to deliver email to %s", to_email)
         raise RuntimeError("Failed to deliver email") from exc
