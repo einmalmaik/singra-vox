@@ -5,6 +5,7 @@ import {
   Export,
   GearSix,
   Keyboard,
+  Lock,
   Microphone,
   Plus,
   ShieldCheck,
@@ -57,9 +58,12 @@ import {
   sortedInstances,
 } from "@/lib/instanceManager";
 
+import TwoFactorSection from "./TwoFactorSection";
+
 const SECTION_CONFIG = [
   { id: "voice",     icon: <SlidersHorizontal size={16} /> },
   { id: "account",   icon: <UserCircle size={16} /> },
+  { id: "security",  icon: <Lock size={16} /> },
   { id: "privacy",   icon: <ShieldCheck size={16} /> },
   { id: "instances", icon: <DesktopTower size={16} /> },
 ];
@@ -1127,6 +1131,14 @@ export default function GlobalSettingsOverlay({
               </div>
             </section>
           </div>
+        </div>
+      )}
+
+      {activeSection === "security" && (
+        <div className="space-y-6" data-testid="security-settings-panel">
+          <section className="workspace-card p-5">
+            <TwoFactorSection token={token} />
+          </section>
         </div>
       )}
 

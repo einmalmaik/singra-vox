@@ -168,6 +168,10 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     const res = await api.post("/auth/login", { email, password });
+    // If 2FA is required, return the response without setting auth state
+    if (res.data?.requires_2fa) {
+      return res.data;
+    }
     return applyAuthResult(res.data);
   }, [applyAuthResult]);
 

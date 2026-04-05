@@ -60,7 +60,7 @@ from app.auth_service import (
     refresh_auth_session,
     list_user_sessions,
 )
-from app.emailing import render_password_reset_email, render_verification_email, send_email
+from app.emailing import render_password_reset_email, render_verification_email, render_welcome_email, send_email
 from app.blob_storage import ensure_bucket, get_blob, put_blob
 from app.permissions import (
     DEFAULT_PERMISSIONS,
@@ -1155,6 +1155,15 @@ async def login(inp: LoginInput, request: Request, response: Response):
     # Bevorzugten Status wiederherstellen (nicht immer auf "online" setzen)
     preferred = user.get("preferred_status", "online")
     restore_status = preferred if preferred != "offline" else "online"
+
+    # ── 2FA Check: If TOTP enabled, don't issue token yet ──
+    if user.get("totp_enabled"):
+        return {
+            "requires_2fa": True,
+            "user_id": user["id"],
+            "message": "Two-factor authentication required.",
+        }
+
     await db.users.update_one({"id": user["id"]}, {"$set": {"status": restore_status, "last_seen": now_utc()}})
     user["status"] = restore_status
     await log_status_history(user["id"], restore_status)
@@ -1211,6 +1220,22 @@ async def verify_email(inp: VerifyEmailInput, request: Request, response: Respon
     verified_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
     auth_payload = await issue_auth_response(verified_user, request, response)
     await broadcast_presence_update(verified_user["id"])
+
+    # ── Send welcome email after successful verification ──
+    try:
+        instance_settings = await db.instance_settings.find_one({"id": INSTANCE_SETTINGS_ID}, {"_id": 0})
+        instance_name = (instance_settings or {}).get("instance_name", "Singra Vox")
+        frontend_url = os.environ.get("FRONTEND_URL", "")
+        subj, txt, htm = render_welcome_email(
+            app_name="Singra Vox",
+            instance_name=instance_name,
+            username=verified_user.get("username", ""),
+            login_url=frontend_url,
+        )
+        await send_email(to_email=email, subject=subj, text_body=txt, html_body=htm)
+    except Exception:
+        pass  # Welcome email is non-critical, don't block auth flow
+
     return auth_payload
 
 
@@ -3374,6 +3399,7 @@ from app.routes.emojis import router as emojis_router
 from app.routes.webhooks import router as webhooks_router
 from app.routes.bots import router as bots_router
 from app.routes.files import router as files_router
+from app.routes.twofa import router as twofa_router
 from app.services.notifications import send_notification as create_notification
 
 app.include_router(threads_router)
@@ -3388,6 +3414,7 @@ app.include_router(emojis_router)
 app.include_router(webhooks_router)
 app.include_router(bots_router)
 app.include_router(files_router)
+app.include_router(twofa_router)
 
 # ── Singra Vox ID (Central Identity) ────────────────────────────────────────
 mount_identity_routes(app, db)

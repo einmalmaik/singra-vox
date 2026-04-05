@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import AuthShell from "@/components/auth/AuthShell";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
 import { ArrowLeft, Fingerprint } from "@phosphor-icons/react";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 import { rememberPendingVerification } from "@/lib/pendingVerification";
@@ -37,6 +38,11 @@ export default function LoginPage() {
   const [pendingToken, setPendingToken] = useState("");
   const [totpCode, setTotpCode] = useState("");
 
+  // ── Local 2FA state ────────────────────────────────────────────────────────
+  const [localRequires2FA, setLocalRequires2FA] = useState(false);
+  const [localPendingUserId, setLocalPendingUserId] = useState("");
+  const [localTotpCode, setLocalTotpCode] = useState("");
+
   const handleChangeServer = async () => {
     await disconnectFromInstance();
     navigate("/connect");
@@ -48,7 +54,16 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login(email, password);
+      const result = await login(email, password);
+
+      // Check if 2FA is required for this local account
+      if (result?.requires_2fa) {
+        setLocalRequires2FA(true);
+        setLocalPendingUserId(result.user_id);
+        setLoading(false);
+        return;
+      }
+
       if (pendingInvite?.code) {
         try {
           const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
@@ -74,6 +89,27 @@ export default function LoginPage() {
         return;
       }
       setError(formatAppError(t, err, { fallbackKey: "auth.signInFailed" }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Local 2FA verification ────────────────────────────────────────────────
+  const handleLocal2FAVerify = async () => {
+    if (localTotpCode.length < 6) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await api.post("/auth/2fa/verify", {
+        user_id: localPendingUserId,
+        code: localTotpCode,
+      });
+      // The verify endpoint returns the same auth payload as login
+      // Reload the page to pick up the new session from cookies
+      window.location.href = "/";
+    } catch (err) {
+      setError(formatAppError(t, err, { fallbackKey: "auth.invalid2FACode" }));
+      setLocalTotpCode("");
     } finally {
       setLoading(false);
     }
@@ -257,6 +293,59 @@ export default function LoginPage() {
   }
 
   // ── Main Login Page ──────────────────────────────────────────────────────
+
+  // ── Local 2FA Step ────────────────────────────────────────────────────────
+  if (localRequires2FA) {
+    return (
+      <AuthShell
+        eyebrow="Two-Factor Authentication"
+        title={t("auth.enter2FACode")}
+        subtitle="Enter the 6-digit code from your authenticator app."
+        sideTitle={setupStatus?.instance_name || "Singra Vox"}
+      >
+        <div className="space-y-5" data-testid="local-2fa-page">
+          <LocalizedErrorBanner message={error} className="text-red-200" data-testid="local-2fa-error" />
+
+          <div className="flex justify-center">
+            <InputOTP
+              maxLength={6}
+              value={localTotpCode}
+              onChange={(val) => setLocalTotpCode(val)}
+              data-testid="local-2fa-input"
+            >
+              <InputOTPGroup>
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <InputOTPSlot key={i} index={i} />
+                ))}
+              </InputOTPGroup>
+            </InputOTP>
+          </div>
+
+          <Button
+            onClick={handleLocal2FAVerify}
+            disabled={loading || localTotpCode.length < 6}
+            data-testid="local-2fa-submit-btn"
+            className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300"
+          >
+            {loading ? t("auth.verifying") : t("auth.verify")}
+          </Button>
+
+          <p className="text-xs text-center text-zinc-500">
+            You can also use a backup code.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => { setLocalRequires2FA(false); setLocalPendingUserId(""); setLocalTotpCode(""); setError(""); }}
+            className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors duration-150 pt-1"
+          >
+            <ArrowLeft size={12} /> Back to login
+          </button>
+        </div>
+      </AuthShell>
+    );
+  }
+
   return (
     <AuthShell
       eyebrow={t("auth.signIn")}

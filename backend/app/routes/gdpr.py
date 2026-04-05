@@ -184,8 +184,47 @@ async def delete_account(request: Request) -> dict:
             {"identifier": {"$regex": user["email"]}}
         )
 
-    # 10. Delete the user record itself (must be last)
+    # 10. Delete TOTP / 2FA secrets and backup codes
+    await db.totp_secrets.delete_many({"user_id": uid})
+
+    # 11. Delete sessions
+    await db.sessions.delete_many({"user_id": uid})
+
+    # 12. Delete push notification subscriptions
+    await db.push_subscriptions.delete_many({"user_id": uid})
+
+    # 13. Delete notifications
+    await db.notifications.delete_many({"user_id": uid})
+
+    # 14. Delete SVID-related data (cross-instance links)
+    await db.svid_links.delete_many({"user_id": uid})
+    await db.svid_email_codes.delete_many({"user_id": uid})
+    await db.svid_invites.delete_many({"$or": [{"from_user_id": uid}, {"to_user_id": uid}]})
+
+    # 15. Delete status history
+    await db.status_history.delete_many({"user_id": uid})
+
+    # 16. Delete password reset tokens
+    await db.password_resets.delete_many({"user_id": uid})
+
+    # 17. Delete the user record itself (MUST be last)
     await db.users.delete_one({"id": uid})
+
+    # 18. Send account deletion confirmation email (non-critical)
+    try:
+        from app.email_templates import render_security_alert_email
+        from app.emailing import send_email
+        email = user.get("email", "")
+        if email:
+            subj, txt, htm = render_security_alert_email(
+                app_name="Singra Vox",
+                instance_name="",
+                alert_type="Account deleted",
+                details="Your Singra Vox account has been permanently deleted. All data has been removed from our servers.",
+            )
+            await send_email(to_email=email, subject=subj, text_body=txt, html_body=htm)
+    except Exception:
+        pass  # Non-critical
 
     return {
         "ok": True,
@@ -197,6 +236,12 @@ async def delete_account(request: Request) -> dict:
             "voice_states": "deleted",
             "e2ee_keys": "deleted",
             "files": "deleted",
+            "totp_2fa": "deleted",
+            "sessions": "deleted",
+            "push_subscriptions": "deleted",
+            "notifications": "deleted",
+            "svid_links": "deleted",
+            "status_history": "deleted",
             "audit_log": "anonymised",
         },
     }
