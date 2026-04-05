@@ -748,14 +748,14 @@ export default function MainLayout() {
 
       case "voice_join":
         setChannels((previous) => upsertVoiceState(previous, data.channel_id, data.state));
-        // Beitrittston nur für andere Nutzer (nicht für den eigenen Join)
-        if (data.state?.user_id !== user?.id) playVoiceTone(audioCtxRef, "join");
+        // Beitrittston nur für andere Nutzer, nicht im DND-Modus
+        if (data.state?.user_id !== user?.id && user?.status !== "dnd") playVoiceTone(audioCtxRef, "join");
         break;
 
       case "voice_leave":
         setChannels((previous) => removeVoiceUser(previous, data.user_id, data.channel_id));
-        // Abgangston nur für andere Nutzer (nicht für den eigenen Leave)
-        if (data.user_id !== user?.id) playVoiceTone(audioCtxRef, "leave");
+        // Abgangston nur für andere Nutzer, nicht im DND-Modus
+        if (data.user_id !== user?.id && user?.status !== "dnd") playVoiceTone(audioCtxRef, "leave");
         break;
 
       case "voice_state_update":
@@ -780,6 +780,8 @@ export default function MainLayout() {
 
       case "notification":
         pushNotification(data.notification);
+        // Keine UI-Benachrichtigungen im DND-Modus
+        if (user?.status === "dnd") break;
         toast(data.notification.title, {
           description: data.notification.body,
           action: data.notification.link ? {

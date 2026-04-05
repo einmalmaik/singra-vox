@@ -23,6 +23,12 @@ from fastapi import APIRouter, Request
 from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc
+from app.core.encryption import (
+    decrypt_channel_content,
+    decrypt_dm_content,
+    decrypt_group_content,
+    decrypt_metadata,
+)
 
 router = APIRouter(prefix="/api", tags=["gdpr"])
 
@@ -47,9 +53,18 @@ async def export_user_data(request: Request) -> dict:
     messages = await db.messages.find(
         {"author_id": uid, "is_deleted": {"$ne": True}}, {"_id": 0}
     ).to_list(10_000)
+    # Entschlüsseln für Export
+    for msg in messages:
+        if msg.get("encrypted_at_rest") and not msg.get("is_e2ee") and msg.get("channel_id"):
+            msg["content"] = decrypt_channel_content(msg["channel_id"], msg.get("content", ""))
 
     dms_sent = await db.direct_messages.find({"sender_id": uid}, {"_id": 0}).to_list(10_000)
     dms_received = await db.direct_messages.find({"receiver_id": uid}, {"_id": 0}).to_list(10_000)
+    # DMs entschlüsseln
+    for dm in dms_sent + dms_received:
+        if dm.get("encrypted_at_rest") and not dm.get("is_encrypted"):
+            other = dm.get("receiver_id") if dm.get("sender_id") == uid else dm.get("sender_id")
+            dm["content"] = decrypt_dm_content(uid, other, dm.get("content", ""))
 
     memberships = await db.server_members.find({"user_id": uid}, {"_id": 0}).to_list(100)
     for m in memberships:
@@ -62,13 +77,23 @@ async def export_user_data(request: Request) -> dict:
     group_messages = await db.group_messages.find(
         {"sender_id": uid}, {"_id": 0}
     ).to_list(10_000)
+    # Gruppen-Nachrichten entschlüsseln
+    for gm in group_messages:
+        if gm.get("encrypted_at_rest") and not gm.get("is_encrypted") and gm.get("group_id"):
+            gm["content"] = decrypt_group_content(gm["group_id"], gm.get("content", ""))
 
     read_states = await db.read_states.find({"user_id": uid}, {"_id": 0}).to_list(500)
 
     # File metadata only – not the binary content (to keep response manageable)
     files = await db.files.find(
-        {"uploaded_by": uid}, {"_id": 0, "original_name": 1, "content_type": 1, "size_bytes": 1, "created_at": 1, "id": 1}
+        {"uploaded_by": uid}, {"_id": 0, "original_name": 1, "content_type": 1, "size_bytes": 1, "created_at": 1, "id": 1, "encrypted_at_rest": 1}
     ).to_list(500)
+    # Datei-Metadaten entschlüsseln
+    for f in files:
+        if f.get("encrypted_at_rest"):
+            f["original_name"] = decrypt_metadata(f"file_meta:{f['id']}", f.get("original_name", ""))
+            f["content_type"] = decrypt_metadata(f"file_ct:{f['id']}", f.get("content_type", ""))
+        f.pop("encrypted_at_rest", None)
 
     return {
         "export_date": now_utc(),

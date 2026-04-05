@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.auth_service import load_current_user
 from app.core.database import db
+from app.core.encryption import decrypt_channel_content
 from app.pagination import clamp_page_limit
 from app.permissions import (
     assert_channel_access,
@@ -58,8 +59,8 @@ async def search_messages(
 ) -> list:
     """Search for messages matching *q*.
 
-    E2EE / private-channel messages are always excluded because the server
-    stores only encrypted ciphertext.
+    Encrypted-at-rest messages are decrypted before search. E2EE / private-channel
+    messages are excluded because the server stores only client-side ciphertext.
     """
     user = await _current_user(request)
 
@@ -68,7 +69,6 @@ async def search_messages(
 
     limit = clamp_page_limit(limit, default=25)
     query: dict = {
-        "content": {"$regex": q.strip(), "$options": "i"},
         "is_deleted": {"$ne": True},
         "is_e2ee": {"$ne": True},
     }
@@ -99,12 +99,26 @@ async def search_messages(
         if cutoff:
             query["created_at"] = {"$gte": cutoff}
 
-    results = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
-    for msg in results:
-        msg["author"] = await db.users.find_one(
-            {"id": msg["author_id"]}, {"_id": 0, "password_hash": 0}
-        )
-        msg["channel"] = await db.channels.find_one(
-            {"id": msg.get("channel_id")}, {"_id": 0, "name": 1, "server_id": 1}
-        )
+    # Fetch more results than needed because we filter after decryption
+    fetch_limit = limit * 4
+    candidates = await db.messages.find(query, {"_id": 0}).sort("created_at", -1).to_list(fetch_limit)
+
+    # Decrypt and filter
+    search_term = q.strip().lower()
+    results = []
+    for msg in candidates:
+        content = msg.get("content", "")
+        if msg.get("encrypted_at_rest") and msg.get("channel_id"):
+            content = decrypt_channel_content(msg["channel_id"], content)
+        if search_term in content.lower():
+            msg["content"] = content
+            msg["author"] = await db.users.find_one(
+                {"id": msg["author_id"]}, {"_id": 0, "password_hash": 0}
+            )
+            msg["channel"] = await db.channels.find_one(
+                {"id": msg.get("channel_id")}, {"_id": 0, "name": 1, "server_id": 1}
+            )
+            results.append(msg)
+            if len(results) >= limit:
+                break
     return results

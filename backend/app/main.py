@@ -86,6 +86,8 @@ from app.core.encryption import (
     decrypt_channel_content,
     encrypt_dm_content,
     decrypt_dm_content,
+    encrypt_metadata,
+    decrypt_metadata,
 )
 
 # ============================================================
@@ -253,10 +255,15 @@ async def get_message_history_cutoff(user_id: str, server_id: str, *, channel: O
     return await get_permission_history_cutoff(db, user_id, server_id, channel=channel)
 
 async def log_audit(server_id, actor_id, action, target_type, target_id, details):
+    """Audit-Log erstellen – Details werden verschlüsselt gespeichert."""
+    details_str = json.dumps(details) if details else ""
+    if details_str:
+        details_str = encrypt_metadata(f"audit:{server_id}", details_str)
     await db.audit_log.insert_one({
         "id": new_id(), "server_id": server_id, "actor_id": actor_id,
         "action": action, "target_type": target_type, "target_id": target_id,
-        "details": details, "created_at": now_utc()
+        "details": details_str, "encrypted_at_rest": encryption_enabled(),
+        "created_at": now_utc()
     })
 
 
@@ -1145,7 +1152,7 @@ async def login(inp: LoginInput, request: Request, response: Response):
             {"$set": {"password_hash": upgraded_hash}},
         )
         user["password_hash"] = upgraded_hash
-    await db.users.update_one({"id": user["id"]}, {"$set": {"status": "online", "last_seen": now_utc()}})
+    await db.users.update_one({"id": user["id"]}, {"$set": {"status": "online", "preferred_status": "online", "last_seen": now_utc()}})
     await log_status_history(user["id"], "online")
     auth_payload = await issue_auth_response(user, request, response)
     await broadcast_presence_update(user["id"])
@@ -1314,7 +1321,7 @@ async def logout(request: Request, response: Response):
         user, session = await load_current_user(db, request)
         await revoke_session(db, session["session_id"])
         await ws_mgr.close_session(session["session_id"], session_closed_payload("logout"))
-        await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "last_seen": now_utc()}})
+        await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "preferred_status": "online", "last_seen": now_utc()}})
         await log_status_history(user["id"], "offline")
         await clear_voice_membership(user["id"])
         await broadcast_presence_update(user["id"])
@@ -1329,7 +1336,7 @@ async def logout_all(request: Request, response: Response):
     user, _session = await load_current_user(db, request)
     await revoke_user_sessions(db, user["id"])
     await ws_mgr.close_user_sessions(user["id"], session_closed_payload("logout_all"))
-    await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "last_seen": now_utc()}})
+    await db.users.update_one({"id": user["id"]}, {"$set": {"status": "offline", "preferred_status": "online", "last_seen": now_utc()}})
     await log_status_history(user["id"], "offline")
     await clear_voice_membership(user["id"])
     await broadcast_presence_update(user["id"])
@@ -2526,10 +2533,17 @@ async def get_audit_log(server_id: str, request: Request):
     if not await check_permission(user["id"], server_id, "manage_server"):
         raise HTTPException(403, "No permission")
     logs = await db.audit_log.find({"server_id": server_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    # Attach actor info
+    # Entschlüsseln + Actor-Info anhängen
+    import json as _json
     for log_entry in logs:
         actor = await db.users.find_one({"id": log_entry.get("actor_id")}, {"_id": 0, "password_hash": 0})
         log_entry["actor"] = actor
+        if log_entry.get("encrypted_at_rest") and log_entry.get("details"):
+            try:
+                decrypted = decrypt_metadata(f"audit:{server_id}", log_entry["details"])
+                log_entry["details"] = _json.loads(decrypted)
+            except Exception:
+                log_entry["details"] = {}
     return logs
 
 # --- Invites ---
@@ -3256,6 +3270,7 @@ async def update_profile(inp: ProfileUpdateInput, request: Request):
             updates["username"] = normalized_username
     if updates:
         if "status" in updates and updates["status"] != user.get("status"):
+            updates["preferred_status"] = updates["status"]
             await log_status_history(user["id"], updates["status"])
         await db.users.update_one({"id": user["id"]}, {"$set": updates})
         await broadcast_presence_update(user["id"])
@@ -3448,14 +3463,18 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: 
         ws_mgr.user_servers[uid] = {m["server_id"] for m in members}
     
     if len(ws_mgr.conns[uid]) == 1:
-        # Check if user has a preferred status, otherwise default to online
-        current_status = user.get("status", "online")
-        if current_status == "offline":
-            current_status = "online"
+        # Bevorzugten Status des Nutzers wiederherstellen (nicht immer "online")
+        preferred = user.get("preferred_status", user.get("status", "online"))
+        if preferred == "offline":
+            # "offline" als preferred_status = "invisible" Modus
+            # User ist verbunden aber will als offline erscheinen
+            pass
+        else:
+            current_status = preferred
         
-        await db.users.update_one({"id": uid}, {"$set": {"status": current_status, "last_seen": now_utc()}})
-        await log_status_history(uid, current_status)
-        await broadcast_presence_update(uid)
+            await db.users.update_one({"id": uid}, {"$set": {"status": current_status, "last_seen": now_utc()}})
+            await log_status_history(uid, current_status)
+            await broadcast_presence_update(uid)
 
     try:
         while True:
@@ -3477,6 +3496,7 @@ async def ws_endpoint(websocket: WebSocket, token: str = Query(None), platform: 
     finally:
         remaining_connections = ws_mgr.disconnect(uid, connection_id)
         if remaining_connections == 0:
+            # Status auf "offline" setzen, aber preferred_status beibehalten
             await db.users.update_one({"id": uid}, {"$set": {"status": "offline", "last_seen": now_utc()}})
             await log_status_history(uid, "offline")
             await broadcast_presence_update(uid)
