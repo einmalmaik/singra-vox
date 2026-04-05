@@ -223,11 +223,50 @@ async def svid_register(inp: SvidRegisterInput):
     if policy_errors:
         raise HTTPException(400, {"code": "weak_password", "errors": policy_errors})
 
-    # Uniqueness
-    if await _db.svid_accounts.find_one({"email": email}, {"_id": 0}):
-        raise HTTPException(400, "Email already registered")
-    if await _db.svid_accounts.find_one({"username": username}, {"_id": 0}):
-        raise HTTPException(400, "Username already taken")
+    # Uniqueness – unverifizierte Accounts dürfen überschrieben werden
+    existing_email = await _db.svid_accounts.find_one({"email": email}, {"_id": 0})
+    if existing_email:
+        if existing_email.get("email_verified"):
+            raise HTTPException(400, "Email already registered")
+        # Unverifiziert → Account-Daten aktualisieren und neuen Code senden
+        await _db.svid_accounts.update_one(
+            {"email": email},
+            {"$set": {
+                "username": username,
+                "display_name": inp.display_name or username,
+                "password_hash": hash_password(inp.password),
+                "last_seen": _now(),
+            }},
+        )
+        account = {**existing_email, "username": username, "display_name": inp.display_name or username}
+        try:
+            verify_state = await _issue_auth_code_email(
+                account=account,
+                purpose="verify_email",
+                ttl_minutes=SVID_EMAIL_VERIFICATION_TTL_MINUTES,
+                renderer=render_verification_email,
+            )
+            return {
+                "ok": True,
+                "verification_required": True,
+                "email": verify_state["email"],
+                "expires_at": verify_state["expires_at"],
+            }
+        except Exception as exc:
+            logger.warning("SVID verification email failed (%s) – auto-verifying", exc)
+            await _db.svid_accounts.update_one(
+                {"email": email},
+                {"$set": {"email_verified": True, "email_verified_at": _now()}},
+            )
+            return {"ok": True, "verification_required": False, "email": email, "expires_at": None}
+
+    existing_username = await _db.svid_accounts.find_one({"username": username}, {"_id": 0})
+    if existing_username:
+        if existing_username.get("email_verified"):
+            raise HTTPException(400, "Username already taken")
+        # Unverifizierter Username-Conflict: anderer unverifizierter Account hat den Namen
+        # → Der aktuelle User darf den Namen trotzdem verwenden (alter wird überschrieben)
+        await _db.svid_accounts.delete_one({"username": username, "email_verified": False})
 
     account_id = _new_id()
     account = {
