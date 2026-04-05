@@ -25,9 +25,14 @@ function LoadingScreen({ label }) {
 
   return (
     <div className="flex items-center justify-center h-screen bg-[#0A0A0A]" data-testid="loading-screen">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 border-2 border-[#6366F1] border-t-transparent rounded-full animate-spin" />
-        <p className="text-[#A1A1AA] text-sm font-medium" style={{ fontFamily: "Manrope, sans-serif" }}>
+      <div className="flex flex-col items-center gap-5">
+        <img
+          src="/favicon-192x192.png"
+          alt="Singra Vox"
+          className="w-16 h-16 animate-pulse"
+          style={{ filter: "drop-shadow(0 0 20px rgba(34,211,238,0.3))" }}
+        />
+        <p className="text-zinc-500 text-sm font-medium tracking-wide" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
           {resolvedLabel}
         </p>
       </div>

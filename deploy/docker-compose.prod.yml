@@ -52,6 +52,10 @@ services:
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
       VAPID_EMAIL: "${VAPID_EMAIL:-}"
+      INSTANCE_ENCRYPTION_SECRET: "${INSTANCE_ENCRYPTION_SECRET}"
+      SVID_ISSUER: "${SVID_ISSUER:-}"
+      SVID_JWT_SECRET: "${SVID_JWT_SECRET:-}"
+      MAX_E2EE_BLOB_BYTES: "${MAX_E2EE_BLOB_BYTES:-52428800}"
     volumes:
       - uploads_data:/app/storage/uploads
     healthcheck:
