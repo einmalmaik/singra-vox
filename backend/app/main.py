@@ -1244,6 +1244,36 @@ async def resend_verification(inp: ResendVerificationInput, request: Request):
     }
 
 
+
+class PasswordResetLookupInput(BaseModel):
+    email: str
+
+@auth_r.post("/password-reset-lookup")
+async def password_reset_lookup(inp: PasswordResetLookupInput, request: Request):
+    """Prüft ob eine E-Mail für Passwort-Reset bei lokaler Auth und/oder SVID existiert.
+
+    Gibt zurück welche Account-Typen verfügbar sind, damit das Frontend
+    dem Nutzer die Wahl lässt. Aus Sicherheitsgründen wird bei unbekannter
+    E-Mail trotzdem 200 zurückgegeben (keine Information-Leakage).
+
+    Returns:
+        {"accounts": ["local", "svid"] | ["local"] | ["svid"] | []}
+    """
+    email = inp.email.lower().strip()
+    accounts = []
+
+    local_user = await db.users.find_one({"email": email}, {"_id": 0, "id": 1, "email_verified": 1})
+    if local_user and local_user.get("email_verified", True):
+        accounts.append("local")
+
+    svid_account = await db.svid_accounts.find_one({"email": email}, {"_id": 0, "id": 1, "email_verified": 1})
+    if svid_account and svid_account.get("email_verified"):
+        accounts.append("svid")
+
+    return {"accounts": accounts}
+
+
+
 @auth_r.post("/forgot-password")
 async def forgot_password(inp: ForgotPasswordInput, request: Request):
     email = inp.email.lower().strip()

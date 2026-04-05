@@ -80,7 +80,7 @@ function AppRoutes() {
       <Route path="/setup" element={<Navigate to={user ? "/onboarding" : "/login"} replace />} />
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />} />
-      <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ResetPasswordPage />} />
+      <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />} />
       <Route path="/register-svid" element={user ? <Navigate to="/" replace /> : <SvidRegisterPage />} />
       <Route
         path="/register"
