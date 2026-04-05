@@ -2,63 +2,98 @@
 Singra Vox – Encryption at Rest
 =================================
 
-All message content, DM content, and file metadata is encrypted before
-being stored in MongoDB.  The database never contains plaintext messages.
+**Zentrale Verschlüsselungs-Datei – wird von allen Modulen referenziert.**
 
-How it works:
-    1. Each channel/conversation has a derived encryption key
-    2. Key = HKDF(instance_secret, context_id)  [AES-256-GCM]
-    3. On write: plaintext → encrypt → store ciphertext
-    4. On read:  ciphertext → decrypt → return plaintext (if authorized)
-    5. DB dumps, backups, and direct DB access only show ciphertext
+Alle Inhalte (Nachrichten, DMs, Gruppen, Dateien, Metadaten) werden vor
+der Speicherung in MongoDB/Filesystem verschlüsselt.  Die Datenbank und
+der Speicher enthalten **niemals Klartext**.
 
-Key hierarchy:
-    INSTANCE_ENCRYPTION_SECRET  (env var, per-instance, required)
-        └─ channel key  = HKDF(secret, "channel:" + channel_id)
-        └─ dm key       = HKDF(secret, "dm:" + sorted(user_a, user_b))
-        └─ group key    = HKDF(secret, "group:" + group_id)
+Architektur
+-----------
+Dieses Modul implementiert serverseitige Encryption at Rest.  Es ist die
+unterste Verschlüsselungsschicht und wird IMMER angewendet – unabhängig
+davon, ob zusätzlich clientseitige E2EE aktiv ist.
 
-This is server-side encryption at rest, NOT end-to-end encryption.
-The server CAN decrypt to serve authorized users.  For true zero-knowledge
-E2EE (where the server cannot decrypt), use private channels or DMs
-with E2EE enabled – that system works ON TOP of this layer.
+    ┌─────────────────────────────────────────────────┐
+    │  Client-Side E2EE (libsodium, optional)         │
+    │  → Server sieht nur Ciphertext                  │
+    ├─────────────────────────────────────────────────┤
+    │  Server-Side Encryption at Rest (DIESES MODUL)  │
+    │  → Datenbank/Dateisystem sieht nur Ciphertext   │
+    └─────────────────────────────────────────────────┘
 
-Security:
-    - AES-256-GCM (authenticated encryption)
-    - Unique nonce per message (random 12 bytes)
-    - Per-channel key derivation (HKDF-SHA256)
-    - Instance secret never stored in database
+Key-Hierarchie
+--------------
+    INSTANCE_ENCRYPTION_SECRET  (env var, pro Instanz, PFLICHT)
+        ├─ channel key  = HKDF(secret, "channel:" + channel_id)
+        ├─ dm key       = HKDF(secret, "dm:" + sorted(user_a, user_b))
+        ├─ group key    = HKDF(secret, "group:" + group_id)
+        ├─ file key     = HKDF(secret, "file:" + file_id)
+        └─ meta key     = HKDF(secret, "meta:" + context)
+
+Algorithmen
+-----------
+    - AES-256-GCM (authentifizierte Verschlüsselung)
+    - Einmaliger Nonce pro Operation (zufällige 12 Bytes)
+    - Kontextabhängige Schlüsselableitung (HMAC-SHA256)
+    - Instanz-Geheimnis nie in der Datenbank gespeichert
+
+Sicherheitshinweise
+-------------------
+    - INSTANCE_ENCRYPTION_SECRET MUSS in Produktion gesetzt sein
+    - Einmal gesetzt, darf der Schlüssel NICHT geändert werden
+      (alle bestehenden Daten werden sonst unlesbar)
+    - Sicher aufbewahren! Verlust = permanenter Datenverlust
+
+Erweiterbarkeit
+---------------
+    Um einen neuen verschlüsselten Kontext hinzuzufügen:
+    1. Neue Funktionen encrypt_X() / decrypt_X() hier definieren
+    2. Kontext-String wählen (z.B. "audit:channel_id")
+    3. In der aufrufenden Datei importieren und nutzen
+    4. Fertig – die Schlüsselableitung und Verschlüsselung ist zentral
 """
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
-import logging
 
 logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────────────────
-# The instance encryption secret.  MUST be set in production.
-# If not set, encryption is disabled and content is stored as plaintext
-# (backward compatible).
 _ENCRYPTION_SECRET = os.environ.get("INSTANCE_ENCRYPTION_SECRET", "").strip()
 
-# Once set, changing this secret will make all existing messages unreadable.
-# Back it up securely!
+if not _ENCRYPTION_SECRET:
+    logger.warning(
+        "INSTANCE_ENCRYPTION_SECRET ist nicht gesetzt! "
+        "Inhalte werden UNVERSCHLÜSSELT gespeichert. "
+        "Bitte setze diese Variable in Produktion."
+    )
 
 
 def encryption_enabled() -> bool:
-    """Check if encryption at rest is configured."""
+    """Prüft ob Encryption at Rest konfiguriert ist."""
     return bool(_ENCRYPTION_SECRET)
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# INTERNE KRYPTOGRAPHIE-PRIMITIVEN
+# ═════════════════════════════════════════════════════════════════════════════
+
 def _derive_key(context: str) -> bytes:
     """
-    Derive a 256-bit AES key from the instance secret + context string.
+    Leitet einen 256-Bit AES-Schlüssel aus dem Instanz-Geheimnis ab.
 
-    Uses HKDF-like construction: HMAC-SHA256(secret, context).
-    Each channel/DM/group gets a unique key.
+    Verwendet HMAC-SHA256(secret, context) – jeder Kanal, jede DM,
+    jede Datei bekommt einen einzigartigen Schlüssel.
+
+    Args:
+        context: Eindeutiger Kontext-String, z.B. "channel:abc-123"
+
+    Returns:
+        32 Bytes (256-Bit) Schlüssel
     """
     return hmac.new(
         _ENCRYPTION_SECRET.encode("utf-8"),
@@ -69,24 +104,28 @@ def _derive_key(context: str) -> bytes:
 
 def _aes_gcm_encrypt(plaintext: str, key: bytes) -> str:
     """
-    Encrypt plaintext with AES-256-GCM.
+    Verschlüsselt Text mit AES-256-GCM.
 
-    Returns: base64(nonce + ciphertext + tag)
+    Returns:
+        Base64-kodiert: nonce (12 Bytes) + ciphertext + auth-tag
     """
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-    nonce = secrets.token_bytes(12)  # 96-bit nonce
+    nonce = secrets.token_bytes(12)
     aesgcm = AESGCM(key)
     ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
-    # Pack: nonce (12) + ciphertext+tag (variable)
     return base64.b64encode(nonce + ciphertext).decode("ascii")
 
 
 def _aes_gcm_decrypt(packed_b64: str, key: bytes) -> str:
     """
-    Decrypt AES-256-GCM packed data.
+    Entschlüsselt AES-256-GCM Daten.
 
-    Expects: base64(nonce + ciphertext + tag)
+    Args:
+        packed_b64: Base64-kodiert: nonce (12 Bytes) + ciphertext + auth-tag
+
+    Returns:
+        Klartext-String
     """
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -97,12 +136,45 @@ def _aes_gcm_decrypt(packed_b64: str, key: bytes) -> str:
     return aesgcm.decrypt(nonce, ciphertext, None).decode("utf-8")
 
 
+def _aes_gcm_encrypt_bytes(plaintext_bytes: bytes, key: bytes) -> bytes:
+    """
+    Verschlüsselt Binärdaten mit AES-256-GCM.
+
+    Returns:
+        nonce (12 Bytes) + ciphertext + auth-tag (als Bytes)
+    """
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = secrets.token_bytes(12)
+    aesgcm = AESGCM(key)
+    ciphertext = aesgcm.encrypt(nonce, plaintext_bytes, None)
+    return nonce + ciphertext
+
+
+def _aes_gcm_decrypt_bytes(packed: bytes, key: bytes) -> bytes:
+    """
+    Entschlüsselt Binärdaten aus AES-256-GCM.
+
+    Args:
+        packed: nonce (12 Bytes) + ciphertext + auth-tag
+
+    Returns:
+        Klartext-Bytes
+    """
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = packed[:12]
+    ciphertext = packed[12:]
+    aesgcm = AESGCM(key)
+    return aesgcm.decrypt(nonce, ciphertext, None)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
-# PUBLIC API
+# ÖFFENTLICHE API – NACHRICHTEN
 # ═════════════════════════════════════════════════════════════════════════════
 
 def encrypt_channel_content(channel_id: str, plaintext: str) -> str:
-    """Encrypt message content for a channel.  Returns ciphertext or plaintext if disabled."""
+    """Verschlüsselt Nachrichteninhalt für einen Kanal."""
     if not encryption_enabled() or not plaintext:
         return plaintext
     key = _derive_key(f"channel:{channel_id}")
@@ -110,19 +182,18 @@ def encrypt_channel_content(channel_id: str, plaintext: str) -> str:
 
 
 def decrypt_channel_content(channel_id: str, stored: str) -> str:
-    """Decrypt message content from a channel.  Returns plaintext."""
+    """Entschlüsselt Nachrichteninhalt aus einem Kanal."""
     if not encryption_enabled() or not stored:
         return stored
     try:
         key = _derive_key(f"channel:{channel_id}")
         return _aes_gcm_decrypt(stored, key)
     except Exception:
-        # If decryption fails, return as-is (legacy unencrypted or wrong key)
         return stored
 
 
 def encrypt_dm_content(user_a_id: str, user_b_id: str, plaintext: str) -> str:
-    """Encrypt DM content.  Key is derived from sorted user IDs (order-independent)."""
+    """Verschlüsselt DM-Inhalt.  Schlüssel aus sortierten User-IDs abgeleitet."""
     if not encryption_enabled() or not plaintext:
         return plaintext
     pair = ":".join(sorted([user_a_id, user_b_id]))
@@ -131,7 +202,7 @@ def encrypt_dm_content(user_a_id: str, user_b_id: str, plaintext: str) -> str:
 
 
 def decrypt_dm_content(user_a_id: str, user_b_id: str, stored: str) -> str:
-    """Decrypt DM content."""
+    """Entschlüsselt DM-Inhalt."""
     if not encryption_enabled() or not stored:
         return stored
     try:
@@ -143,7 +214,7 @@ def decrypt_dm_content(user_a_id: str, user_b_id: str, stored: str) -> str:
 
 
 def encrypt_group_content(group_id: str, plaintext: str) -> str:
-    """Encrypt group conversation content."""
+    """Verschlüsselt Gruppen-Nachrichteninhalt."""
     if not encryption_enabled() or not plaintext:
         return plaintext
     key = _derive_key(f"group:{group_id}")
@@ -151,11 +222,97 @@ def encrypt_group_content(group_id: str, plaintext: str) -> str:
 
 
 def decrypt_group_content(group_id: str, stored: str) -> str:
-    """Decrypt group conversation content."""
+    """Entschlüsselt Gruppen-Nachrichteninhalt."""
     if not encryption_enabled() or not stored:
         return stored
     try:
         key = _derive_key(f"group:{group_id}")
+        return _aes_gcm_decrypt(stored, key)
+    except Exception:
+        return stored
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ÖFFENTLICHE API – DATEIEN
+# ═════════════════════════════════════════════════════════════════════════════
+
+def encrypt_file_bytes(file_id: str, plaintext_bytes: bytes) -> bytes:
+    """
+    Verschlüsselt Datei-Bytes vor der Speicherung auf dem Dateisystem.
+
+    Die Datei wird unter einer UUID gespeichert, der Originalname und
+    Content-Type sind separat in der DB gespeichert (ebenfalls verschlüsselt
+    via encrypt_metadata).
+
+    Args:
+        file_id: UUID der Datei (zur Schlüsselableitung)
+        plaintext_bytes: Rohe Datei-Bytes
+
+    Returns:
+        Verschlüsselte Bytes (nonce + ciphertext + tag)
+    """
+    if not encryption_enabled() or not plaintext_bytes:
+        return plaintext_bytes
+    key = _derive_key(f"file:{file_id}")
+    return _aes_gcm_encrypt_bytes(plaintext_bytes, key)
+
+
+def decrypt_file_bytes(file_id: str, encrypted_bytes: bytes) -> bytes:
+    """
+    Entschlüsselt Datei-Bytes nach dem Lesen vom Dateisystem.
+
+    Args:
+        file_id: UUID der Datei
+        encrypted_bytes: Verschlüsselte Bytes vom Dateisystem
+
+    Returns:
+        Entschlüsselte Originaldaten
+    """
+    if not encryption_enabled() or not encrypted_bytes:
+        return encrypted_bytes
+    try:
+        key = _derive_key(f"file:{file_id}")
+        return _aes_gcm_decrypt_bytes(encrypted_bytes, key)
+    except Exception:
+        return encrypted_bytes
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ÖFFENTLICHE API – METADATEN
+# ═════════════════════════════════════════════════════════════════════════════
+
+def encrypt_metadata(context: str, plaintext: str) -> str:
+    """
+    Verschlüsselt beliebige Metadaten (Dateinamen, Content-Types, etc.).
+
+    Args:
+        context: Eindeutiger Kontext, z.B. "file_meta:abc-123"
+        plaintext: Zu verschlüsselnder String
+
+    Returns:
+        Verschlüsselter String (Base64) oder Klartext wenn deaktiviert
+    """
+    if not encryption_enabled() or not plaintext:
+        return plaintext
+    key = _derive_key(f"meta:{context}")
+    return _aes_gcm_encrypt(plaintext, key)
+
+
+def decrypt_metadata(context: str, stored: str) -> str:
+    """
+    Entschlüsselt Metadaten.
+
+    Args:
+        context: Selber Kontext wie beim Verschlüsseln
+        stored: Verschlüsselter String aus der DB
+
+    Returns:
+        Klartext-String
+    """
+    if not encryption_enabled() or not stored:
+        return stored
+    try:
+        key = _derive_key(f"meta:{context}")
         return _aes_gcm_decrypt(stored, key)
     except Exception:
         return stored

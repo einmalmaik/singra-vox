@@ -23,6 +23,11 @@ from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc, new_id
 from app.core.constants import E2EE_DEVICE_HEADER
+from app.core.encryption import (
+    encryption_enabled,
+    encrypt_group_content,
+    decrypt_group_content,
+)
 from app.pagination import clamp_page_limit
 
 router = APIRouter(prefix="/api", tags=["groups"])
@@ -138,6 +143,9 @@ async def list_group_messages(
         msg["sender"] = await db.users.find_one(
             {"id": msg["sender_id"]}, {"_id": 0, "password_hash": 0}
         )
+        # Server-seitige Entschlüsselung für nicht-E2EE Nachrichten
+        if msg.get("encrypted_at_rest") and not msg.get("is_encrypted"):
+            msg["content"] = decrypt_group_content(group_id, msg["content"])
 
     return {
         "messages": messages,
@@ -163,13 +171,19 @@ async def send_group_message(group_id: str, inp: GroupMessageInput, request: Req
         if inp.sender_device_id != device["device_id"]:
             raise HTTPException(400, "Encrypted messages must originate from the active E2EE device")
 
+    # Server-seitige Verschlüsselung für nicht-E2EE Nachrichten
+    stored_content = inp.content
+    if not inp.is_encrypted and inp.content:
+        stored_content = encrypt_group_content(group_id, inp.content)
+
     msg = {
         "id": new_id(),
         "group_id": group_id,
         "sender_id": user["id"],
-        "content": inp.content if not inp.is_encrypted else "[encrypted]",
+        "content": "[encrypted]" if inp.is_encrypted else stored_content,
         "encrypted_content": inp.encrypted_content or "",
         "is_encrypted": inp.is_encrypted,
+        "encrypted_at_rest": encryption_enabled() and not inp.is_encrypted,
         "attachments": inp.attachments,
         "nonce": inp.nonce or "",
         "sender_device_id": inp.sender_device_id or "",
@@ -180,6 +194,9 @@ async def send_group_message(group_id: str, inp: GroupMessageInput, request: Req
     await db.group_messages.insert_one(msg)
     msg.pop("_id", None)
     msg["sender"] = {k: v for k, v in user.items()}
+    # Klartext für Response zurückgeben
+    if msg.get("encrypted_at_rest") and not msg.get("is_encrypted"):
+        msg["content"] = decrypt_group_content(group_id, msg["content"])
     return msg
 
 
