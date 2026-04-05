@@ -100,3 +100,7 @@ yarn-error.log*
 *.tmp
 *.bak
 .gitconfig
+-e 
+# Environment files
+*.env
+*.env.*
