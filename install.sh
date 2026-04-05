@@ -1209,8 +1209,17 @@ configure_smtp() {
   echo "" >&2
   echo -e "  ${BOLD}1)${RESET} Eingebaut (Mailpit) — Alle E-Mails im Browser sichtbar" >&2
   echo "     Empfohlen für Tests und private Server" >&2
-  echo -e "  ${BOLD}2)${RESET} Extern (Gmail, Mailgun, Resend, etc.) — Echte E-Mails" >&2
-  echo "     Empfohlen für öffentliche Server" >&2
+  echo "" >&2
+  echo -e "  ${BOLD}2)${RESET} Resend — API-basiert, einfach einzurichten" >&2
+  echo "     Kostenlos bis 3.000 E-Mails/Monat, nur API-Key nötig" >&2
+  echo "" >&2
+  echo -e "  ${BOLD}3)${RESET} Gmail — Google App-Passwort" >&2
+  echo "     Voraussetzung: 2FA aktiv + App-Passwort erstellt" >&2
+  echo "" >&2
+  echo -e "  ${BOLD}4)${RESET} Mailgun — Transaktionale E-Mails" >&2
+  echo "     Domain-Verifizierung erforderlich" >&2
+  echo "" >&2
+  echo -e "  ${BOLD}5)${RESET} Manuell — Eigene SMTP-Zugangsdaten eingeben" >&2
   echo "" >&2
 
   local choice
@@ -1218,25 +1227,73 @@ configure_smtp() {
   read -r choice
   choice="${choice:-1}"
 
-  if [[ "$choice" == "2" ]]; then
-    echo "" >&2
-    local smtp_host smtp_port smtp_user smtp_pass smtp_from smtp_tls smtp_ssl
-    printf "  ${BOLD}%s${RESET}: " "SMTP Server (z.B. smtp.resend.com)" >&2
-    read -r smtp_host
-    printf "  ${BOLD}%s${RESET} [%s]: " "SMTP Port" "587" >&2
-    read -r smtp_port; smtp_port="${smtp_port:-587}"
-    printf "  ${BOLD}%s${RESET}: " "SMTP Benutzername / E-Mail" >&2
-    read -r smtp_user
-    printf "  ${BOLD}%s${RESET}: " "SMTP Passwort" >&2
-    read -rs smtp_pass; echo "" >&2
-    printf "  ${BOLD}%s${RESET} [%s]: " "Absender E-Mail" "$smtp_user" >&2
-    read -r smtp_from; smtp_from="${smtp_from:-$smtp_user}"
-    smtp_tls="true"; smtp_ssl="false"
-    if [[ "$smtp_port" == "465" ]]; then smtp_ssl="true"; smtp_tls="false"; fi
-    echo "$smtp_host|$smtp_port|$smtp_user|$smtp_pass|$smtp_from|$smtp_tls|$smtp_ssl"
-  else
-    echo "mailpit|1025|||no-reply@singravox.local|false|false"
-  fi
+  local smtp_host smtp_port smtp_user smtp_pass smtp_from smtp_tls smtp_ssl
+
+  case "$choice" in
+    2)
+      # ── Resend ──────────────────────────────────────────────────────────
+      echo "" >&2
+      echo -e "  ${DIM}Resend API-Key findest du unter: https://resend.com/api-keys${RESET}" >&2
+      printf "  ${BOLD}%s${RESET}: " "Resend API-Key (re_...)" >&2
+      read -rs smtp_pass; echo "" >&2
+      printf "  ${BOLD}%s${RESET}: " "Absender E-Mail (z.B. noreply@deine-domain.de)" >&2
+      read -r smtp_from
+      smtp_host="smtp.resend.com"; smtp_port="587"
+      smtp_user="resend"; smtp_tls="true"; smtp_ssl="false"
+      ;;
+    3)
+      # ── Gmail ───────────────────────────────────────────────────────────
+      echo "" >&2
+      echo -e "  ${DIM}App-Passwort erstellen: Google-Konto → Sicherheit → 2FA → App-Passwörter${RESET}" >&2
+      printf "  ${BOLD}%s${RESET}: " "Gmail-Adresse" >&2
+      read -r smtp_user
+      printf "  ${BOLD}%s${RESET}: " "App-Passwort (16 Zeichen ohne Leerzeichen)" >&2
+      read -rs smtp_pass; echo "" >&2
+      smtp_host="smtp.gmail.com"; smtp_port="587"
+      smtp_from="$smtp_user"; smtp_tls="true"; smtp_ssl="false"
+      ;;
+    4)
+      # ── Mailgun ─────────────────────────────────────────────────────────
+      echo "" >&2
+      printf "  ${BOLD}%s${RESET} [%s]: " "Mailgun Region" "EU" >&2
+      read -r mg_region; mg_region="${mg_region:-EU}"
+      if [[ "${mg_region,,}" == "eu" ]]; then
+        smtp_host="smtp.eu.mailgun.org"
+      else
+        smtp_host="smtp.mailgun.org"
+      fi
+      printf "  ${BOLD}%s${RESET}: " "SMTP-Benutzername (z.B. postmaster@mg.deine-domain.de)" >&2
+      read -r smtp_user
+      printf "  ${BOLD}%s${RESET}: " "SMTP-Passwort" >&2
+      read -rs smtp_pass; echo "" >&2
+      printf "  ${BOLD}%s${RESET} [%s]: " "Absender E-Mail" "$smtp_user" >&2
+      read -r smtp_from; smtp_from="${smtp_from:-$smtp_user}"
+      smtp_port="587"; smtp_tls="true"; smtp_ssl="false"
+      ;;
+    5)
+      # ── Manuell ─────────────────────────────────────────────────────────
+      echo "" >&2
+      printf "  ${BOLD}%s${RESET}: " "SMTP Server" >&2
+      read -r smtp_host
+      printf "  ${BOLD}%s${RESET} [%s]: " "SMTP Port" "587" >&2
+      read -r smtp_port; smtp_port="${smtp_port:-587}"
+      printf "  ${BOLD}%s${RESET}: " "SMTP Benutzername" >&2
+      read -r smtp_user
+      printf "  ${BOLD}%s${RESET}: " "SMTP Passwort" >&2
+      read -rs smtp_pass; echo "" >&2
+      printf "  ${BOLD}%s${RESET} [%s]: " "Absender E-Mail" "$smtp_user" >&2
+      read -r smtp_from; smtp_from="${smtp_from:-$smtp_user}"
+      smtp_tls="true"; smtp_ssl="false"
+      if [[ "$smtp_port" == "465" ]]; then smtp_ssl="true"; smtp_tls="false"; fi
+      ;;
+    *)
+      # ── Mailpit (Default) ───────────────────────────────────────────────
+      echo "mailpit|1025|||no-reply@singravox.local|false|false"
+      return
+      ;;
+  esac
+
+  echo "$smtp_host|$smtp_port|$smtp_user|$smtp_pass|$smtp_from|$smtp_tls|$smtp_ssl"
 }
 
 # ── Update Mode ───────────────────────────────────────────────────────────────
