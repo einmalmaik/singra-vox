@@ -583,14 +583,14 @@ run_identity_setup() {
   echo "  Singra Vox ID ermöglicht EIN Konto über ALLE Instanzen hinweg."
   echo "  Ähnlich wie 'Login mit Google' – aber komplett selbst gehostet."
   echo ""
-  echo "  ${BOLD}Zwei Optionen:${RESET}"
+  echo -e "  ${BOLD}Zwei Optionen:${RESET}"
   echo ""
-  echo "  ${BOLD}1) Integriert${RESET} – Teil deiner bestehenden Singra Vox Instanz"
+  echo -e "  ${BOLD}1) Integriert${RESET} – Teil deiner bestehenden Singra Vox Instanz"
   echo "     → Einfachste Option: SVID läuft auf dem gleichen Server"
   echo "     → Nutzer können sich mit Singra Vox ID auf DEINER Instanz registrieren"
   echo "     → Andere Instanzen können deine als ID-Server nutzen"
   echo ""
-  echo "  ${BOLD}2) Standalone${RESET} – Eigener Server nur für Identity"
+  echo -e "  ${BOLD}2) Standalone${RESET} – Eigener Server nur für Identity"
   echo "     → Empfohlen für: Mehrere Instanzen, zentraler ID-Server"
   echo "     → Braucht eigene Domain (z.B. id.deine-domain.de)"
   echo "     → Minimale Ressourcen (512 MB RAM)"
@@ -668,7 +668,7 @@ run_identity_setup() {
     echo "  Für einen dedizierten Identity Server auf einem eigenen Server"
     echo "  folge der Anleitung in: docs/deploy-identity-server.md"
     echo ""
-    echo "  ${BOLD}Kurzfassung:${RESET}"
+    echo -e "  ${BOLD}Kurzfassung:${RESET}"
     echo ""
     echo "  1. Auf dem ID-Server:"
     echo "     git clone https://github.com/einmalmaik/singra-vox.git"
@@ -1207,9 +1207,9 @@ configure_smtp() {
   header "E-Mail Konfiguration"
   echo "  Singra Vox benötigt E-Mail für Registrierungsbestätigung."
   echo ""
-  echo "  ${BOLD}1)${RESET} Eingebaut (Mailpit) — Alle E-Mails im Browser sichtbar"
+  echo -e "  ${BOLD}1)${RESET} Eingebaut (Mailpit) — Alle E-Mails im Browser sichtbar"
   echo "     Empfohlen für Tests und private Server"
-  echo "  ${BOLD}2)${RESET} Extern (Gmail, Mailgun, Resend, etc.) — Echte E-Mails"
+  echo -e "  ${BOLD}2)${RESET} Extern (Gmail, Mailgun, Resend, etc.) — Echte E-Mails"
   echo "     Empfohlen für öffentliche Server"
   echo ""
 
@@ -1367,10 +1367,10 @@ main() {
     echo ""
     warn "Bestehende Installation erkannt in $DATA_DIR"
     echo ""
-    echo "  ${BOLD}1)${RESET} Neu installieren (Konfiguration wird überschrieben!)"
-    echo "  ${BOLD}2)${RESET} Reparieren (Konfiguration bleibt erhalten)"
-    echo "  ${BOLD}3)${RESET} Update (Konfiguration bleibt erhalten, neuster Code)"
-    echo "  ${BOLD}4)${RESET} Abbrechen"
+    echo -e "  ${BOLD}1)${RESET} Neu installieren (Konfiguration wird überschrieben!)"
+    echo -e "  ${BOLD}2)${RESET} Reparieren (Konfiguration bleibt erhalten)"
+    echo -e "  ${BOLD}3)${RESET} Update (Konfiguration bleibt erhalten, neuster Code)"
+    echo -e "  ${BOLD}4)${RESET} Abbrechen"
     echo ""
     local reinstall_choice; reinstall_choice=$(ask "Wahl" "2")
     case "$reinstall_choice" in
@@ -1396,10 +1396,10 @@ main() {
   header "Speicher-Modus (E2EE Datei-Uploads)"
   local total_ram_mb; total_ram_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)
   echo ""
-  echo "  ${BOLD}1) Lite-Modus${RESET}  — Lokales Dateisystem (kein MinIO, ~50 MB RAM)"
+  echo -e "  ${BOLD}1) Lite-Modus${RESET}  — Lokales Dateisystem (kein MinIO, ~50 MB RAM)"
   echo "     Ideal für: VPS mit 1-2 GB RAM, kleine Instanzen"
   echo ""
-  echo "  ${BOLD}2) Voll-Modus${RESET}  — MinIO S3-kompatibler Storage (~200 MB RAM)"
+  echo -e "  ${BOLD}2) Voll-Modus${RESET}  — MinIO S3-kompatibler Storage (~200 MB RAM)"
   echo "     Ideal für: Server mit 4+ GB RAM, große Instanzen, S3-Backups"
   echo ""
   if [[ $total_ram_mb -lt 3000 ]]; then
@@ -1409,7 +1409,7 @@ main() {
     info "Erkannter RAM: ${total_ram_mb} MB"
     local storage_default="2"
   fi
-  local storage_mode; storage_mode=$(ask "Speicher-Modus" "$storage_default")
+  local storage_mode; storage_mode=$(ask "Wähle 1 oder 2" "$storage_default")
 
   # ── Worker-Anzahl (CPU-basiert) ────────────────────────────────────────────
   local cpu_cores; cpu_cores=$(nproc 2>/dev/null || echo 1)
@@ -1420,34 +1420,23 @@ main() {
   info "CPU-Kerne: ${cpu_cores} → Backend-Workers: ${workers}"
 
   # ── Mode Selection ───────────────────────────────────────────────────────────
+  echo ""
   header "Installations-Modus"
   echo ""
-  echo "  ${BOLD}1) Schnellstart${RESET}  — HTTP, über IP oder Domain erreichbar"
+  echo -e "  ${BOLD}1) Schnellstart${RESET}  — HTTP, über IP oder Domain erreichbar"
   echo "     Ideal für: Tests, privates Netzwerk, eigene Subdomain"
   echo ""
-  echo "  ${BOLD}2) Produktiv${RESET}     — HTTPS mit automatischem SSL-Zertifikat (Let's Encrypt)"
+  echo -e "  ${BOLD}2) Produktiv${RESET}     — HTTPS mit automatischem SSL-Zertifikat (Let's Encrypt)"
   echo "     Ideal für: Öffentlicher Server, Hetzner/Netcup/Contabo VPS"
   echo "     Voraussetzung: Domain zeigt auf diesen Server (Port 80+443 offen)"
   echo ""
-  local mode; mode=$(ask "Modus wählen" "1")
+  local mode; mode=$(ask "Wähle 1 oder 2" "1")
 
   # ── Instance Name ─────────────────────────────────────────────────────────
   echo ""
   header "Server-Name"
+  echo -e "  ${DIM}Der Name, der in der App und bei Einladungen angezeigt wird.${RESET}"
   local instance_name; instance_name=$(ask "Name deiner Singra-Vox-Instanz" "Mein Singra Vox")
-
-  # ── Admin Account ─────────────────────────────────────────────────────────
-  echo ""
-  header "Admin-Account"
-  echo "  Dieser Account wird der erste Administrator deiner Instanz."
-  echo ""
-  local admin_email; admin_email=$(ask "Admin E-Mail" "admin@example.com")
-  local admin_user;  admin_user=$(ask "Admin Benutzername (3-32 Zeichen, a-z 0-9 _)" "admin")
-  local admin_pass;  admin_pass=$(ask_secret "Admin Passwort (min. 8 Zeichen)")
-  if [[ ${#admin_pass} -lt 8 ]]; then
-    error "Passwort zu kurz (min. 8 Zeichen)"; exit 1
-  fi
-  local admin_display; admin_display=$(ask "Anzeigename" "Admin")
 
   # ── Open Signup ───────────────────────────────────────────────────────────
   echo ""
@@ -1532,7 +1521,7 @@ main() {
     "$livekit_internal" "$livekit_public" "$livekit_key" "$livekit_secret" \
     "$domain" "$rtc_domain" \
     "$smtp_host" "$smtp_port" "$smtp_user" "$smtp_pass" "$smtp_tls" "$smtp_ssl" "$smtp_from" \
-    "$vapid_private" "$vapid_public" "${admin_email}" \
+    "$vapid_private" "$vapid_public" "" \
     "$s3_key" "$s3_secret"
 
   # Storage-Modus und Worker-Anzahl in .env eintragen
@@ -1545,6 +1534,7 @@ main() {
     info "Voll-Modus: MinIO S3-Storage aktiviert"
   fi
   echo "WORKERS=${workers}" >> "$DATA_DIR/.env"
+  echo "ALLOW_OPEN_SIGNUP=${allow_signup}" >> "$DATA_DIR/.env"
 
   write_livekit_config "$livekit_key" "$livekit_secret"
 
@@ -1581,13 +1571,9 @@ main() {
   sleep 5
   wait_for_api "$api_url/api/setup/status"
 
-  # ── Bootstrap admin ───────────────────────────────────────────────────────
+  # ── Admin setup via Web UI ────────────────────────────────────────────────
   echo ""
-  header "Admin-Account einrichten"
-  bootstrap_admin \
-    "$api_url" "$instance_name" \
-    "$admin_email" "$admin_user" "$admin_pass" "$admin_display" \
-    "$allow_signup"
+  info "Admin-Account wird beim ersten Öffnen der App über den Setup-Wizard erstellt."
 
   # ── Save version info ────────────────────────────────────────────────────
   if [[ -d "$REPO_DIR/.git" ]]; then
@@ -1621,7 +1607,6 @@ main() {
   echo -e "${BOLD}${GREEN}  Singra Vox läuft!${RESET}"
   echo ""
   echo -e "  ${BOLD}App öffnen:${RESET}      $frontend_url"
-  echo -e "  ${BOLD}Admin-Login:${RESET}     $admin_email"
   echo -e "  ${BOLD}Voice (LiveKit):${RESET} $livekit_public"
 
   if $smtp_builtin; then
@@ -1634,9 +1619,9 @@ main() {
 
   echo ""
   echo -e "  ${BOLD}Nächste Schritte:${RESET}"
-  echo "  1. App öffnen und einloggen"
-  echo "  2. Ersten Server erstellen"
-  echo "  3. Freunde per Einladungs-Link einladen"
+  echo "  1. App im Browser öffnen: $frontend_url"
+  echo "  2. Setup-Wizard durchlaufen (Admin-Account & Instanz einrichten)"
+  echo "  3. Ersten Server erstellen und Freunde einladen"
   echo ""
   echo -e "  ${BOLD}Verwaltung:${RESET}"
   echo "  bash install.sh --status          Status & Diagnose"
