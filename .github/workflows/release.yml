@@ -131,7 +131,7 @@ jobs:
 
             ### Selfhosting
             Server-Images: `ghcr.io/einmalmaik/singra-vox/backend` und `/web`
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
           args: --target ${{ matrix.target }}

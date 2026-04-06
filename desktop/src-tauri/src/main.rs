@@ -621,9 +621,12 @@ async fn check_for_update(app: tauri::AppHandle) {
         Ok(None) => {
             let _ = app.emit("update-not-available", ());
         }
-        Err(_) => {
-            // Netzwerkfehler – still ignorieren (kein Internet etc.)
-            let _ = app.emit("update-not-available", ());
+        Err(e) => {
+            // Fehler an Frontend senden für Debugging
+            let _ = app.emit(
+                "update-error",
+                serde_json::json!({ "error": e.to_string() }),
+            );
         }
     }
 }

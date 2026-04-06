@@ -34,7 +34,7 @@ export function UpdateNotification() {
     if (!isDesktopApp()) return;
 
     let unlistenChecking, unlistenAvailable, unlistenNotAvailable,
-        unlistenProgress, unlistenInstall;
+        unlistenProgress, unlistenInstall, unlistenError;
 
     (async () => {
       // "Prüfe gerade…" – kurz anzeigen, dann wieder idle
@@ -72,6 +72,13 @@ export function UpdateNotification() {
       unlistenInstall = await listenTauri("update-install-started", () => {
         setPhase("installing");
       });
+
+      // Update-Fehler (z.B. Netzwerkfehler, ungültige Signatur)
+      unlistenError = await listenTauri("update-error", (event) => {
+        if (checkingTimer.current) clearTimeout(checkingTimer.current);
+        console.warn("[Updater] Fehler:", event.payload?.error);
+        setPhase("idle");
+      });
     })();
 
     return () => {
@@ -81,6 +88,7 @@ export function UpdateNotification() {
       unlistenNotAvailable?.();
       unlistenProgress?.();
       unlistenInstall?.();
+      unlistenError?.();
     };
   }, []);
 
