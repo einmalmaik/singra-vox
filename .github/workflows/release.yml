@@ -73,9 +73,16 @@ jobs:
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          import json, re, os
+          import json, re, os, sys
 
-          version = os.environ["TAG_NAME"].lstrip("v")
+          raw = os.environ.get("TAG_NAME", "").strip()
+          version = raw.lstrip("v")
+
+          # Semver validieren (MAJOR.MINOR.PATCH, optional prerelease)
+          if not re.match(r'^\d+\.\d+\.\d+', version):
+              print(f"FEHLER: '{raw}' ist kein gueltiger semver-Tag (erwartet: vMAJOR.MINOR.PATCH)")
+              sys.exit(1)
+
           print(f"Setze Version: {version}")
 
           # tauri.conf.json
@@ -84,6 +91,7 @@ jobs:
           c["version"] = version
           with open("desktop/src-tauri/tauri.conf.json", "w") as f:
               json.dump(c, f, indent=4)
+              f.write("\n")
           print("tauri.conf.json:", c["version"])
 
           # Cargo.toml (nur erste version-Zeile im [package]-Block)
