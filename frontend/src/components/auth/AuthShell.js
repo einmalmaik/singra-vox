@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 import { useTranslation } from "react-i18next";
+import { openExternalUrl } from "@/lib/desktop";
 
 function FoxLogo({ size = 26 }) {
   return (

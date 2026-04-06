@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import LocalizedErrorBanner from "@/components/ui/LocalizedErrorBanner";
+import { openExternalUrl } from "@/lib/desktop";
 import { toast } from "sonner";
 
 
