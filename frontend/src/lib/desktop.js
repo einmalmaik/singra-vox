@@ -256,11 +256,12 @@ export async function openExternalUrl(url) {
   if (!url) return;
   if (isDesktopApp()) {
     try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(url);
+      // Tauri 2: invoke the open_url shell command via IPC
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("plugin:shell|open", { path: url });
       return;
     } catch {
-      // Fallback if plugin not available
+      // shell plugin not available – fall through to window.open
     }
   }
   window.open(url, "_blank", "noopener,noreferrer");

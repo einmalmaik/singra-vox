@@ -667,7 +667,6 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             #[cfg(target_os = "windows")]
             spawn_ptt_listener(app.handle().clone(), ptt_state.clone());
