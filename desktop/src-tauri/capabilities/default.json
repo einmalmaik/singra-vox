@@ -16,9 +16,6 @@
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install",
-    "process:allow-restart",
-    "allow-store-secret",
-    "allow-get-secret",
-    "allow-delete-secret"
+    "process:allow-restart"
   ]
 }
