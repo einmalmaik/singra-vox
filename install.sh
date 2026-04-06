@@ -922,6 +922,22 @@ run_repair() {
     (( skipped++ ))
   fi
 
+  # SVID_ISSUER prüfen – Default auf voxid.mauntingstudios.de
+  local svid_val
+  svid_val=$(grep "^SVID_ISSUER=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
+  if [[ -z "$svid_val" ]]; then
+    if grep -q "^SVID_ISSUER=" "$DATA_DIR/.env"; then
+      sed -i "s|^SVID_ISSUER=.*|SVID_ISSUER=https://voxid.mauntingstudios.de|" "$DATA_DIR/.env"
+    else
+      echo "SVID_ISSUER=https://voxid.mauntingstudios.de" >> "$DATA_DIR/.env"
+    fi
+    success "SVID_ISSUER Default gesetzt: https://voxid.mauntingstudios.de"
+    (( fixed++ ))
+  else
+    success "SVID_ISSUER OK: $svid_val"
+    (( skipped++ ))
+  fi
+
   # ── Docker Compose Datei prüfen
   header "3/7 Docker Compose prüfen"
   if [[ -f "$DATA_DIR/docker-compose.yml" ]]; then
@@ -1275,6 +1291,8 @@ S3_BUCKET=singravox-e2ee
 S3_REGION=us-east-1
 S3_FORCE_PATH_STYLE=true
 MAX_E2EE_BLOB_BYTES=52428800
+SVID_ISSUER=https://voxid.mauntingstudios.de
+SVID_JWT_SECRET=
 EOF
   chmod 600 "$DATA_DIR/.env"
 

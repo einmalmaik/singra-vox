@@ -12,7 +12,7 @@ Usage:
 Environment:
     MONGO_URL           MongoDB connection string
     DB_NAME             Database name (default: singravox_id)
-    SVID_ISSUER         Canonical URL (e.g. https://id.singravox.com)
+    SVID_ISSUER         Canonical URL (default: https://voxid.mauntingstudios.de)
     SVID_JWT_SECRET     JWT signing secret (MUST be set in production)
     SMTP_HOST           SMTP server for email delivery
     SMTP_PORT           SMTP port

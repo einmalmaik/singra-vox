@@ -13,7 +13,7 @@ import secrets
 # ── Issuer URL ──────────────────────────────────────────────────────────────
 # The canonical URL of this Singra Vox ID server.  Used in JWT `iss` claims,
 # OpenID Connect discovery, and as the server identifier in federated setups.
-SVID_ISSUER = os.environ.get("SVID_ISSUER", "").strip()
+SVID_ISSUER = os.environ.get("SVID_ISSUER", "https://voxid.mauntingstudios.de").strip()
 
 # ── JWT Signing ─────────────────────────────────────────────────────────────
 SVID_JWT_SECRET = os.environ.get("SVID_JWT_SECRET", "").strip() or secrets.token_hex(32)

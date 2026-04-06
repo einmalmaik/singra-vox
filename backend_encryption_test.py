@@ -25,7 +25,7 @@ from datetime import datetime
 from pymongo import MongoClient
 
 class SingraVoxEncryptionTester:
-    def __init__(self, base_url="https://bbdd79a5-5dd9-4359-80cf-7f512a35bc81.preview.emergentagent.com"):
+    def __init__(self, base_url="https://vox-identity.preview.emergentagent.com"):
         self.base_url = base_url
         self.session = requests.Session()
         self.tests_run = 0

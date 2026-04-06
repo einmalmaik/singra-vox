@@ -24,7 +24,7 @@ import time
 from datetime import datetime
 
 class PasswordResetTester:
-    def __init__(self, base_url="https://voice-rebo-config.preview.emergentagent.com"):
+    def __init__(self, base_url="https://vox-identity.preview.emergentagent.com"):
         self.base_url = base_url
         self.session = requests.Session()
         self.tests_run = 0
