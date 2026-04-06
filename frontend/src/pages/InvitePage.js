@@ -1,3 +1,12 @@
+/*
+ * Singra Vox - Privacy-first communication platform
+ * Copyright (C) 2026  Maik Haedrich
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -198,6 +207,15 @@ export default function InvitePage() {
           </div>
         ) : null}
       </div>
+      <a
+        href="https://github.com/einmalmaik/singra-vox"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
+        data-testid="repo-footer-link"
+      >
+        Singra Vox &middot; Open Source on GitHub
+      </a>
     </div>
   );
 }

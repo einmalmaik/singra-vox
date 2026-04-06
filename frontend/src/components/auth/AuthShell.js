@@ -1,3 +1,12 @@
+/*
+ * Singra Vox - Privacy-first communication platform
+ * Copyright (C) 2026  Maik Haedrich
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
 import { useTranslation } from "react-i18next";
 
 function FoxLogo({ size = 26 }) {
@@ -34,7 +43,7 @@ export default function AuthShell({
       <div className="pointer-events-none absolute left-[-10%] top-[-10%] h-[28rem] w-[28rem] rounded-full bg-cyan-500/16 blur-[140px]" />
       <div className="pointer-events-none absolute bottom-[-15%] right-[-8%] h-[24rem] w-[24rem] rounded-full bg-zinc-500/14 blur-[120px]" />
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl items-center justify-center">
+      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col items-center justify-center">
         <main className={`workspace-panel-solid grid w-full max-w-5xl overflow-hidden p-0 lg:grid-cols-[minmax(0,1fr)_340px] ${cardClassName}`}>
           <section className="relative p-6 sm:p-8 xl:p-10">
             <div className={`mx-auto w-full max-w-md ${contentClassName}`}>
@@ -107,6 +116,15 @@ export default function AuthShell({
             )}
           </aside>
         </main>
+        <a
+          href="https://github.com/einmalmaik/singra-vox"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-4 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
+          data-testid="repo-footer-link"
+        >
+          Singra Vox &middot; Open Source on GitHub
+        </a>
       </div>
     </div>
   );
