@@ -252,6 +252,20 @@ export async function getDesktopCaptureSession() {
   return invoke("get_desktop_capture_session");
 }
 
+export async function openExternalUrl(url) {
+  if (!url) return;
+  if (isDesktopApp()) {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+      return;
+    } catch {
+      // Fallback if plugin not available
+    }
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 // ── Update-Helpers ───────────────────────────────────────────────────────────
 
 /** Ruft einen Tauri-Befehl auf (invoke shorthand für Komponenten) */

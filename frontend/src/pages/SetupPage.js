@@ -253,15 +253,13 @@ export default function SetupPage() {
           </form>
         </div>
       </div>
-      <a
-        href="https://github.com/einmalmaik/singra-vox"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="fixed bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
+      <button
+        onClick={() => openExternalUrl("https://github.com/einmalmaik/singra-vox")}
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400 bg-transparent border-0 cursor-pointer"
         data-testid="repo-footer-link"
       >
         Singra Vox &middot; Open Source on GitHub
-      </a>
+      </button>
     </div>
   );
 }

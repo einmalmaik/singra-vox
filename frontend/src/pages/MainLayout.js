@@ -803,7 +803,10 @@ export default function MainLayout() {
             onClick: () => navigate(data.notification.link)
           } : undefined
         });
-        if (config?.isDesktop && notificationPreferencesRef.current?.desktop_push_enabled !== false) {
+        if (config?.isDesktop
+          && notificationPreferencesRef.current?.desktop_push_enabled !== false
+          && document.visibilityState !== "visible"
+        ) {
           import("@tauri-apps/plugin-notification").then(({ sendNotification }) => {
             sendNotification({ title: data.notification.title, body: data.notification.body });
           }).catch(() => {});

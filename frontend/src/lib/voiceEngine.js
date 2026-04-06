@@ -308,6 +308,7 @@ export class VoiceEngine {
       adaptiveStream: true,
       dynacast: true,
       webAudioMix: false,
+      autoSubscribe: true,
       encryption: encryptionOptions,
     });
 
@@ -782,7 +783,7 @@ export class VoiceEngine {
       canvas.height = this.nativeScreenShare.lastFrameSettings.height;
     }
 
-    const mediaStream = canvas.captureStream(0);
+    const mediaStream = canvas.captureStream(resolution.frameRate || 30);
     const mediaStreamTrack = mediaStream.getVideoTracks()[0];
     if (!mediaStreamTrack) {
       await this._stopNativeDesktopScreenShare({ keepTracksArray: false });
@@ -1005,10 +1006,16 @@ export class VoiceEngine {
   }
 
   async _probeInput() {
-    const probeStream = await navigator.mediaDevices.getUserMedia({
-      audio: this._audioConstraints(),
-    });
-    probeStream.getTracks().forEach((track) => track.stop());
+    try {
+      const probeStream = await navigator.mediaDevices.getUserMedia({
+        audio: this._audioConstraints(),
+      });
+      probeStream.getTracks().forEach((track) => track.stop());
+    } catch (err) {
+      // In Tauri WebViews permissions may not be available until first real capture.
+      // We allow joinChannel to proceed and request mic when actually publishing.
+      console.warn("[VoiceEngine] _probeInput failed (will retry on publish):", err.message);
+    }
   }
 
   async _ensureAudioContext() {

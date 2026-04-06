@@ -667,13 +667,15 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             #[cfg(target_os = "windows")]
             spawn_ptt_listener(app.handle().clone(), ptt_state.clone());
 
-            // Prüfe beim Start im Hintergrund auf Updates
+            // Prüfe beim Start im Hintergrund auf Updates (mit Verzögerung damit die UI erst rendern kann)
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 check_for_update(app_handle).await;
             });
 

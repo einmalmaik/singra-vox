@@ -28,6 +28,7 @@ export function UpdateNotification() {
   const [progress, setProgress] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const checkingTimer = useRef(null);
+  const downloadedRef = useRef(0);
 
   useEffect(() => {
     if (!isDesktopApp()) return;
@@ -63,7 +64,8 @@ export function UpdateNotification() {
       unlistenProgress = await listenTauri("update-download-progress", (event) => {
         const { chunkLength, contentLength } = event.payload;
         if (contentLength) {
-          setProgress(Math.round((chunkLength / contentLength) * 100));
+          downloadedRef.current += chunkLength;
+          setProgress(Math.min(99, Math.round((downloadedRef.current / contentLength) * 100)));
         }
       });
 

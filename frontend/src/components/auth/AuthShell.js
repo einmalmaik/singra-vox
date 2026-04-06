@@ -116,15 +116,13 @@ export default function AuthShell({
             )}
           </aside>
         </main>
-        <a
-          href="https://github.com/einmalmaik/singra-vox"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-4 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
+        <button
+          onClick={() => openExternalUrl("https://github.com/einmalmaik/singra-vox")}
+          className="mt-4 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400 bg-transparent border-0 cursor-pointer"
           data-testid="repo-footer-link"
         >
           Singra Vox &middot; Open Source on GitHub
-        </a>
+        </button>
       </div>
     </div>
   );

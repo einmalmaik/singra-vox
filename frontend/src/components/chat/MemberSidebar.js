@@ -19,11 +19,26 @@ import { buildServerCapabilities } from "@/lib/serverPermissions";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { resolveAssetUrl } from "@/lib/assetUrls";
 
+const ACTIVE_STATUSES = new Set(["online", "away", "dnd"]);
+
+function isActiveStatus(status) {
+  return ACTIVE_STATUSES.has(status);
+}
+
+function statusIndicatorClass(status) {
+  switch (status) {
+    case "online": return "status-online";
+    case "away":   return "status-away";
+    case "dnd":    return "status-dnd";
+    default:       return "status-offline";
+  }
+}
+
 export default function MemberSidebar({ members, roles, serverId, server, user, viewerContext, onStartDM, onRefreshMembers }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
-  const onlineMembers = members.filter(m => m.user?.status === "online");
-  const offlineMembers = members.filter(m => m.user?.status !== "online");
+  const activeMembers = members.filter(m => isActiveStatus(m.user?.status));
+  const offlineMembers = members.filter(m => !isActiveStatus(m.user?.status));
   const capabilities = buildServerCapabilities({ user, server, viewerContext });
 
   const getRoleColor = (member) => {
@@ -75,7 +90,8 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
   };
 
   const MemberItem = ({ member }) => {
-    const isOnline = member.user?.status === "online";
+    const memberStatus = member.user?.status || "offline";
+    const isActive = isActiveStatus(memberStatus);
     const isSelf = member.user?.id === user?.id;
     const isAdmin = isOwnerOrAdmin(member);
     const isServerOwner = server?.owner_id === member.user?.id;
@@ -90,7 +106,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
           >
             <div className="relative">
               <div className={`flex h-8 w-8 items-center justify-center overflow-hidden rounded-full text-xs font-bold ${
-                isOnline ? 'bg-zinc-800/85' : 'bg-zinc-800/45'
+                isActive ? 'bg-zinc-800/85' : 'bg-zinc-800/45'
               }`} style={{ color: getRoleColor(member) }}>
                 {member.user?.avatar_url ? (
                   <img src={resolveAssetUrl(member.user.avatar_url, config?.assetBase)} alt={member.user?.display_name || member.user?.username || "avatar"} className="h-full w-full object-cover" />
@@ -99,13 +115,13 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
                 )}
               </div>
               <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#121212] ${
-                isOnline ? 'status-online' : 'status-offline'
+                statusIndicatorClass(memberStatus)
               }`} />
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1">
-                <span className={`text-sm truncate ${isOnline ? 'text-white' : 'text-[#71717A]'}`}
-                  style={{ color: isOnline ? getRoleColor(member) : undefined }}>
+                <span className={`text-sm truncate ${isActive ? 'text-white' : 'text-[#71717A]'}`}
+                  style={{ color: isActive ? getRoleColor(member) : undefined }}>
                   {member.user?.display_name || member.user?.username}
                 </span>
                 {isAdmin && <Crown size={12} weight="fill" className="text-[#F59E0B] shrink-0" />}
@@ -160,12 +176,12 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
         </h3>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto py-4 px-3">
-        {onlineMembers.length > 0 && (
+        {activeMembers.length > 0 && (
           <>
             <p className="workspace-section-label px-2 mb-2">
-              {t("memberList.online")} &mdash; {onlineMembers.length}
+              {t("memberList.online")} &mdash; {activeMembers.length}
             </p>
-            {onlineMembers.map(m => <MemberItem key={m.user_id} member={m} />)}
+            {activeMembers.map(m => <MemberItem key={m.user_id} member={m} />)}
           </>
         )}
         {offlineMembers.length > 0 && (
