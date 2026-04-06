@@ -210,6 +210,339 @@ configure_firewall() {
   fi
 }
 
+# ── Webserver-Erkennung ───────────────────────────────────────────────────────
+detect_existing_webserver() {
+  local proc80=""
+  if command -v ss &>/dev/null; then
+    proc80=$(ss -tlnp 2>/dev/null | grep ':80 ' | head -1)
+  elif command -v netstat &>/dev/null; then
+    proc80=$(netstat -tlnp 2>/dev/null | grep ':80 ' | head -1)
+  fi
+  if echo "$proc80" | grep -qi "nginx"; then echo "nginx"; return; fi
+  if echo "$proc80" | grep -qi "apache\|httpd"; then echo "apache"; return; fi
+  if echo "$proc80" | grep -qi "caddy"; then echo "caddy"; return; fi
+  # Fallback: systemd
+  if systemctl is-active --quiet nginx 2>/dev/null; then echo "nginx"; return; fi
+  if systemctl is-active --quiet apache2 2>/dev/null; then echo "apache"; return; fi
+  if systemctl is-active --quiet httpd 2>/dev/null; then echo "apache"; return; fi
+  if systemctl is-active --quiet caddy 2>/dev/null; then echo "caddy"; return; fi
+  echo "unknown"
+}
+
+configure_nginx_reverse_proxy() {
+  local domain="$1" local_port="$2" rtc_domain="$3" lk_port="${4:-7880}"
+  local conf_dir="" conf_file=""
+
+  if [[ -d "/etc/nginx/sites-available" ]]; then
+    conf_dir="sites"
+    conf_file="/etc/nginx/sites-available/singravox.conf"
+  elif [[ -d "/etc/nginx/conf.d" ]]; then
+    conf_dir="conf.d"
+    conf_file="/etc/nginx/conf.d/singravox.conf"
+  else
+    error "Nginx-Konfigurationsverzeichnis nicht gefunden."
+    return 1
+  fi
+
+  if [[ ! -w "$(dirname "$conf_file")" ]]; then
+    warn "Keine Schreibrechte auf $(dirname "$conf_file")."
+    warn "Bitte mit sudo ausführen oder manuell konfigurieren."
+    return 1
+  fi
+
+  [[ -f "$conf_file" ]] && {
+    cp "$conf_file" "${conf_file}.bak.$(date +%s)" 2>/dev/null || true
+    info "Backup erstellt: ${conf_file}.bak.*"
+  }
+
+  info "Schreibe Nginx-Konfiguration: ${conf_file}"
+
+  cat > "$conf_file" <<NGPROXY_EOF
+# Singra Vox – Automatisch generiert von install.sh ($(date +%F))
+# Wird bei erneutem install.sh ueberschrieben.
+
+server {
+    listen 80;
+    server_name ${domain};
+    client_max_body_size 100M;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:${local_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${local_port};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+
+server {
+    listen 80;
+    server_name ${rtc_domain};
+
+    location / {
+        proxy_pass http://127.0.0.1:${lk_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+NGPROXY_EOF
+
+  [[ "$conf_dir" == "sites" ]] && ln -sf "$conf_file" /etc/nginx/sites-enabled/singravox.conf 2>/dev/null || true
+
+  info "Teste Nginx-Konfiguration…"
+  if nginx -t 2>/dev/null; then
+    success "Nginx-Konfiguration ist gueltig"
+  else
+    error "Nginx-Konfiguration fehlerhaft!"
+    nginx -t 2>&1 | while IFS= read -r l; do echo "  $l" >&2; done
+    return 1
+  fi
+
+  nginx -s reload 2>/dev/null || systemctl reload nginx 2>/dev/null || {
+    warn "Nginx konnte nicht neu geladen werden. Bitte manuell: sudo systemctl reload nginx"
+  }
+  success "Nginx-Proxy: ${domain} -> 127.0.0.1:${local_port}"
+  success "Nginx-Proxy: ${rtc_domain} -> 127.0.0.1:${lk_port} (LiveKit)"
+  return 0
+}
+
+configure_apache_reverse_proxy() {
+  local domain="$1" local_port="$2" rtc_domain="$3" lk_port="${4:-7880}"
+  local conf_file="" svc_name="apache2"
+
+  if [[ -d "/etc/apache2/sites-available" ]]; then
+    conf_file="/etc/apache2/sites-available/singravox.conf"
+  elif [[ -d "/etc/httpd/conf.d" ]]; then
+    conf_file="/etc/httpd/conf.d/singravox.conf"
+    svc_name="httpd"
+  else
+    error "Apache-Konfigurationsverzeichnis nicht gefunden."
+    return 1
+  fi
+
+  if [[ ! -w "$(dirname "$conf_file")" ]]; then
+    warn "Keine Schreibrechte. Bitte mit sudo ausfuehren."
+    return 1
+  fi
+
+  command -v a2enmod &>/dev/null && {
+    a2enmod proxy proxy_http proxy_wstunnel rewrite headers >/dev/null 2>&1 || true
+    info "Apache-Module aktiviert (proxy, proxy_http, proxy_wstunnel, rewrite, headers)"
+  }
+
+  [[ -f "$conf_file" ]] && cp "$conf_file" "${conf_file}.bak.$(date +%s)" 2>/dev/null || true
+
+  info "Schreibe Apache-Konfiguration: ${conf_file}"
+
+  cat > "$conf_file" <<APPROXY_EOF
+# Singra Vox – Automatisch generiert von install.sh ($(date +%F))
+
+<VirtualHost *:80>
+    ServerName ${domain}
+    ProxyPreserveHost On
+    ProxyRequests Off
+
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteRule /(.*) ws://127.0.0.1:${local_port}/\$1 [P,L]
+
+    ProxyPass / http://127.0.0.1:${local_port}/
+    ProxyPassReverse / http://127.0.0.1:${local_port}/
+</VirtualHost>
+
+<VirtualHost *:80>
+    ServerName ${rtc_domain}
+    ProxyPreserveHost On
+    ProxyRequests Off
+
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteRule /(.*) ws://127.0.0.1:${lk_port}/\$1 [P,L]
+
+    ProxyPass / http://127.0.0.1:${lk_port}/
+    ProxyPassReverse / http://127.0.0.1:${lk_port}/
+</VirtualHost>
+APPROXY_EOF
+
+  command -v a2ensite &>/dev/null && a2ensite singravox.conf >/dev/null 2>&1 || true
+
+  systemctl reload "$svc_name" 2>/dev/null || {
+    warn "Apache konnte nicht neu geladen werden. Bitte manuell: sudo systemctl reload $svc_name"
+  }
+  success "Apache-Proxy: ${domain} und ${rtc_domain} konfiguriert"
+  return 0
+}
+
+configure_caddy_reverse_proxy() {
+  local domain="$1" local_port="$2" rtc_domain="$3" lk_port="${4:-7880}"
+  local caddyfile="/etc/caddy/Caddyfile"
+  local conf_dir="/etc/caddy/conf.d"
+  local conf_file="$conf_dir/singravox.caddy"
+
+  if [[ ! -f "$caddyfile" ]]; then
+    error "Caddyfile nicht gefunden: $caddyfile"
+    return 1
+  fi
+
+  mkdir -p "$conf_dir" 2>/dev/null || true
+  [[ -f "$conf_file" ]] && cp "$conf_file" "${conf_file}.bak.$(date +%s)" 2>/dev/null || true
+
+  info "Schreibe Caddy-Konfiguration: ${conf_file}"
+
+  cat > "$conf_file" <<CDPROXY_EOF
+# Singra Vox ($(date +%F))
+${domain} {
+    reverse_proxy 127.0.0.1:${local_port}
+}
+
+${rtc_domain} {
+    reverse_proxy 127.0.0.1:${lk_port}
+}
+CDPROXY_EOF
+
+  if ! grep -q "import ${conf_dir}/" "$caddyfile" 2>/dev/null; then
+    cp "$caddyfile" "${caddyfile}.bak.$(date +%s)" 2>/dev/null || true
+    local tmp; tmp=$(mktemp)
+    echo "import ${conf_dir}/*.caddy" > "$tmp"
+    cat "$caddyfile" >> "$tmp"
+    mv "$tmp" "$caddyfile"
+    info "Import-Direktive in Caddyfile eingefuegt"
+  fi
+
+  systemctl reload caddy 2>/dev/null || caddy reload --config "$caddyfile" 2>/dev/null || {
+    warn "Caddy konnte nicht neu geladen werden."
+  }
+  success "Caddy konfiguriert — SSL wird automatisch eingerichtet!"
+  return 0
+}
+
+print_manual_proxy_instructions() {
+  local domain="$1" local_port="$2" rtc_domain="$3" lk_port="${4:-7880}"
+  echo "" >&2
+  warn "Automatische Proxy-Konfiguration nicht moeglich."
+  echo "" >&2
+  echo -e "  ${BOLD}Richte deinen Reverse Proxy manuell ein:${RESET}" >&2
+  echo "" >&2
+  echo -e "  ${BOLD}App:${RESET}     ${domain}  ->  127.0.0.1:${local_port}" >&2
+  echo -e "  ${BOLD}Voice:${RESET}   ${rtc_domain}  ->  127.0.0.1:${lk_port} (WebSocket!)" >&2
+  echo "" >&2
+  echo -e "  ${CYAN}Nginx-Beispiel:${RESET}" >&2
+  echo "    server {" >&2
+  echo "        listen 80;" >&2
+  echo "        server_name ${domain};" >&2
+  echo "        client_max_body_size 100M;" >&2
+  echo "        location / {" >&2
+  echo "            proxy_pass http://127.0.0.1:${local_port};" >&2
+  echo "            proxy_http_version 1.1;" >&2
+  echo "            proxy_set_header Upgrade \$http_upgrade;" >&2
+  echo "            proxy_set_header Connection \"upgrade\";" >&2
+  echo "            proxy_set_header Host \$host;" >&2
+  echo "        }" >&2
+  echo "    }" >&2
+  echo "" >&2
+  echo -e "  ${CYAN}Caddy-Beispiel:${RESET}" >&2
+  echo "    ${domain} { reverse_proxy 127.0.0.1:${local_port} }" >&2
+  echo "    ${rtc_domain} { reverse_proxy 127.0.0.1:${lk_port} }" >&2
+  echo "" >&2
+}
+
+offer_certbot_ssl() {
+  local domain="$1" rtc_domain="$2" webserver="$3"
+  [[ "$webserver" == "caddy" ]] && return 0
+
+  if ! command -v certbot &>/dev/null; then
+    echo "" >&2
+    info "Fuer SSL empfehlen wir Certbot:"
+    echo -e "  ${DIM}sudo apt install certbot python3-certbot-nginx${RESET}" >&2
+    echo -e "  ${DIM}sudo certbot --nginx -d ${domain} -d ${rtc_domain}${RESET}" >&2
+    return 0
+  fi
+
+  echo "" >&2
+  header "SSL-Zertifikat (Let's Encrypt)"
+  printf "  ${BOLD}%s${RESET} (j/n) [j]: " "SSL-Zertifikat fuer ${domain} einrichten?" >&2
+  read -r ssl_yn
+  ssl_yn="${ssl_yn:-j}"
+  [[ ! "${ssl_yn,,}" =~ ^(j|y|ja|yes)$ ]] && return 0
+
+  local plugin=""
+  case "$webserver" in
+    nginx)  plugin="--nginx" ;;
+    apache) plugin="--apache" ;;
+    *)      plugin="--webroot -w /var/www/html" ;;
+  esac
+
+  info "Starte Certbot…"
+  if certbot $plugin -d "$domain" -d "$rtc_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>&1 | while IFS= read -r l; do echo "  $l" >&2; done; then
+    success "SSL-Zertifikat eingerichtet!"
+  else
+    warn "Certbot fehlgeschlagen. Bitte manuell: sudo certbot ${plugin} -d ${domain} -d ${rtc_domain}"
+  fi
+}
+
+configure_external_proxy() {
+  local webserver="$1" domain="$2" local_port="$3" rtc_domain="$4" lk_port="${5:-7880}"
+
+  echo "" >&2
+  header "Reverse-Proxy Konfiguration"
+
+  local ws_label=""
+  case "$webserver" in
+    nginx)  ws_label="Nginx" ;;
+    apache) ws_label="Apache" ;;
+    caddy)  ws_label="Caddy" ;;
+    *)      ws_label="" ;;
+  esac
+
+  if [[ -n "$ws_label" ]]; then
+    echo "" >&2
+    success "Bestehender Webserver erkannt: ${ws_label}"
+    echo "" >&2
+    echo -e "  Soll die Proxy-Konfiguration fuer" >&2
+    echo -e "  ${BOLD}${domain}${RESET} und ${BOLD}${rtc_domain}${RESET}" >&2
+    echo -e "  automatisch in ${ws_label} eingetragen werden?" >&2
+    echo -e "  ${DIM}(Bestehende Konfiguration wird NICHT veraendert – nur eine neue Datei angelegt)${RESET}" >&2
+    echo "" >&2
+    printf "  ${BOLD}%s${RESET} (j/n) [j]: " "Automatisch konfigurieren?" >&2
+    read -r auto_yn
+    auto_yn="${auto_yn:-j}"
+
+    if [[ "${auto_yn,,}" =~ ^(j|y|ja|yes)$ ]]; then
+      local configure_ok=false
+      case "$webserver" in
+        nginx)  configure_nginx_reverse_proxy "$domain" "$local_port" "$rtc_domain" "$lk_port" && configure_ok=true ;;
+        apache) configure_apache_reverse_proxy "$domain" "$local_port" "$rtc_domain" "$lk_port" && configure_ok=true ;;
+        caddy)  configure_caddy_reverse_proxy "$domain" "$local_port" "$rtc_domain" "$lk_port" && configure_ok=true ;;
+      esac
+
+      if $configure_ok; then
+        offer_certbot_ssl "$domain" "$rtc_domain" "$webserver"
+        return 0
+      fi
+      warn "Automatische Konfiguration fehlgeschlagen. Zeige manuelle Anleitung…"
+    fi
+  fi
+
+  print_manual_proxy_instructions "$domain" "$local_port" "$rtc_domain" "$lk_port"
+  offer_certbot_ssl "$domain" "$rtc_domain" "$webserver"
+}
+
 
 spinner() {
   local pid=$1 msg="$2" i=0
@@ -1200,6 +1533,107 @@ volumes:
 COMPOSE_EOF
 }
 
+write_docker_compose_reverse_proxy() {
+  local local_port="$1" lk_signal_port="${2:-7880}"
+  cat > "$DATA_DIR/docker-compose.yml" <<'COMPOSE_EOF'
+services:
+  mongodb:
+    image: mongo:7
+    container_name: singravox-db
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: ghcr.io/singra-vox/backend:latest
+    build:
+      context: .
+      dockerfile: backend.Dockerfile
+    container_name: singravox-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    env_file: .env
+    environment:
+      MONGO_URL: "mongodb://mongodb:27017"
+      S3_ENDPOINT_URL: "http://minio:9000"
+    volumes:
+      - uploads_data:/app/storage/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: ghcr.io/singra-vox/frontend:latest
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    container_name: singravox-web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: singravox-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    ports:
+      - "127.0.0.1:LK_SIGNAL_PLACEHOLDER:7880"
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+
+  minio:
+    image: minio/minio:latest
+    container_name: singravox-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: "${S3_ACCESS_KEY}"
+      MINIO_ROOT_PASSWORD: "${S3_SECRET_KEY}"
+    volumes:
+      - minio_data:/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: singravox-mailpit
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:1.25-alpine
+    container_name: singravox-proxy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:LOCAL_PORT_PLACEHOLDER:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  mongo_data:
+  minio_data:
+  uploads_data:
+COMPOSE_EOF
+
+  sed -i "s/LOCAL_PORT_PLACEHOLDER/$local_port/" "$DATA_DIR/docker-compose.yml"
+  sed -i "s/LK_SIGNAL_PLACEHOLDER/$lk_signal_port/" "$DATA_DIR/docker-compose.yml"
+}
+
 write_nginx_conf() {
   cat > "$DATA_DIR/nginx.conf" <<'NGINX_EOF'
 server {
@@ -1657,15 +2091,31 @@ main() {
   # ── Mode Selection ───────────────────────────────────────────────────────────
   echo ""
   header "Installations-Modus"
+
+  # Auto-Erkennung: Sind Port 80/443 belegt?
+  local port_80_busy=false port_443_busy=false recommended_mode="1"
+  if ! is_port_free 80; then port_80_busy=true; fi
+  if ! is_port_free 443; then port_443_busy=true; fi
+
+  if $port_80_busy || $port_443_busy; then
+    echo ""
+    if $port_80_busy; then warn "Port 80 ist bereits belegt."; fi
+    if $port_443_busy; then warn "Port 443 ist bereits belegt."; fi
+    info "Modus 3 (Reverse Proxy) wird empfohlen."
+    recommended_mode="3"
+  fi
+
   echo ""
   echo -e "  ${BOLD}1) Schnellstart${RESET}  — HTTP, über IP oder Domain erreichbar"
-  echo "     Ideal für: Tests, privates Netzwerk, eigene Subdomain"
+  echo "     Ideal für: Tests, privates Netzwerk"
   echo ""
-  echo -e "  ${BOLD}2) Produktiv${RESET}     — HTTPS mit automatischem SSL-Zertifikat (Let's Encrypt)"
-  echo "     Ideal für: Öffentlicher Server, Hetzner/Netcup/Contabo VPS"
-  echo "     Voraussetzung: Domain zeigt auf diesen Server (Port 80+443 offen)"
+  echo -e "  ${BOLD}2) Produktiv${RESET}     — HTTPS mit eigenem SSL (Caddy, Let's Encrypt)"
+  echo "     Voraussetzung: Port 80+443 frei, Domain zeigt auf diesen Server"
   echo ""
-  local mode; mode=$(ask "Wähle 1 oder 2" "1")
+  echo -e "  ${BOLD}3) Reverse Proxy${RESET} — Hinter bestehendem Webserver (Nginx/Apache/Caddy)"
+  echo "     Ideal für: Server mit bestehendem Webserver, geteilte Umgebungen"
+  echo ""
+  local mode; mode=$(ask "Wähle 1, 2 oder 3" "$recommended_mode")
 
   # ── Instance Name ─────────────────────────────────────────────────────────
   echo ""
@@ -1677,6 +2127,7 @@ main() {
   local frontend_url cors_origins cookie_secure
   local livekit_internal livekit_public
   local domain rtc_domain http_port api_url compose_flag
+  local detected_webserver="" lk_signal_port=""
 
   if [[ "$mode" == "2" ]]; then
     # ── Produktiv-Modus: Domain + SSL ──────────────────────────────────────
@@ -1716,6 +2167,53 @@ main() {
       "7882/udp:LiveKit Media (WebRTC)"
     )
     configure_firewall "${firewall_ports[@]}"
+
+  elif [[ "$mode" == "3" ]]; then
+    # ── Reverse-Proxy-Modus: Hinter bestehendem Webserver ──────────────────
+    local public_ip; public_ip=$(get_public_ip)
+    echo ""
+    header "Domain-Konfiguration"
+    echo ""
+    info "Erkannte öffentliche IP: ${BOLD}${public_ip}${RESET}"
+    echo ""
+    echo -e "  Dein bestehender Webserver übernimmt SSL und leitet Traffic weiter."
+    echo -e "  Singra Vox bindet sich nur auf ${BOLD}127.0.0.1${RESET} (lokal erreichbar)."
+    echo ""
+    domain=$(ask "Haupt-Domain (z.B. chat.example.com)" "")
+    if [[ -z "$domain" ]]; then error "Domain darf nicht leer sein."; exit 1; fi
+    rtc_domain=$(ask "Voice-Domain (z.B. rtc.example.com)" "rtc.${domain#*.}")
+
+    echo ""
+    header "Webserver-Erkennung"
+    detected_webserver=$(detect_existing_webserver)
+    case "$detected_webserver" in
+      nginx)  success "Erkannt: Nginx" ;;
+      apache) success "Erkannt: Apache" ;;
+      caddy)  success "Erkannt: Caddy (System)" ;;
+      *)      info "Kein bekannter Webserver automatisch erkannt." ;;
+    esac
+
+    local default_local_port; default_local_port=$(find_free_port 8443)
+    http_port=$(ask "Lokaler Port für Singra Vox" "$default_local_port")
+    http_port=$(find_free_port "$http_port")
+
+    lk_signal_port=$(find_free_port 7880)
+
+    frontend_url="https://$domain"
+    cors_origins="https://$domain,tauri://localhost,http://tauri.localhost"
+    cookie_secure="true"
+    livekit_internal="ws://livekit:7880"
+    livekit_public="wss://$rtc_domain"
+    api_url="http://127.0.0.1:$http_port"
+    compose_flag="reverse_proxy"
+
+    # Nur WebRTC-Ports brauchen Firewall (App läuft lokal)
+    local firewall_ports=(
+      "7881/tcp:LiveKit Signaling (WebRTC)"
+      "7882/udp:LiveKit Media (WebRTC)"
+    )
+    configure_firewall "${firewall_ports[@]}"
+
   else
     # ── Schnellstart-Modus: IP + HTTP ──────────────────────────────────────
     local public_ip; public_ip=$(get_public_ip)
@@ -1808,12 +2306,20 @@ main() {
   if [[ "$compose_flag" == "production" ]]; then
     write_caddy_config "$domain" "$rtc_domain"
     write_docker_compose_production
+  elif [[ "$compose_flag" == "reverse_proxy" ]]; then
+    write_nginx_conf
+    write_docker_compose_reverse_proxy "$http_port" "$lk_signal_port"
   else
     write_nginx_conf
     write_docker_compose_quickstart "$http_port"
   fi
 
   success "Konfiguration erstellt in $DATA_DIR"
+
+  # ── Reverse-Proxy: Bestehenden Webserver automatisch konfigurieren ──────
+  if [[ "$compose_flag" == "reverse_proxy" ]]; then
+    configure_external_proxy "$detected_webserver" "$domain" "$http_port" "$rtc_domain" "$lk_signal_port"
+  fi
 
   # ── Build / Pull images ───────────────────────────────────────────────────
   echo ""
@@ -1841,7 +2347,14 @@ main() {
   if ! $COMPOSE_BIN up -d 2>&1; then
     # Check if a specific port is blocked
     local failed_port=""
-    for check_port in 80 443; do
+    local _check_ports=(80 443)
+    if [[ "$compose_flag" == "reverse_proxy" ]]; then
+      _check_ports=("$http_port")
+      [[ -n "$lk_signal_port" ]] && _check_ports+=("$lk_signal_port")
+    elif [[ "$compose_flag" == "quickstart" ]]; then
+      _check_ports=("$http_port")
+    fi
+    for check_port in "${_check_ports[@]}"; do
       if ! is_port_free "$check_port"; then
         local blocker
         blocker=$(ss -tlnp 2>/dev/null | grep ":${check_port} " | awk '{print $NF}' | head -1)
@@ -1907,6 +2420,15 @@ main() {
   echo ""
   echo -e "  ${BOLD}App öffnen:${RESET}      $frontend_url"
   echo -e "  ${BOLD}Voice (LiveKit):${RESET} $livekit_public"
+
+  if [[ "$compose_flag" == "reverse_proxy" ]]; then
+    echo ""
+    echo -e "  ${BOLD}Reverse Proxy:${RESET}   App lauscht auf 127.0.0.1:$http_port"
+    echo -e "  ${BOLD}LiveKit Signal:${RESET}  127.0.0.1:${lk_signal_port:-7880}"
+    if [[ "$detected_webserver" != "unknown" && -n "$detected_webserver" ]]; then
+      success "${detected_webserver^}-Proxy wurde automatisch konfiguriert."
+    fi
+  fi
 
   if $smtp_builtin; then
     if [[ "$compose_flag" == "quickstart" ]]; then
