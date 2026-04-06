@@ -545,6 +545,41 @@ fn clear_ptt_listener(state: State<'_, DesktopState>) -> Result<PttStatus, Strin
     }
 }
 
+// ── Externe URLs öffnen ────────────────────────────────────────────────────────
+
+/// Öffnet eine URL im Standard-Browser des Systems.
+/// Wird vom Frontend über `invoke("open_url", { url })` aufgerufen.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    // Nur http/https URLs erlauben (Sicherheit)
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Nur http/https URLs erlaubt".into());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("Konnte Browser nicht öffnen: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Konnte Browser nicht öffnen: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Konnte Browser nicht öffnen: {e}"))?;
+    }
+    Ok(())
+}
+
 // ── Update-Check ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
@@ -687,6 +722,7 @@ fn main() {
             get_desktop_runtime_info,
             configure_ptt_listener,
             clear_ptt_listener,
+            open_url,
             check_update_command,
             install_update_command,
             #[cfg(any(target_os = "windows", target_os = "macos"))]

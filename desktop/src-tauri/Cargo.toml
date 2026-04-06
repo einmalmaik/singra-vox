@@ -1,6 +1,6 @@
 [package]
 name = "singravox-desktop"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 description = "Singra Vox Desktop Client"
 

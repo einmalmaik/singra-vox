@@ -120,8 +120,18 @@ function AppShell() {
       <Toaster
         theme="dark"
         position="top-right"
+        richColors
         toastOptions={{
-          style: { background: "#18181B", border: "1px solid #27272A", color: "#FFFFFF" },
+          className: "singravox-toast",
+          style: {
+            background: "rgba(24, 24, 27, 0.95)",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(63, 63, 70, 0.5)",
+            color: "#E4E4E7",
+            borderRadius: "12px",
+            fontSize: "13px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          },
         }}
       />
       <DesktopInviteBridge />
