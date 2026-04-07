@@ -123,8 +123,18 @@ default_dev_origins = [
     "http://127.0.0.1:8080",
     "tauri://localhost",
     "http://tauri.localhost",
+    "https://tauri.localhost",
 ]
 allow_origins = list(dict.fromkeys(configured_cors + default_dev_origins))
+
+# Tauri-Origin-Pattern: In Dev-Mode sendet WebView2 "http://localhost:<port>",
+# in Production "tauri://localhost" oder "https://tauri.localhost". Diese
+# werden von Starlette's CORSMiddleware bei WebSocket-Upgrades als
+# nicht-erlaubt abgelehnt wenn sie nicht exakt in allow_origins stehen.
+# Dieses Pattern erkennt alle Tauri-kompatiblen Origins dynamisch.
+_TAURI_ORIGIN_RE = re.compile(
+    r"^(?:https?://(?:localhost|127\.0\.0\.1)(?::\d+)?|tauri://localhost|https://tauri\.localhost)$"
+)
 INSTANCE_SETTINGS_ID = "instance:primary"
 OWNER_ROLE = "owner"
 ADMIN_ROLE = "admin"
@@ -148,6 +158,48 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Singra Vox", version="1.0.0")
 app.state.auth_config = AuthConfig(jwt_secret=jwt_secret, cookie_secure=cookie_secure)
 
+# ── WebSocket CORS Bypass ─────────────────────────────────────────────────
+# Starlette's CORSMiddleware blockt WebSocket-Upgrades mit 403 wenn der
+# Origin nicht exakt in allow_origins steht. In Tauri sendet WebView2 je
+# nach Version/Modus unterschiedliche Origins (http://localhost:3000,
+# tauri://localhost, https://tauri.localhost, etc.).
+#
+# Lösung: Eine Middleware die VOR der CORSMiddleware sitzt und WebSocket-
+# Requests direkt durchleitet. Der Origin wird im ws_endpoint selbst
+# geprüft. HTTP-Requests werden normal durch die CORSMiddleware geleitet.
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class _WebSocketCORSBypass:
+    """ASGI Middleware: Entfernt den Origin-Header bei WebSocket-Upgrades,
+    damit Starlette's CORSMiddleware die Verbindung nicht mit 403 blockiert.
+    Der Origin wird stattdessen im ws_endpoint selbst geprueft."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "websocket":
+            # Origin aus den Headers lesen und prüfen BEVOR wir ihn entfernen
+            raw_headers = list(scope.get("headers", []))
+            origin = ""
+            for k, v in raw_headers:
+                if k == b"origin":
+                    origin = v.decode("utf-8", errors="ignore").strip()
+                    break
+
+            if origin and origin not in allow_origins and not _TAURI_ORIGIN_RE.match(origin):
+                from starlette.responses import PlainTextResponse
+                response = PlainTextResponse("Origin nicht erlaubt", status_code=403)
+                await response(scope, receive, send)
+                return
+
+            # Origin-Header entfernen damit CORSMiddleware den WS durchlässt
+            scope = dict(scope)
+            scope["headers"] = [(k, v) for k, v in raw_headers if k != b"origin"]
+
+        await self.app(scope, receive, send)
+
+# Reihenfolge: Request → _WebSocketCORSBypass → CORSMiddleware → App
+# add_middleware fügt von innen nach außen hinzu, also CORSMiddleware zuerst
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
@@ -155,6 +207,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(_WebSocketCORSBypass)
 
 # ============================================================
 # Helpers

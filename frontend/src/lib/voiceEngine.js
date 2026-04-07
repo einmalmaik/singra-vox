@@ -800,32 +800,80 @@ export class VoiceEngine {
       canvas.height = this.nativeScreenShare.lastFrameSettings.height;
     }
 
-    // captureStream(0) gibt uns volle Kontrolle: Frames werden NUR gerendert
-    // wenn wir explizit requestFrame() aufrufen – direkt nach putImageData.
-    // captureStream(fps) rendert asynchron und kann veraltete Canvas-Zustände
-    // erfassen, was zu schwarzen/eingefrorenen Streams in WebView2 führt.
-    const mediaStream = canvas.captureStream(0);
+    // ── Canvas-basierter MediaStream für LiveKit ──────────────────────────
+    // Zwei Modi: captureStream(0) mit requestFrame() ist am effizientesten
+    // (Frame nur wenn wir es sagen), funktioniert aber NICHT in WebView2.
+    // Dort nutzen wir captureStream(fps) – der Browser erzeugt den Stream
+    // automatisch aus dem Canvas-Zustand in Intervallen.
+    //
+    // Erkennung: Wenn requestFrame() auf dem Track existiert UND aufgerufen
+    // werden kann, nutzen wir Modus 0. Sonst fps-Modus.
+    const targetFps = resolution.frameRate || 30;
+    let usePullMode = false;
+    const mediaStream = canvas.captureStream(targetFps);
     const mediaStreamTrack = mediaStream.getVideoTracks()[0];
-    if (!mediaStreamTrack) {
+
+    if (mediaStreamTrack && typeof mediaStreamTrack.requestFrame === "function") {
+      // Prüfen ob requestFrame() tatsächlich funktioniert (WebView2 hat es
+      // manchmal als no-op). Wir testen es einmal – wenn kein Fehler, Pull-Mode.
+      try {
+        mediaStreamTrack.requestFrame();
+        // Jetzt auf captureStream(0) umschalten für Effizienz
+        const pullStream = canvas.captureStream(0);
+        const pullTrack = pullStream.getVideoTracks()[0];
+        if (pullTrack) {
+          mediaStreamTrack.stop();
+          // Ersetze den Stream und Track
+          const finalStream = pullStream;
+          const finalTrack = pullTrack;
+          finalTrack.contentHint = "detail";
+          usePullMode = true;
+
+          const descriptor = createSyntheticVideoTrackDescriptor(
+            finalTrack,
+            Track.Source.ScreenShare,
+            () => finalTrack.stop(),
+          );
+
+          this.nativeScreenShare.mediaStream = finalStream;
+          this.nativeScreenShare.mediaStreamTrack = finalTrack;
+          this.nativeScreenShare.descriptor = descriptor;
+          this.nativeScreenShare.usePullMode = true;
+          this.screenShareTracks = [descriptor];
+        }
+      } catch {
+        // requestFrame() nicht nutzbar → fps-Modus beibehalten
+      }
+    }
+
+    if (!usePullMode) {
+      // fps-Modus: Browser generiert Frames automatisch aus Canvas
+      mediaStreamTrack.contentHint = "detail";
+
+      const descriptor = createSyntheticVideoTrackDescriptor(
+        mediaStreamTrack,
+        Track.Source.ScreenShare,
+        () => mediaStreamTrack.stop(),
+      );
+
+      this.nativeScreenShare.mediaStream = mediaStream;
+      this.nativeScreenShare.mediaStreamTrack = mediaStreamTrack;
+      this.nativeScreenShare.descriptor = descriptor;
+      this.nativeScreenShare.usePullMode = false;
+      this.screenShareTracks = [descriptor];
+    }
+
+    // Track-Referenz für publishTrack – kann im Pull-Mode ein anderer sein
+    const publishTrack = this.nativeScreenShare.mediaStreamTrack;
+    if (!publishTrack) {
       await this._stopNativeDesktopScreenShare({ keepTracksArray: false });
       throw new Error("The native screen share track could not be created.");
     }
-    mediaStreamTrack.contentHint = "detail";
 
-    const descriptor = createSyntheticVideoTrackDescriptor(
-      mediaStreamTrack,
-      Track.Source.ScreenShare,
-      () => mediaStreamTrack.stop(),
-    );
-
-    this.nativeScreenShare.mediaStream = mediaStream;
-    this.nativeScreenShare.mediaStreamTrack = mediaStreamTrack;
-    this.nativeScreenShare.descriptor = descriptor;
-    this.screenShareTracks = [descriptor];
     const screenSharePublishOptions = buildScreenSharePublishOptions(qualityPreset);
     const screenShareStreamName = `native-screen-share-${Date.now()}`;
 
-    await this.room.localParticipant.publishTrack(mediaStreamTrack, {
+    await this.room.localParticipant.publishTrack(publishTrack, {
       ...screenSharePublishOptions,
       name: `${screenShareStreamName}-video`,
       source: Track.Source.ScreenShare,
@@ -912,9 +960,10 @@ export class VoiceEngine {
       const imageData = new ImageData(rgbaView, frame.width, frame.height);
       this.nativeScreenShare.context.putImageData(imageData, 0, 0);
 
-      // Explizit requestFrame() aufrufen – mit captureStream(0) ist das PFLICHT,
-      // damit der Stream ein neues Frame an LiveKit weiterleitet.
-      if (typeof this.nativeScreenShare.mediaStreamTrack?.requestFrame === "function") {
+      // Nur im Pull-Mode (captureStream(0)) muss requestFrame() aufgerufen
+      // werden. Im fps-Modus macht der Browser das automatisch.
+      if (this.nativeScreenShare.usePullMode
+          && typeof this.nativeScreenShare.mediaStreamTrack?.requestFrame === "function") {
         this.nativeScreenShare.mediaStreamTrack.requestFrame();
       }
 
