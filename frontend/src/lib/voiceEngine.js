@@ -318,19 +318,36 @@ export class VoiceEngine {
       tokenResponse.data.server_url,
       tokenResponse.data.participant_token,
     );
-    if (tokenResponse.data.e2ee_required && typeof this.room.setE2EEEnabled === "function") {
-      await this.room.setE2EEEnabled(true);
-    }
 
-    if (typeof this.room.startAudio === "function") {
-      await this.room.startAudio();
-    }
+    // ── Post-Connect-Initialisierung ──────────────────────────────────
+    // Alles nach room.connect() ist best-effort. Fehler hier (z.B. mic-
+    // Zugriff in Tauri-WebView blockiert) dürfen den Channel-Join NICHT
+    // abbrechen – der User soll trotzdem im Kanal landen und die Controls
+    // sehen. Einzelne Fehler werden geloggt, damit man sie debuggen kann.
+    const safeRun = async (label, fn) => {
+      try { await fn(); } catch (err) {
+        console.warn(`[VoiceEngine] ${label} fehlgeschlagen (best-effort):`, err.message);
+      }
+    };
 
-    await this._ensureAudioContext();
-    await this._publishLocalTrack();
-    await this._applyOutputDevice();
-    this._applyRemoteAudioState();
-    await this._applyMuteState();
+    await safeRun("e2ee", async () => {
+      if (tokenResponse.data.e2ee_required && typeof this.room.setE2EEEnabled === "function") {
+        await this.room.setE2EEEnabled(true);
+      }
+    });
+
+    await safeRun("startAudio", async () => {
+      if (typeof this.room.startAudio === "function") {
+        await this.room.startAudio();
+      }
+    });
+
+    await safeRun("audioContext", () => this._ensureAudioContext());
+    await safeRun("publishLocalTrack", () => this._publishLocalTrack());
+    await safeRun("outputDevice", () => this._applyOutputDevice());
+    await safeRun("remoteAudio", () => this._applyRemoteAudioState());
+    await safeRun("muteState", () => this._applyMuteState());
+
     this._emit("connected");
   }
 

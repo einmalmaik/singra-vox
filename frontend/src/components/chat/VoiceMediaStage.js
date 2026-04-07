@@ -40,6 +40,10 @@ const MAX_RETRIES = 8;
 /** Millisekunden zwischen jedem Retry-Versuch */
 const RETRY_INTERVAL_MS = 500;
 
+/** Maximale Wartezeit in ms bevor Loading aufgegeben wird. Danach wird
+ *  ein Fehlerzustand angezeigt statt endlosem Spinner. */
+const LOADING_TIMEOUT_MS = 10_000;
+
 // ─── Komponente ────────────────────────────────────────────────────────────────
 
 export default function VoiceMediaStage({
@@ -61,6 +65,9 @@ export default function VoiceMediaStage({
   // Zeigt einen Lade-Indikator wenn der Track noch nicht bereit ist
   const [videoLoading, setVideoLoading] = useState(true);
 
+  // Zeigt eine Fehlermeldung wenn der Track nicht geladen werden konnte
+  const [videoError, setVideoError] = useState(false);
+
   // ── Sichtbarkeits-Tracking ────────────────────────────────────────────────
 
   useEffect(() => {
@@ -74,6 +81,7 @@ export default function VoiceMediaStage({
   useEffect(() => {
     if (open) {
       setVideoLoading(true);
+      setVideoError(false);
     }
   }, [open, participantId, source]);
 
@@ -125,14 +133,31 @@ export default function VoiceMediaStage({
         // Track erfolgreich angehängt – play() erzwingen für den Fall
         // dass autoplay vom Browser blockiert wurde
         void videoElement.play?.().catch(() => {});
+      } else {
+        // Alle Retries aufgebraucht, kein Track verfügbar
+        setVideoLoading(false);
+        setVideoError(true);
       }
     };
 
     tryAttach();
 
+    // Safety-Timeout: Falls der Track angehängt wurde aber loadeddata/
+    // playing nie feuern (z.B. captureStream ohne Frames), nach
+    // LOADING_TIMEOUT_MS den Loading-State auflösen und Error anzeigen.
+    const safetyTimer = setTimeout(() => {
+      if (!cancelled) {
+        setVideoLoading((prev) => {
+          if (prev) setVideoError(true);
+          return false;
+        });
+      }
+    }, LOADING_TIMEOUT_MS);
+
     // Cleanup: Timer stoppen und Track sauber lösen
     return () => {
       cancelled = true;
+      clearTimeout(safetyTimer);
       if (retryTimer) {
         clearTimeout(retryTimer);
       }
@@ -166,7 +191,7 @@ export default function VoiceMediaStage({
             ) : (
               <>
                 {/* Lade-Indikator über dem Video – verschwindet sobald Daten ankommen */}
-                {videoLoading && (
+                {videoLoading && !videoError && (
                   <div
                     className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
                     data-testid="media-stage-loading"
@@ -174,6 +199,28 @@ export default function VoiceMediaStage({
                     <div className="flex flex-col items-center gap-3">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
                       <p className="text-sm text-zinc-400">{t("mediaStage.loading", { defaultValue: "Stream wird geladen..." })}</p>
+                    </div>
+                  </div>
+                )}
+                {/* Fehler-Anzeige wenn Track nicht geladen werden konnte */}
+                {videoError && (
+                  <div
+                    className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
+                    data-testid="media-stage-error"
+                  >
+                    <div className="flex flex-col items-center gap-3 max-w-sm text-center">
+                      <MonitorPlay size={32} className="text-zinc-500" />
+                      <p className="text-sm text-zinc-400">
+                        {t("mediaStage.loadFailed", { defaultValue: "Stream konnte nicht geladen werden. Die Quelle ist m\u00F6glicherweise nicht mehr verf\u00FCgbar." })}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => { setVideoError(false); setVideoLoading(true); }}
+                        className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-white hover:bg-white/15 transition-colors"
+                        data-testid="media-stage-retry"
+                      >
+                        {t("common.retry", { defaultValue: "Erneut versuchen" })}
+                      </button>
                     </div>
                   </div>
                 )}

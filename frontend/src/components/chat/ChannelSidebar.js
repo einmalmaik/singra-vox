@@ -93,6 +93,7 @@ import ServerSettingsOverlay from "@/components/settings/ServerSettingsOverlay";
 import GlobalSettingsOverlay from "@/components/settings/GlobalSettingsOverlay";
 import VoiceMediaStage from "@/components/chat/VoiceMediaStage";
 import { useDesktopPtt } from "@/hooks/useDesktopPtt";
+import { useVoiceCleanup } from "@/hooks/useVoiceCleanup";
 import { getDesktopCaptureSession, listDesktopCaptureSources } from "@/lib/desktop";
 import {
   DEFAULT_SCREEN_SHARE_PRESET_ID,
@@ -195,6 +196,9 @@ export default function ChannelSidebar({
   const activeDragChannel = activeDragId ? channelOrganization.byId[activeDragId] : null;
   const isDraggingChannel = Boolean(activeDragChannel);
   const canDropIntoCategory = activeDragChannel?.type && activeDragChannel.type !== "category";
+
+  // Voice-Session sauber aufräumen wenn der Browser-Tab geschlossen wird
+  useVoiceCleanup({ serverId: server?.id, voiceChannelId: voiceChannel?.id, voiceEngineRef });
   const mediaByUserId = useMemo(
     () => new Map(mediaParticipants.map((participant) => [participant.userId, participant])),
     [mediaParticipants],
