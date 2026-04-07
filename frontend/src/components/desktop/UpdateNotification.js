@@ -8,186 +8,197 @@
  * (at your option) any later version.
  */
 /**
- * UpdateNotification – vollständige Update-Anzeige für die Desktop-App.
+ * UpdateNotification – Auto-Update-Anzeige fuer die Desktop-App.
  *
- * Phasen:
- *  idle        → nichts anzeigen
- *  checking    → "Prüfe auf Updates…" (Spinner, 3 Sek. sichtbar, dann idle)
- *  available   → "Update X.X.X verfügbar" + Button
- *  downloading → Fortschrittsbalken
- *  installing  → "Installiere…"
- *  done        → Auto-Neustart
+ * Zeigt bei jedem App-Start eine deutliche Status-Anzeige:
+ *
+ *   checking     → "Pruefe auf Updates…"         (prominentes Banner)
+ *   available    → "Update vX.Y.Z gefunden"       (wird automatisch heruntergeladen)
+ *   downloading  → Fortschrittsbalken              (automatisch)
+ *   installing   → "Wird installiert…"             (automatisch)
+ *   up-to-date   → "App ist aktuell"               (blendet nach 3s aus)
+ *   error        → Fehlermeldung                    (blendet nach 5s aus)
+ *
+ * Die gesamte Update-Logik (Download + Install + Restart) laeuft automatisch
+ * im Rust-Backend. Das Frontend ist rein deklarativ und zeigt nur den State.
+ *
+ * Wiederverwendbarkeit: Die Komponente ist selbststaendig (kein Prop noetig),
+ * registriert Tauri-Events im Mount-Lifecycle und raumt im Cleanup auf.
  */
-import { useState, useEffect, useRef } from "react";
-import { isDesktopApp, invokeTauri, listenTauri } from "@/lib/desktop";
-import { ArrowsClockwise, X, CheckCircle } from "@phosphor-icons/react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { isDesktopApp, listenTauri } from "@/lib/desktop";
+import { ArrowsClockwise, CheckCircle, WarningCircle, ArrowDown } from "@phosphor-icons/react";
+
+/** Wie lange "App ist aktuell" sichtbar bleibt (ms) */
+const UP_TO_DATE_DISPLAY_MS = 3000;
+
+/** Wie lange eine Fehlermeldung sichtbar bleibt (ms) */
+const ERROR_DISPLAY_MS = 6000;
+
+// ── Phase-Konfiguration ──────────────────────────────────────────────────────
+// Jede Phase hat ein Icon, Label und optionale Farbe. Das macht die Komponente
+// leicht erweiterbar ohne die Render-Logik anzufassen.
+const PHASE_CONFIG = {
+  checking: {
+    icon: ArrowsClockwise,
+    iconClass: "text-cyan-400 animate-spin",
+    label: "Pruefe auf Updates…",
+    bg: "bg-zinc-900/95 border-cyan-500/20",
+  },
+  available: {
+    icon: ArrowDown,
+    iconClass: "text-cyan-400 animate-bounce",
+    label: "Update gefunden – wird heruntergeladen…",
+    bg: "bg-zinc-900/95 border-cyan-500/30",
+  },
+  downloading: {
+    icon: ArrowsClockwise,
+    iconClass: "text-cyan-400 animate-spin",
+    label: "Wird heruntergeladen…",
+    bg: "bg-zinc-900/95 border-cyan-500/30",
+  },
+  installing: {
+    icon: ArrowsClockwise,
+    iconClass: "text-cyan-400 animate-spin",
+    label: "Wird installiert… App startet gleich neu.",
+    bg: "bg-zinc-900/95 border-cyan-500/40",
+  },
+  "up-to-date": {
+    icon: CheckCircle,
+    iconClass: "text-emerald-400",
+    label: "App ist aktuell",
+    bg: "bg-zinc-900/95 border-emerald-500/20",
+  },
+  error: {
+    icon: WarningCircle,
+    iconClass: "text-amber-400",
+    label: "Update-Fehler",
+    bg: "bg-zinc-900/95 border-amber-500/20",
+  },
+};
 
 export function UpdateNotification() {
-  const [phase, setPhase] = useState("idle"); // idle | checking | available | downloading | installing
+  const [phase, setPhase] = useState("idle");
   const [update, setUpdate] = useState(null);
   const [progress, setProgress] = useState(0);
-  const [dismissed, setDismissed] = useState(false);
-  const checkingTimer = useRef(null);
+  const [errorMsg, setErrorMsg] = useState(null);
   const downloadedRef = useRef(0);
+  const fadeTimerRef = useRef(null);
+
+  // Hilfsfunktion: Phase nach Delay auf idle setzen
+  const fadeToIdle = useCallback((delayMs) => {
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => {
+      setPhase("idle");
+    }, delayMs);
+  }, []);
 
   useEffect(() => {
-    if (!isDesktopApp()) return;
+    if (!isDesktopApp()) return undefined;
 
-    let unlistenChecking, unlistenAvailable, unlistenNotAvailable,
-        unlistenProgress, unlistenInstall, unlistenError;
+    const unlisteners = [];
 
     (async () => {
-      // "Prüfe gerade…" – kurz anzeigen, dann wieder idle
-      unlistenChecking = await listenTauri("update-checking", () => {
+      // ── Checking ───────────────────────────────────────────────────────
+      unlisteners.push(await listenTauri("update-checking", (event) => {
         setPhase("checking");
-        setDismissed(false);
-        if (checkingTimer.current) clearTimeout(checkingTimer.current);
-        checkingTimer.current = setTimeout(() => {
-          setPhase((prev) => prev === "checking" ? "idle" : prev);
-        }, 3500);
-      });
+        setUpdate((prev) => prev || { currentVersion: event.payload?.currentVersion });
+        setErrorMsg(null);
+        downloadedRef.current = 0;
+        setProgress(0);
+        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      }));
 
-      // Update gefunden
-      unlistenAvailable = await listenTauri("update-available", (event) => {
-        if (checkingTimer.current) clearTimeout(checkingTimer.current);
+      // ── Update gefunden ────────────────────────────────────────────────
+      unlisteners.push(await listenTauri("update-available", (event) => {
+        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
         setUpdate(event.payload);
         setPhase("available");
-        setDismissed(false);
-      });
+      }));
 
-      // Kein Update
-      unlistenNotAvailable = await listenTauri("update-not-available", () => {
-        if (checkingTimer.current) clearTimeout(checkingTimer.current);
-        setPhase((prev) => prev === "checking" ? "idle" : prev);
-      });
+      // ── Kein Update ────────────────────────────────────────────────────
+      unlisteners.push(await listenTauri("update-not-available", () => {
+        setPhase("up-to-date");
+        fadeToIdle(UP_TO_DATE_DISPLAY_MS);
+      }));
 
-      unlistenProgress = await listenTauri("update-download-progress", (event) => {
+      // ── Download-Fortschritt ───────────────────────────────────────────
+      unlisteners.push(await listenTauri("update-download-progress", (event) => {
         const { chunkLength, contentLength } = event.payload;
         if (contentLength) {
           downloadedRef.current += chunkLength;
           setProgress(Math.min(99, Math.round((downloadedRef.current / contentLength) * 100)));
         }
-      });
+        setPhase("downloading");
+      }));
 
-      unlistenInstall = await listenTauri("update-install-started", () => {
+      // ── Installation gestartet ─────────────────────────────────────────
+      unlisteners.push(await listenTauri("update-install-started", () => {
+        setProgress(100);
         setPhase("installing");
-      });
+      }));
 
-      // Update-Fehler (z.B. Netzwerkfehler, ungültige Signatur)
-      unlistenError = await listenTauri("update-error", (event) => {
-        if (checkingTimer.current) clearTimeout(checkingTimer.current);
-        console.warn("[Updater] Fehler:", event.payload?.error);
-        setPhase("idle");
-      });
+      // ── Fehler ─────────────────────────────────────────────────────────
+      unlisteners.push(await listenTauri("update-error", (event) => {
+        const msg = event.payload?.error || "Unbekannter Fehler";
+        console.warn("[Updater] Fehler:", msg);
+        setErrorMsg(msg);
+        setPhase("error");
+        fadeToIdle(ERROR_DISPLAY_MS);
+      }));
     })();
 
     return () => {
-      if (checkingTimer.current) clearTimeout(checkingTimer.current);
-      unlistenChecking?.();
-      unlistenAvailable?.();
-      unlistenNotAvailable?.();
-      unlistenProgress?.();
-      unlistenInstall?.();
-      unlistenError?.();
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      unlisteners.forEach((unlisten) => unlisten?.());
     };
-  }, []);
+  }, [fadeToIdle]);
 
-  const handleUpdate = async () => {
-    setPhase("downloading");
-    setProgress(0);
-    try {
-      await invokeTauri("install_update_command");
-    } catch (err) {
-      console.error("Update fehlgeschlagen:", err);
-      setPhase("available");
-    }
-  };
+  // ── Nichts anzeigen wenn idle oder kein Desktop ────────────────────────────
+  if (!isDesktopApp() || phase === "idle") return null;
 
-  if (!isDesktopApp()) return null;
+  const config = PHASE_CONFIG[phase];
+  if (!config) return null;
 
-  // ── Checking-Banner (schmales Top-Banner) ──────────────────────────────────
-  if (phase === "checking") {
-    return (
-      <div
-        className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 py-1.5 text-xs text-zinc-400"
-        style={{ background: "rgba(24,24,27,0.92)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}
-        data-testid="update-checking-banner"
-      >
-        <div className="w-3 h-3 border border-zinc-500 border-t-transparent rounded-full animate-spin" />
-        <span>Prüfe auf Updates…</span>
-      </div>
-    );
-  }
-
-  // Nichts anzeigen wenn dismissed oder kein Update
-  if (dismissed || phase === "idle" || !update) return null;
+  const PhaseIcon = config.icon;
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 w-80 rounded-2xl border border-cyan-500/30 bg-zinc-900/95 shadow-2xl backdrop-blur-xl"
+      className={`fixed top-0 left-0 right-0 z-[100] border-b backdrop-blur-xl transition-all duration-300 ${config.bg}`}
       data-testid="update-notification"
+      role="status"
+      aria-live="polite"
     >
-      <div className="flex items-start gap-3 p-4">
-        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-cyan-500/15">
-          <ArrowsClockwise
-            size={16}
-            className={`text-cyan-400 ${phase === "downloading" ? "animate-spin" : ""}`}
-          />
-        </div>
+      <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-2.5">
+        {/* Phase-Icon */}
+        <PhaseIcon size={18} weight="bold" className={config.iconClass} />
 
+        {/* Haupttext */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white">
-            {phase === "installing" ? "Update wird installiert…" : "Update verfügbar"}
-          </p>
-          <p className="mt-0.5 text-xs text-zinc-400">
-            Version {update.version} — du nutzt {update.currentVersion || update.current_version}
+          <p className="text-sm font-medium text-white">
+            {phase === "error" ? errorMsg : config.label}
           </p>
 
-          {update.body && phase === "available" && (
-            <p className="mt-1.5 text-xs text-zinc-500 line-clamp-2">{update.body}</p>
+          {/* Version-Info (bei available/downloading/installing) */}
+          {update?.version && phase !== "checking" && phase !== "up-to-date" && phase !== "error" && (
+            <p className="text-xs text-zinc-400 truncate">
+              {update.currentVersion || update.current_version} → {update.version}
+            </p>
           )}
 
-          {phase === "available" && (
-            <button
-              onClick={handleUpdate}
-              className="mt-3 w-full rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs font-medium text-cyan-300 transition-colors hover:bg-cyan-500/30"
-              data-testid="update-install-btn"
-            >
-              Jetzt aktualisieren
-            </button>
-          )}
-
+          {/* Fortschrittsbalken (bei downloading) */}
           {phase === "downloading" && (
-            <div className="mt-3 space-y-1.5">
-              <div className="flex justify-between text-xs text-zinc-500">
-                <span>Herunterladen…</span>
-                <span>{progress}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-zinc-700">
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-zinc-700/60 overflow-hidden">
                 <div
-                  className="h-1.5 rounded-full bg-cyan-500 transition-all duration-300"
+                  className="h-full rounded-full bg-cyan-400 transition-all duration-300 ease-out"
                   style={{ width: `${progress}%` }}
                 />
               </div>
+              <span className="text-xs text-zinc-400 tabular-nums w-8 text-right">{progress}%</span>
             </div>
           )}
-
-          {phase === "installing" && (
-            <p className="mt-3 text-xs text-cyan-400 animate-pulse">
-              Installiere… App startet gleich automatisch neu.
-            </p>
-          )}
         </div>
-
-        {phase === "available" && (
-          <button
-            onClick={() => setDismissed(true)}
-            className="ml-1 rounded p-1 text-zinc-500 transition-colors hover:text-zinc-300"
-            data-testid="update-dismiss-btn"
-          >
-            <X size={14} />
-          </button>
-        )}
       </div>
     </div>
   );

@@ -598,55 +598,107 @@ struct UpdateInfo {
 }
 
 /// Wird beim App-Start im Hintergrund aufgerufen.
-/// Sendet update-checking → update-available oder update-not-available.
-/// Bricht nach 15 Sekunden ab, damit die App nicht hängt wenn der
-/// GitHub-Endpoint unerreichbar ist.
-async fn check_for_update(app: tauri::AppHandle) {
-    // Dem Frontend signalisieren, dass wir gerade prüfen
+/// Prüft auf Updates und installiert sie automatisch (kein User-Input nötig).
+///
+/// Phasen (jeweils als Event an das Frontend):
+///   update-checking        → UI zeigt "Prüfe auf Updates…"
+///   update-available        → UI zeigt Version + "Wird heruntergeladen…"
+///   update-download-progress → UI zeigt Fortschrittsbalken
+///   update-install-started  → UI zeigt "Wird installiert…"
+///   (restart)               → App startet automatisch neu
+///   update-not-available    → UI zeigt kurz "Aktuell" und blendet aus
+///   update-error            → UI zeigt kurz Fehler und blendet aus
+async fn auto_update_on_startup(app: tauri::AppHandle) {
     let current_version = app.package_info().version.to_string();
-    let _ = app.emit("update-checking", serde_json::json!({ "currentVersion": current_version }));
+    let _ = app.emit(
+        "update-checking",
+        serde_json::json!({ "currentVersion": current_version }),
+    );
 
     let updater = match app.updater() {
         Ok(u) => u,
-        Err(_) => {
-            let _ = app.emit("update-not-available", ());
+        Err(e) => {
+            let _ = app.emit(
+                "update-error",
+                serde_json::json!({ "error": format!("Updater nicht verfügbar: {e}") }),
+            );
             return;
         }
     };
 
-    // 15s Timeout: Verhindert dass ein unerreichbarer Endpoint die App blockiert
+    // 15s Timeout für den Check – verhindert Blockade bei Netzwerkproblemen
     let check_result = tokio::time::timeout(
         std::time::Duration::from_secs(15),
         updater.check(),
     )
     .await;
 
-    match check_result {
-        Ok(Ok(Some(update))) => {
-            let _ = app.emit(
-                "update-available",
-                UpdateInfo {
-                    available: true,
-                    version: Some(update.version.clone()),
-                    current_version: update.current_version.clone(),
-                    body: update.body.clone(),
-                },
-            );
-        }
+    let update = match check_result {
+        Ok(Ok(Some(update))) => update,
         Ok(Ok(None)) => {
             let _ = app.emit("update-not-available", ());
+            return;
         }
         Ok(Err(e)) => {
             let _ = app.emit(
                 "update-error",
                 serde_json::json!({ "error": e.to_string() }),
             );
+            return;
         }
-        Err(_elapsed) => {
-            // Timeout – leise ignorieren, Update-Check beim nächsten Start erneut
+        Err(_) => {
             let _ = app.emit(
                 "update-error",
                 serde_json::json!({ "error": "Update-Check Timeout (15s)" }),
+            );
+            return;
+        }
+    };
+
+    // Update gefunden → Frontend informieren, dann automatisch herunterladen
+    let _ = app.emit(
+        "update-available",
+        UpdateInfo {
+            available: true,
+            version: Some(update.version.clone()),
+            current_version: update.current_version.clone(),
+            body: update.body.clone(),
+        },
+    );
+
+    // Kurz warten damit die UI den "Update gefunden"-State anzeigen kann
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+    // Automatisch herunterladen und installieren
+    let app_dl = app.clone();
+    let app_inst = app.clone();
+    let install_result = update
+        .download_and_install(
+            move |chunk_length, content_length| {
+                let _ = app_dl.emit(
+                    "update-download-progress",
+                    serde_json::json!({
+                        "chunkLength": chunk_length,
+                        "contentLength": content_length
+                    }),
+                );
+            },
+            move || {
+                let _ = app_inst.emit("update-install-started", ());
+            },
+        )
+        .await;
+
+    match install_result {
+        Ok(()) => {
+            // Kurz warten damit "Installiere…" sichtbar ist, dann Neustart
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            restart(&app.env());
+        }
+        Err(e) => {
+            let _ = app.emit(
+                "update-error",
+                serde_json::json!({ "error": format!("Installation fehlgeschlagen: {e}") }),
             );
         }
     }
@@ -730,11 +782,12 @@ fn main() {
             #[cfg(target_os = "windows")]
             spawn_ptt_listener(app.handle().clone(), ptt_state.clone());
 
-            // Prüfe beim Start im Hintergrund auf Updates (mit Verzögerung damit die UI erst rendern kann)
+            // Auto-Update-Check beim Start. 2s Delay damit React-Listener
+            // registriert sind bevor das erste Event emittiert wird.
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                check_for_update(app_handle).await;
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                auto_update_on_startup(app_handle).await;
             });
 
             Ok(())
