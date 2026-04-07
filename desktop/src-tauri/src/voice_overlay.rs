@@ -197,7 +197,7 @@ fn detect_fullscreen_windows() -> Result<FullscreenDetectionResult, String> {
 
     unsafe {
         let fg_hwnd = GetForegroundWindow();
-        if fg_hwnd == 0 {
+        if fg_hwnd.is_null() {
             return Ok(FullscreenDetectionResult {
                 is_fullscreen: false,
                 window_title: String::new(),
@@ -206,10 +206,10 @@ fn detect_fullscreen_windows() -> Result<FullscreenDetectionResult, String> {
         }
 
         // Monitor-Auflösung ermitteln
-        let hdc = GetDC(0);
+        let hdc = GetDC(std::ptr::null_mut());
         let screen_w = GetDeviceCaps(hdc, HORZRES as i32);
         let screen_h = GetDeviceCaps(hdc, VERTRES as i32);
-        ReleaseDC(0, hdc);
+        ReleaseDC(std::ptr::null_mut(), hdc);
 
         // Fenster-Rect ermitteln
         let mut rect: RECT = std::mem::zeroed();
