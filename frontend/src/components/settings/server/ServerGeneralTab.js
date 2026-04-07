@@ -4,9 +4,11 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Gear, Crown, SignOut } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { formatAppError } from "@/lib/appErrors";
+import { SETTINGS_INPUT_CLASSNAME, SETTINGS_NATIVE_SELECT_CLASSNAME } from "@/components/settings/settingsConstants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -85,41 +87,89 @@ export default function ServerGeneralTab({
   };
 
   return (
-    <div className="space-y-6" data-testid="server-settings-general">
-      <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-        <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.general")}</h3>
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("server.serverName")}</Label>
-            <Input data-testid="server-name-input" value={serverName} onChange={(e) => setServerName(e.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+    <div className="space-y-8" data-testid="server-settings-general">
+      {/* Server Info */}
+      <section className="workspace-card p-6">
+        <div className="flex items-start gap-4 mb-6">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-500/15">
+            <Gear size={22} className="text-cyan-300" />
           </div>
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.descriptionLabel")}</Label>
-            <Input data-testid="server-description-input" value={serverDescription} onChange={(e) => setServerDescription(e.target.value)} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+          <div>
+            <h3 className="text-lg font-bold text-white" style={{ fontFamily: "Manrope" }}>
+              {t("server.general")}
+            </h3>
+            <p className="mt-1 text-sm text-zinc-500">
+              {t("serverSettings.generalHelp", { defaultValue: "Grundlegende Server-Einstellungen bearbeiten." })}
+            </p>
           </div>
         </div>
-        <Button data-testid="server-save-general-btn" onClick={saveGeneral} className="mt-5 bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveChanges")}</Button>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <div className="space-y-2.5">
+            <Label className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">
+              {t("server.serverName")}
+            </Label>
+            <Input
+              data-testid="server-name-input"
+              value={serverName}
+              onChange={(e) => setServerName(e.target.value)}
+              className={SETTINGS_INPUT_CLASSNAME}
+            />
+          </div>
+          <div className="space-y-2.5">
+            <Label className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">
+              {t("serverSettings.descriptionLabel")}
+            </Label>
+            <Input
+              data-testid="server-description-input"
+              value={serverDescription}
+              onChange={(e) => setServerDescription(e.target.value)}
+              className={SETTINGS_INPUT_CLASSNAME}
+            />
+          </div>
+        </div>
+
+        <Button
+          data-testid="server-save-general-btn"
+          onClick={saveGeneral}
+          className="mt-6 h-11 rounded-2xl bg-cyan-400 px-8 text-zinc-950 font-semibold hover:bg-cyan-300 transition-colors"
+        >
+          {t("serverSettings.saveChanges")}
+        </Button>
       </section>
 
-      <section className="rounded-xl border border-[#27272A] bg-[#121212] p-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("server.ownership")}</h3>
-            <p className="mt-1 text-sm text-[#71717A]">{t("serverSettings.ownershipBanner")}</p>
+      {/* Ownership */}
+      <section className="workspace-card p-6">
+        <div className="flex items-start gap-4 mb-6">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15">
+            <Crown size={22} className="text-amber-300" />
           </div>
-          <div className="rounded-full border border-[#27272A] bg-[#0A0A0A] px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#A1A1AA]">
-            {isServerOwner ? t("server.owner") : t("server.ownership")}
+          <div className="flex-1">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-white" style={{ fontFamily: "Manrope" }}>
+                  {t("server.ownership")}
+                </h3>
+                <p className="mt-1 text-sm text-zinc-500">{t("serverSettings.ownershipBanner")}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-1.5 text-xs font-bold uppercase tracking-[0.15em] text-zinc-400">
+                {isServerOwner ? t("server.owner") : t("server.ownership")}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("server.transferOwnership")}</Label>
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="space-y-2.5">
+            <Label className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">
+              {t("server.transferOwnership")}
+            </Label>
             <select
               value={ownershipTargetId}
               onChange={(e) => setOwnershipTargetId(e.target.value)}
               disabled={!isServerOwner || transferCandidates.length === 0}
-              className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white disabled:opacity-50"
+              className={SETTINGS_NATIVE_SELECT_CLASSNAME}
+              data-testid="transfer-ownership-select"
             >
               <option value="">{t("serverSettings.selectMember")}</option>
               {transferCandidates.map((m) => (
@@ -128,7 +178,7 @@ export default function ServerGeneralTab({
                 </option>
               ))}
             </select>
-            <p className="text-xs text-[#71717A]">
+            <p className="text-xs text-zinc-500 leading-relaxed">
               {isServerOwner ? t("serverSettings.ownershipHelpOwner") : t("serverSettings.ownershipHelpMember")}
             </p>
           </div>
@@ -136,29 +186,41 @@ export default function ServerGeneralTab({
             <Button
               onClick={handleTransferOwnership}
               disabled={!isServerOwner || !ownershipTargetId || transferringOwnership}
-              className="w-full bg-cyan-400 text-zinc-950 hover:bg-cyan-300"
+              className="w-full h-12 rounded-2xl bg-cyan-400 text-zinc-950 font-semibold hover:bg-cyan-300 transition-colors"
+              data-testid="transfer-ownership-btn"
             >
               {transferringOwnership ? t("serverSettings.transferring") : t("server.transferOwnership")}
             </Button>
           </div>
         </div>
+      </section>
 
-        <div className="mt-5 rounded-lg border border-[#EF4444]/20 bg-[#0A0A0A] px-4 py-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-sm font-medium text-white">{t("server.leaveServer")}</p>
-              <p className="mt-1 text-xs text-[#71717A]">
-                {isServerOwner ? t("serverSettings.leaveOwnerHelp") : t("serverSettings.leaveMemberHelp")}
-              </p>
+      {/* Danger Zone */}
+      <section className="workspace-card border-red-500/15 bg-red-500/[0.03] p-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15">
+            <SignOut size={22} className="text-red-400" />
+          </div>
+          <div className="flex-1">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white" style={{ fontFamily: "Manrope" }}>
+                  {t("server.leaveServer")}
+                </h3>
+                <p className="mt-1.5 text-sm text-zinc-400 leading-relaxed">
+                  {isServerOwner ? t("serverSettings.leaveOwnerHelp") : t("serverSettings.leaveMemberHelp")}
+                </p>
+              </div>
+              <Button
+                onClick={handleLeaveServer}
+                disabled={leavingServer}
+                variant="outline"
+                className="h-11 rounded-2xl border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 px-6 transition-colors shrink-0"
+                data-testid="leave-server-btn"
+              >
+                {leavingServer ? t("serverSettings.leaving") : t("server.leaveServer")}
+              </Button>
             </div>
-            <Button
-              onClick={handleLeaveServer}
-              disabled={leavingServer}
-              variant="outline"
-              className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10"
-            >
-              {leavingServer ? t("serverSettings.leaving") : t("server.leaveServer")}
-            </Button>
           </div>
         </div>
       </section>

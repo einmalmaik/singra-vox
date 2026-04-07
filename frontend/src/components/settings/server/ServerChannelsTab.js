@@ -22,10 +22,12 @@ import {
   Microphone,
   Plus,
   Trash,
+  PencilSimple,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { formatAppError } from "@/lib/appErrors";
+import { SETTINGS_INPUT_CLASSNAME, SETTINGS_NATIVE_SELECT_CLASSNAME } from "@/components/settings/settingsConstants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -224,9 +226,16 @@ export default function ServerChannelsTab({ server, channels }) {
     }
   };
 
+  const channelIcon = (type, size = 16) => {
+    if (type === "category") return <Folder size={size} weight="duotone" />;
+    if (type === "voice") return <Microphone size={size} />;
+    return <Hash size={size} />;
+  };
+
   const renderChannelTreeRow = (channel, { nested = false } = {}) => {
     const isCategory = channel.type === "category";
     const isCollapsed = Boolean(collapsedCategories[channel.id]);
+    const isSelected = selectedChannel?.id === channel.id;
     return (
       <ContextMenu key={channel.id}>
         <SortableChannelItem
@@ -249,37 +258,41 @@ export default function ServerChannelsTab({ server, channels }) {
                   setSelectedChannelId(channel.id);
                   if (isCategory) setCollapsedCategories((prev) => ({ ...prev, [channel.id]: !prev[channel.id] }));
                 }}
-                className={`flex ${nested ? "ml-4 w-[calc(100%-1rem)]" : "w-full"} items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors touch-none ${
-                  selectedChannel?.id === channel.id ? "bg-[#27272A] text-white" : "text-[#A1A1AA] hover:bg-[#1A1A1A] hover:text-white"
-                } ${isOver ? "ring-1 ring-[#6366F1] bg-[#18181B]" : ""} ${isDragging ? "opacity-60" : ""}`}
+                className={`flex ${nested ? "ml-5 w-[calc(100%-1.25rem)]" : "w-full"} items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium transition-all touch-none ${
+                  isSelected
+                    ? "bg-white/8 text-white shadow-[0_0_12px_rgba(34,211,238,0.06)]"
+                    : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200"
+                } ${isOver ? "ring-1 ring-cyan-400/40 bg-cyan-500/5" : ""} ${isDragging ? "opacity-50" : ""}`}
+                data-testid={`channel-tree-item-${channel.id}`}
               >
-                {isCategory ? (
-                  <>{isCollapsed ? <CaretRight size={12} /> : <CaretDown size={12} />}<Folder size={14} /></>
-                ) : channel.type === "voice" ? (
-                  <Microphone size={14} />
-                ) : (
-                  <Hash size={14} />
-                )}
-                <span>{channel.name}</span>
+                <span className={isSelected ? "text-cyan-300" : "text-zinc-500"}>
+                  {isCategory ? (
+                    <>{isCollapsed ? <CaretRight size={13} /> : <CaretDown size={13} />}</>
+                  ) : null}
+                </span>
+                <span className={isSelected ? "text-cyan-300" : "text-zinc-500"}>
+                  {channelIcon(channel.type, 16)}
+                </span>
+                <span className="truncate">{channel.name}</span>
               </button>
             </ContextMenuTrigger>
           )}
         </SortableChannelItem>
-        <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
+        <ContextMenuContent className="w-56 rounded-xl border-white/10 bg-zinc-900/95 backdrop-blur-xl text-white shadow-2xl">
           {isCategory ? (
             <>
-              <ContextMenuItem onClick={() => prepareChannelCreate("text", channel.id)}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
-              <ContextMenuItem onClick={() => prepareChannelCreate("voice", channel.id)}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
-              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameCategoryAction")}</ContextMenuItem>
-              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteCategoryAction")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => prepareChannelCreate("text", channel.id)} className="rounded-lg">{t("serverSettings.createTextChannel")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => prepareChannelCreate("voice", channel.id)} className="rounded-lg">{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => renameChannelQuick(channel)} className="rounded-lg">{t("serverSettings.renameCategoryAction")}</ContextMenuItem>
+              <ContextMenuItem className="rounded-lg text-red-400" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteCategoryAction")}</ContextMenuItem>
             </>
           ) : (
             <>
-              <ContextMenuItem onClick={() => renameChannelQuick(channel)}>{t("serverSettings.renameChannelAction")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => renameChannelQuick(channel)} className="rounded-lg">{t("serverSettings.renameChannelAction")}</ContextMenuItem>
               {channel.parent_id && (
-                <ContextMenuItem onClick={() => { void moveChannelToRoot(channel.id); }}>{t("serverSettings.moveToRoot")}</ContextMenuItem>
+                <ContextMenuItem onClick={() => { void moveChannelToRoot(channel.id); }} className="rounded-lg">{t("serverSettings.moveToRoot")}</ContextMenuItem>
               )}
-              <ContextMenuItem className="text-[#EF4444]" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteChannelAction")}</ContextMenuItem>
+              <ContextMenuItem className="rounded-lg text-red-400" onClick={() => deleteChannelQuick(channel)}>{t("serverSettings.deleteChannelAction")}</ContextMenuItem>
             </>
           )}
         </ContextMenuContent>
@@ -291,17 +304,17 @@ export default function ServerChannelsTab({ server, channels }) {
     const childIds = channelOrganization.childIdsByCategory[category.id] || [];
     const isCollapsed = Boolean(collapsedCategories[category.id]);
     return (
-      <div key={category.id} className="space-y-1 rounded-lg border border-[#27272A] bg-[#101113] p-1.5">
+      <div key={category.id} className="space-y-1 rounded-2xl border border-white/8 bg-zinc-950/40 p-2">
         {renderChannelTreeRow(category)}
         {!isCollapsed && (
-          <div className="space-y-1 border-t border-[#27272A] pt-1">
+          <div className="space-y-1 border-t border-white/5 pt-1.5">
             {canDropIntoCategory && (
               <ChannelContainerDropZone id={getContainerDropId(category.id)} data={{ containerId: category.id }}>
                 {({ setNodeRef, isOver }) => (
                   <div
                     ref={setNodeRef}
-                    className={`ml-4 rounded-md border border-dashed px-3 py-2 text-[11px] transition-colors ${
-                      isOver ? "border-[#6366F1] bg-[#18181B] text-[#A5B4FC]" : "border-[#27272A] bg-[#111113] text-[#71717A]"
+                    className={`ml-5 rounded-xl border border-dashed px-4 py-2.5 text-xs transition-all ${
+                      isOver ? "border-cyan-400/50 bg-cyan-500/8 text-cyan-300" : "border-white/8 bg-zinc-950/30 text-zinc-600"
                     }`}
                   >
                     {t("serverSettings.dropIntoCategory", { name: category.name })}
@@ -316,7 +329,7 @@ export default function ServerChannelsTab({ server, channels }) {
               })}
             </SortableContext>
             {!childIds.length && !canDropIntoCategory && (
-              <div className="ml-4 px-3 py-1 text-[11px] text-[#52525B]">{t("channel.noChannelsYet")}</div>
+              <div className="ml-5 px-4 py-2 text-xs text-zinc-600">{t("channel.noChannelsYet")}</div>
             )}
           </div>
         )}
@@ -325,129 +338,176 @@ export default function ServerChannelsTab({ server, channels }) {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]">
+    <div className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)] xl:grid-cols-[400px_minmax(0,1fr)]" data-testid="server-settings-channels">
       {/* Channel tree panel */}
-      <section className="rounded-xl border border-[#27272A] bg-[#121212] p-4">
-        <div className="mb-4 flex items-center justify-between">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.channelsPanelTitle")}</p>
-          <Button size="sm" variant="outline" onClick={createChannel} className="border-[#27272A] bg-[#0A0A0A] text-white hover:bg-[#1A1A1A]">
-            <Plus size={14} className="mr-2" />
+      <section className="workspace-card p-6">
+        <div className="mb-5 flex items-center justify-between">
+          <p className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">{t("serverSettings.channelsPanelTitle")}</p>
+          <Button
+            size="sm"
+            onClick={createChannel}
+            disabled={!newChannelName.trim()}
+            className="h-9 rounded-xl bg-cyan-400 text-zinc-950 font-semibold hover:bg-cyan-300 transition-colors px-4"
+            data-testid="create-channel-btn"
+          >
+            <Plus size={14} className="mr-1.5" />
             {t("common.create")}
           </Button>
         </div>
-        <div className="space-y-3">
-          <div className="grid gap-2">
-            <Input
-              value={newChannelName}
-              onChange={(e) => setNewChannelName(e.target.value)}
-              placeholder={t("serverSettings.createChannelPlaceholder")}
-              className="bg-[#0A0A0A] border-[#27272A] text-white"
-            />
-            <div className="grid gap-2 md:grid-cols-2">
-              <select value={newChannelType} onChange={(e) => setNewChannelType(e.target.value)} className="h-10 rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white">
-                <option value="text">{t("serverSettings.channelTypeText")}</option>
-                <option value="voice">{t("serverSettings.channelTypeVoice")}</option>
-                <option value="category">{t("serverSettings.channelTypeCategory")}</option>
-              </select>
-              <select
-                value={newChannelParentId}
-                onChange={(e) => setNewChannelParentId(e.target.value)}
-                disabled={newChannelType === "category"}
-                className="h-10 rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white disabled:opacity-50"
-              >
-                <option value="__root__">{t("common.noCategory")}</option>
-                {categoryChannels.map((cat) => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-            </div>
+
+        {/* Create form */}
+        <div className="space-y-3 mb-5">
+          <Input
+            value={newChannelName}
+            onChange={(e) => setNewChannelName(e.target.value)}
+            placeholder={t("serverSettings.createChannelPlaceholder")}
+            className={SETTINGS_INPUT_CLASSNAME}
+            data-testid="new-channel-name-input"
+          />
+          <div className="grid gap-3 grid-cols-2">
+            <select
+              value={newChannelType}
+              onChange={(e) => setNewChannelType(e.target.value)}
+              className={SETTINGS_NATIVE_SELECT_CLASSNAME}
+              data-testid="new-channel-type-select"
+            >
+              <option value="text">{t("serverSettings.channelTypeText")}</option>
+              <option value="voice">{t("serverSettings.channelTypeVoice")}</option>
+              <option value="category">{t("serverSettings.channelTypeCategory")}</option>
+            </select>
+            <select
+              value={newChannelParentId}
+              onChange={(e) => setNewChannelParentId(e.target.value)}
+              disabled={newChannelType === "category"}
+              className={SETTINGS_NATIVE_SELECT_CLASSNAME}
+              data-testid="new-channel-parent-select"
+            >
+              <option value="__root__">{t("common.noCategory")}</option>
+              {categoryChannels.map((cat) => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
           </div>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={collisionDetection}
-            onDragStart={handleChannelDragStart}
-            onDragCancel={handleChannelDragCancel}
-            onDragEnd={handleChannelDragEnd}
-          >
-            <ContextMenu>
-              <ContextMenuTrigger asChild>
-                <div className="space-y-2 rounded-lg">
-                  <SortableContext items={channelOrganization.rootIds} strategy={verticalListSortingStrategy}>
-                    {channelOrganization.rootIds.map((chId) => {
-                      const ch = channelOrganization.byId[chId];
-                      if (!ch) return null;
-                      return ch.type === "category" ? renderCategoryTreeBlock(ch) : renderChannelTreeRow(ch);
-                    })}
-                  </SortableContext>
-                  {isDraggingChannel && (
-                    <ChannelContainerDropZone id={getContainerDropId(ROOT_CHANNEL_CONTAINER_ID)} data={{ containerId: ROOT_CHANNEL_CONTAINER_ID }}>
-                      {({ setNodeRef, isOver }) => (
-                        <div
-                          ref={setNodeRef}
-                          className={`rounded-md border border-dashed px-3 py-2 text-[11px] transition-colors ${
-                            isOver ? "border-[#6366F1] bg-[#18181B] text-[#A5B4FC]" : "border-[#27272A] bg-[#111113] text-[#71717A]"
-                          }`}
-                        >
-                          {t("serverSettings.dropToTopLevel")}
-                        </div>
-                      )}
-                    </ChannelContainerDropZone>
-                  )}
-                </div>
-              </ContextMenuTrigger>
-              <ContextMenuContent className="w-52 border-[#27272A] bg-[#18181B] text-white">
-                <ContextMenuItem onClick={() => prepareChannelCreate("category")}>{t("serverSettings.createCategory")}</ContextMenuItem>
-                <ContextMenuItem onClick={() => prepareChannelCreate("text")}>{t("serverSettings.createTextChannel")}</ContextMenuItem>
-                <ContextMenuItem onClick={() => prepareChannelCreate("voice")}>{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
-            <DragOverlay>
-              {activeDragChannel ? (
-                <div className="flex items-center gap-2 rounded-md border border-[#6366F1] bg-[#18181B] px-3 py-2 text-sm text-white shadow-2xl" style={{ transform: "translateY(-14px)" }}>
-                  {activeDragChannel.type === "category" ? <Folder size={14} className="text-[#A5B4FC]" /> : activeDragChannel.type === "voice" ? <Microphone size={14} className="text-[#A5B4FC]" /> : <Hash size={14} className="text-[#A5B4FC]" />}
-                  <span>{activeDragChannel.name}</span>
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
         </div>
+
+        {/* Channel tree */}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={collisionDetection}
+          onDragStart={handleChannelDragStart}
+          onDragCancel={handleChannelDragCancel}
+          onDragEnd={handleChannelDragEnd}
+        >
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <div className="space-y-2">
+                <SortableContext items={channelOrganization.rootIds} strategy={verticalListSortingStrategy}>
+                  {channelOrganization.rootIds.map((chId) => {
+                    const ch = channelOrganization.byId[chId];
+                    if (!ch) return null;
+                    return ch.type === "category" ? renderCategoryTreeBlock(ch) : renderChannelTreeRow(ch);
+                  })}
+                </SortableContext>
+                {isDraggingChannel && (
+                  <ChannelContainerDropZone id={getContainerDropId(ROOT_CHANNEL_CONTAINER_ID)} data={{ containerId: ROOT_CHANNEL_CONTAINER_ID }}>
+                    {({ setNodeRef, isOver }) => (
+                      <div
+                        ref={setNodeRef}
+                        className={`rounded-xl border border-dashed px-4 py-3 text-xs transition-all ${
+                          isOver ? "border-cyan-400/50 bg-cyan-500/8 text-cyan-300" : "border-white/8 bg-zinc-950/30 text-zinc-600"
+                        }`}
+                      >
+                        {t("serverSettings.dropToTopLevel")}
+                      </div>
+                    )}
+                  </ChannelContainerDropZone>
+                )}
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-56 rounded-xl border-white/10 bg-zinc-900/95 backdrop-blur-xl text-white shadow-2xl">
+              <ContextMenuItem onClick={() => prepareChannelCreate("category")} className="rounded-lg">{t("serverSettings.createCategory")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => prepareChannelCreate("text")} className="rounded-lg">{t("serverSettings.createTextChannel")}</ContextMenuItem>
+              <ContextMenuItem onClick={() => prepareChannelCreate("voice")} className="rounded-lg">{t("serverSettings.createVoiceChannel")}</ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
+          <DragOverlay>
+            {activeDragChannel ? (
+              <div className="flex items-center gap-2.5 rounded-xl border border-cyan-400/30 bg-zinc-900/95 backdrop-blur-xl px-4 py-3 text-sm font-medium text-white shadow-2xl">
+                <span className="text-cyan-300">{channelIcon(activeDragChannel.type, 16)}</span>
+                <span>{activeDragChannel.name}</span>
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+
+        {(!channels || channels.length === 0) && (
+          <div className="mt-4 rounded-2xl border border-white/8 bg-zinc-950/40 px-5 py-6 text-center">
+            <p className="text-sm text-zinc-500">{t("channel.noChannelsYet")}</p>
+          </div>
+        )}
       </section>
 
       {/* Channel editor panel */}
-      <section className="rounded-xl border border-[#27272A] bg-[#121212] p-6">
+      <section className="workspace-card p-6">
         {selectedChannel ? (
           <>
-            <div className="mb-5 flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-bold" style={{ fontFamily: "Manrope" }}>{t("serverSettings.editChannel")}</h3>
-                <p className="mt-1 text-sm text-[#71717A]">{t("serverSettings.editChannelHelp")}</p>
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-cyan-500/15">
+                  <PencilSimple size={22} className="text-cyan-300" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white" style={{ fontFamily: "Manrope" }}>
+                    {t("serverSettings.editChannel")}
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-500">{t("serverSettings.editChannelHelp")}</p>
+                </div>
               </div>
-              <div className="rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 py-2 text-xs uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.dragDrop")}</div>
+              <div className="rounded-2xl border border-white/10 bg-zinc-950/60 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.15em] text-zinc-500">
+                {t("serverSettings.dragDrop")}
+              </div>
             </div>
-            <div className="grid gap-4 xl:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.name")}</Label>
-                <Input value={channelDraft.name} onChange={(e) => setChannelDraft((p) => ({ ...p, name: e.target.value }))} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+
+            <div className="grid gap-5 xl:grid-cols-2">
+              <div className="space-y-2.5">
+                <Label className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">{t("common.name")}</Label>
+                <Input
+                  value={channelDraft.name}
+                  onChange={(e) => setChannelDraft((p) => ({ ...p, name: e.target.value }))}
+                  className={SETTINGS_INPUT_CLASSNAME}
+                  data-testid="edit-channel-name-input"
+                />
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("serverSettings.topicLabel")}</Label>
-                <Input value={channelDraft.topic} onChange={(e) => setChannelDraft((p) => ({ ...p, topic: e.target.value }))} disabled={channelDraft.type === "category"} className="bg-[#0A0A0A] border-[#27272A] text-white" />
+              <div className="space-y-2.5">
+                <Label className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">{t("serverSettings.topicLabel")}</Label>
+                <Input
+                  value={channelDraft.topic}
+                  onChange={(e) => setChannelDraft((p) => ({ ...p, topic: e.target.value }))}
+                  disabled={channelDraft.type === "category"}
+                  className={SETTINGS_INPUT_CLASSNAME}
+                  data-testid="edit-channel-topic-input"
+                />
               </div>
             </div>
-            <div className="mt-5 grid gap-4 xl:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.type")}</Label>
-                <div className="h-10 flex items-center rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-[#A1A1AA]">
-                  {channelDraft.type === "category" ? t("serverSettings.channelTypeCategory") : channelDraft.type === "voice" ? t("serverSettings.channelTypeVoice") : t("serverSettings.channelTypeText")}
+
+            <div className="mt-5 grid gap-5 xl:grid-cols-2">
+              <div className="space-y-2.5">
+                <Label className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">{t("common.type")}</Label>
+                <div className="h-12 flex items-center rounded-2xl border border-white/10 bg-zinc-950/60 px-4 text-sm text-zinc-400">
+                  {channelIcon(channelDraft.type, 15)}
+                  <span className="ml-2.5">
+                    {channelDraft.type === "category" ? t("serverSettings.channelTypeCategory") : channelDraft.type === "voice" ? t("serverSettings.channelTypeVoice") : t("serverSettings.channelTypeText")}
+                  </span>
                 </div>
               </div>
               {channelDraft.type !== "category" && (
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-[0.2em] text-[#71717A]">{t("common.category")}</Label>
+                <div className="space-y-2.5">
+                  <Label className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500">{t("common.category")}</Label>
                   <select
                     value={channelDraft.parent_id}
                     onChange={(e) => setChannelDraft((p) => ({ ...p, parent_id: e.target.value }))}
-                    className="h-10 w-full rounded-md border border-[#27272A] bg-[#0A0A0A] px-3 text-sm text-white"
+                    className={SETTINGS_NATIVE_SELECT_CLASSNAME}
+                    data-testid="edit-channel-category-select"
                   >
                     <option value="__root__">{t("common.noCategory")}</option>
                     {categoryChannels.map((cat) => (
@@ -457,27 +517,43 @@ export default function ServerChannelsTab({ server, channels }) {
                 </div>
               )}
             </div>
-            <div className="mt-5 flex items-center justify-between rounded-lg border border-[#27272A] bg-[#0A0A0A] px-4 py-3">
+
+            <div className="mt-5 flex items-center justify-between rounded-2xl border border-white/10 bg-zinc-950/60 px-5 py-4">
               <div>
-                <p className="text-sm text-white">{t("serverSettings.privateChannel")}</p>
-                <p className="text-xs text-[#71717A]">{t("serverSettings.privateChannelHelp")}</p>
+                <p className="text-sm font-medium text-white">{t("serverSettings.privateChannel")}</p>
+                <p className="mt-1 text-xs text-zinc-500">{t("serverSettings.privateChannelHelp")}</p>
               </div>
               <Switch
                 checked={channelDraft.is_private}
                 disabled={channelDraft.type === "category"}
                 onCheckedChange={(checked) => setChannelDraft((p) => ({ ...p, is_private: checked }))}
+                data-testid="edit-channel-private-toggle"
               />
             </div>
-            <div className="mt-5 flex gap-2">
-              <Button onClick={saveChannel} className="bg-cyan-400 text-zinc-950 hover:bg-cyan-300">{t("serverSettings.saveChannel")}</Button>
-              <Button onClick={deleteChannel} variant="outline" className="border-[#EF4444]/30 bg-transparent text-[#EF4444] hover:bg-[#EF4444]/10">
-                <Trash size={14} className="mr-2" />
+
+            <div className="mt-6 flex gap-3">
+              <Button
+                onClick={saveChannel}
+                className="h-11 rounded-2xl bg-cyan-400 px-8 text-zinc-950 font-semibold hover:bg-cyan-300 transition-colors"
+                data-testid="save-channel-btn"
+              >
+                {t("serverSettings.saveChannel")}
+              </Button>
+              <Button
+                onClick={deleteChannel}
+                variant="outline"
+                className="h-11 rounded-2xl border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 px-6 transition-colors"
+                data-testid="delete-channel-btn"
+              >
+                <Trash size={15} className="mr-2" />
                 {t("common.delete")}
               </Button>
             </div>
           </>
         ) : (
-          <p className="text-sm text-[#71717A]">{t("serverSettings.noChannelSelected")}</p>
+          <div className="flex items-center justify-center h-60">
+            <p className="text-sm text-zinc-600">{t("serverSettings.noChannelSelected")}</p>
+          </div>
         )}
       </section>
     </div>
