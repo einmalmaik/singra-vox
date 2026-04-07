@@ -811,6 +811,8 @@ fn main() {
             voice_overlay::create_overlay,
             voice_overlay::toggle_overlay,
             voice_overlay::update_overlay_speakers,
+            voice_overlay::update_overlay_settings,
+            voice_overlay::is_fullscreen_game_active,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::list_capture_sources,
             #[cfg(any(target_os = "windows", target_os = "macos"))]

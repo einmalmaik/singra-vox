@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowsDownUp, ChatCircleDots, List, MagnifyingGlass, Paperclip, Plus, ShieldCheck, UsersThree, X } from "@phosphor-icons/react";
+import { ArrowsDownUp, ChatCircleDots, List, MagnifyingGlass, Paperclip, Plus, ShieldCheck, UsersThree, X, UserPlus } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRuntime } from "@/contexts/RuntimeContext";
@@ -44,6 +44,10 @@ import ChannelSidebar from "@/components/chat/ChannelSidebar";
 import ChatArea from "@/components/chat/ChatArea";
 import MemberSidebar from "@/components/chat/MemberSidebar";
 import E2EEStatus from "@/components/security/E2EEStatus";
+import GroupDMSection from "@/components/dm/GroupDMSection";
+import GroupDMChat from "@/components/dm/GroupDMChat";
+import FriendsPanel from "@/components/friends/FriendsPanel";
+import RelayDMChat from "@/components/friends/RelayDMChat";
 
 function upsertById(list, item) {
   const existingIndex = list.findIndex((entry) => entry.id === item.id);
@@ -214,6 +218,13 @@ export default function MainLayout() {
   const [dmSearchQuery, setDmSearchQuery] = useState("");
   const [dmSearchResults, setDmSearchResults] = useState([]);
   const [dmSearchLoading, setDmSearchLoading] = useState(false);
+  // DM-Sidebar Tabs: "dms" | "groups" | "friends"
+  const [dmTab, setDmTab] = useState("dms");
+  // Group DMs
+  const [groupDMs, setGroupDMs] = useState([]);
+  const [currentGroupDM, setCurrentGroupDM] = useState(null);
+  // Cross-Instance Relay DM (Friends)
+  const [relayDmFriend, setRelayDmFriend] = useState(null);
 
   useEffect(() => {
     currentServerRef.current = currentServer;
@@ -318,6 +329,16 @@ export default function MainLayout() {
       setDmConversations(res.data);
     } catch {
       setDmConversations([]);
+    }
+  }, []);
+
+  // Group-DMs laden
+  const loadGroupDMs = useCallback(async () => {
+    try {
+      const res = await api.get("/groups");
+      setGroupDMs(res.data || []);
+    } catch {
+      setGroupDMs([]);
     }
   }, []);
 
@@ -530,7 +551,8 @@ export default function MainLayout() {
     setShowChannels(false);
     setShowMembers(false);
     void loadDmConversations();
-  }, [loadDmConversations]);
+    void loadGroupDMs();
+  }, [loadDmConversations, loadGroupDMs]);
 
   // DM Benutzersuche mit Debounce
   useEffect(() => {
@@ -1201,8 +1223,31 @@ export default function MainLayout() {
               </button>
             </div>
 
+            {/* Tab-Navigation: DMs | Gruppen | Freunde */}
+            <div className="flex gap-0.5 border-b workspace-divider bg-zinc-950/30 px-2 py-1.5 shrink-0" data-testid="dm-tabs">
+              {[
+                { id: "dms",     label: "DMs",     icon: <ChatCircleDots size={13} /> },
+                { id: "groups",  label: "Gruppen", icon: <UsersThree size={13} /> },
+                { id: "friends", label: "Freunde", icon: <UserPlus size={13} /> },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setDmTab(tab.id)}
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    dmTab === tab.id
+                      ? "bg-cyan-500/12 text-cyan-300"
+                      : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300"
+                  }`}
+                  data-testid={`dm-tab-${tab.id}`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
             {/* Benutzersuche */}
-            {dmSearchOpen && (
+            {dmTab === "dms" && dmSearchOpen && (
               <div className="px-3 pt-2 pb-1 border-b workspace-divider bg-zinc-900/15 shrink-0">
                 <div className="relative">
                   <MagnifyingGlass size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" />
@@ -1249,6 +1294,8 @@ export default function MainLayout() {
               </div>
             )}
 
+            {/* DMs Tab */}
+            {dmTab === "dms" && (
             <div className="flex-1 overflow-y-auto p-3 space-y-1" data-testid="dm-conversations-list">
               {/* Sortierte Konversationen */}
               {[...dmConversations]
@@ -1312,9 +1359,39 @@ export default function MainLayout() {
                 </div>
               )}
             </div>
+            )}
+
+            {/* Groups Tab */}
+            {dmTab === "groups" && (
+              <div className="flex-1 overflow-y-auto" data-testid="group-dm-tab">
+                <GroupDMSection
+                  groups={groupDMs}
+                  selectedGroupId={currentGroupDM?.id}
+                  onSelectGroup={(g) => { setCurrentGroupDM(g); setCurrentDmUser(null); setRelayDmFriend(null); }}
+                  onGroupsChanged={loadGroupDMs}
+                />
+              </div>
+            )}
+
+            {/* Friends Tab */}
+            {dmTab === "friends" && (
+              <div className="flex-1 overflow-y-auto" data-testid="friends-tab">
+                <FriendsPanel
+                  onStartRelayDm={(f) => { setRelayDmFriend(f); setCurrentGroupDM(null); setCurrentDmUser(null); }}
+                />
+              </div>
+            )}
           </div>
 
-          {currentDmUser ? (
+          {currentGroupDM ? (
+            <div className="workspace-panel flex-1 flex flex-col overflow-hidden" data-testid="group-dm-chat-area">
+              <GroupDMChat group={currentGroupDM} config={config} />
+            </div>
+          ) : relayDmFriend ? (
+            <div className="workspace-panel flex-1 flex flex-col overflow-hidden" data-testid="relay-dm-chat-area">
+              <RelayDMChat friendship={relayDmFriend} config={config} />
+            </div>
+          ) : currentDmUser ? (
             <div className="workspace-panel flex-1 flex flex-col overflow-hidden" data-testid="dm-chat-area">
               <div className="h-12 flex items-center px-4 border-b workspace-divider bg-zinc-900/25 shrink-0">
                 <div className="w-8 h-8 rounded-xl bg-zinc-800/80 flex items-center justify-center text-xs font-bold mr-3">

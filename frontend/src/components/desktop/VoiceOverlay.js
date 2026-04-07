@@ -1,109 +1,220 @@
 /*
- * Singra Vox - Privacy-first communication platform
- * Copyright (C) 2026  Maik Haedrich
+ * Singra Vox – Voice Overlay (Desktop)
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Transparentes, always-on-top Overlay-Fenster das über Spielen
+ * angezeigt wird. Zeigt aktive Sprecher im Voice-Channel.
+ *
+ * Architektur:
+ *   - Rendert auf einer separaten Tauri WebviewWindow Route (/overlay)
+ *   - Empfängt Sprech-Updates über Tauri IPC Events
+ *   - Pollt Vollbild-Erkennung alle 2 Sekunden
+ *   - Overlay-Einstellungen aus localStorage
+ *
+ * Performance:
+ *   - Minimaler DOM (max 10 Sprecher-Elemente)
+ *   - CSS-only Animationen (kein JS-Rendering-Loop)
+ *   - Kein React-Context (eigenständige Route)
+ *   - requestAnimationFrame für Level-Meter
  */
+import { useEffect, useRef, useState } from "react";
+import { Microphone, MicrophoneSlash, ShieldCheck, SpeakerSlash } from "@phosphor-icons/react";
 
-/**
- * VoiceOverlay – In-Game Voice-Anzeige (Desktop Only).
- *
- * Zeigt aktive Sprecher mit Namen, Mute-Status und E2EE-Indikator.
- * Wird in einem separaten Tauri-Fenster (transparent, always-on-top)
- * gerendert. Empfängt Daten per Tauri IPC Events vom Hauptfenster.
- *
- * Das Overlay ist bewusst minimalistisch gehalten:
- *   - Keine Interaktionselemente (Click-Through für Spiele)
- *   - Kompaktes Design (300x200px max)
- *   - Reduzierte Animationen (Performance in Spielen)
- */
-import { useState, useEffect } from "react";
-import { isDesktopApp, listenTauri } from "@/lib/desktop";
+const OVERLAY_STORAGE_KEY = "singravox.overlay.settings";
 
-/** Farbe für sprechende User (pulsierender Ring) */
-const SPEAKING_COLOR = "#22D3EE";
+// Standard-Einstellungen (muss mit OverlaySettingsTab übereinstimmen)
+const DEFAULT_SETTINGS = {
+  enabled: true, // Im Overlay-Fenster immer "aktiv" (das Fenster existiert ja)
+  position: "bottom-left",
+  opacity: 0.85,
+  gameOnly: true,
+  showNames: true,
+  showSpeakingIndicator: true,
+};
+
+function loadSettings() {
+  try {
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(OVERLAY_STORAGE_KEY) || "{}") };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+// Position-Klassen für Tailwind
+const POSITION_CLASSES = {
+  "top-left":     "top-4 left-4",
+  "top-right":    "top-4 right-4",
+  "bottom-left":  "bottom-4 left-4",
+  "bottom-right": "bottom-4 right-4",
+};
 
 export default function VoiceOverlay() {
   const [speakers, setSpeakers] = useState([]);
   const [e2eeActive, setE2eeActive] = useState(false);
+  const [settings, setSettings] = useState(loadSettings);
+  const [isFullscreenGame, setIsFullscreenGame] = useState(false);
+  const animationRef = useRef(null);
 
+  // Tauri IPC Events lauschen
   useEffect(() => {
-    if (!isDesktopApp()) return undefined;
+    let unlisten1 = null;
+    let unlisten2 = null;
 
-    let unlisten;
-    (async () => {
-      unlisten = await listenTauri("overlay-speakers-update", (event) => {
-        const { speakers: s, e2ee_active } = event.payload;
-        setSpeakers(s || []);
-        setE2eeActive(Boolean(e2ee_active));
-      });
-    })();
+    const setup = async () => {
+      if (!window.__TAURI__?.event?.listen) return;
 
-    return () => { unlisten?.(); };
+      // Sprech-Updates vom Hauptfenster
+      unlisten1 = await window.__TAURI__.event.listen(
+        "overlay-speakers-update",
+        (event) => {
+          const data = event.payload;
+          if (data?.speakers) setSpeakers(data.speakers);
+          if (typeof data?.e2ee_active === "boolean") setE2eeActive(data.e2ee_active);
+        },
+      );
+
+      // Einstellungs-Updates
+      unlisten2 = await window.__TAURI__.event.listen(
+        "overlay-settings-update",
+        (event) => {
+          if (event.payload) setSettings(event.payload);
+        },
+      );
+    };
+
+    void setup();
+    return () => {
+      if (typeof unlisten1 === "function") unlisten1();
+      if (typeof unlisten2 === "function") unlisten2();
+    };
   }, []);
 
-  if (!speakers.length) return null;
+  // Fullscreen Game Detection Polling (alle 2 Sekunden)
+  useEffect(() => {
+    if (!settings.gameOnly) {
+      setIsFullscreenGame(true); // Kein Game-Only = immer anzeigen
+      return;
+    }
+
+    const poll = async () => {
+      if (!window.__TAURI__?.core?.invoke) {
+        setIsFullscreenGame(false);
+        return;
+      }
+      try {
+        const result = await window.__TAURI__.core.invoke("is_fullscreen_game_active");
+        setIsFullscreenGame(result?.is_fullscreen || false);
+      } catch {
+        setIsFullscreenGame(false);
+      }
+    };
+
+    void poll();
+    const interval = setInterval(poll, 2000);
+    return () => clearInterval(interval);
+  }, [settings.gameOnly]);
+
+  // Nicht anzeigen wenn kein Spiel erkannt und gameOnly aktiv
+  if (settings.gameOnly && !isFullscreenGame) {
+    return null;
+  }
+
+  // Nur aktive Sprecher (max 10 für Performance)
+  const activeSpeakers = speakers.slice(0, 10);
 
   return (
-    <div className="fixed inset-0 pointer-events-none select-none"
-         style={{ background: "transparent", fontFamily: "Manrope, sans-serif" }}>
-      {/* E2EE Indikator */}
-      {e2eeActive && (
-        <div className="absolute top-2 right-2 flex items-center gap-1 bg-emerald-500/20 px-2 py-0.5 rounded-full">
-          <svg width="10" height="10" viewBox="0 0 16 16" fill="#10B981">
-            <path d="M12 6V4a4 4 0 00-8 0v2H3v8h10V6h-1zm-6-2a2 2 0 014 0v2H6V4z" />
-          </svg>
-          <span className="text-[9px] text-emerald-400 font-medium">E2EE</span>
-        </div>
-      )}
+    <div
+      className={`fixed ${POSITION_CLASSES[settings.position] || POSITION_CLASSES["bottom-left"]} z-[9999] select-none pointer-events-none`}
+      style={{
+        opacity: settings.opacity,
+        fontFamily: "Inter, system-ui, sans-serif",
+      }}
+      data-testid="voice-overlay"
+    >
+      <div className="space-y-1 w-[260px]">
+        {/* E2EE Status Badge */}
+        {e2eeActive && (
+          <div className="flex items-center gap-1.5 rounded-lg bg-black/60 backdrop-blur-sm px-2.5 py-1 w-fit mb-1">
+            <ShieldCheck size={10} weight="fill" className="text-emerald-400" />
+            <span className="text-[9px] font-medium text-emerald-300 uppercase tracking-wider">E2EE</span>
+          </div>
+        )}
 
-      {/* Sprecher-Liste */}
-      <div className="absolute bottom-3 left-3 flex flex-col gap-1">
-        {speakers.map((speaker) => (
+        {/* Sprecher-Liste */}
+        {activeSpeakers.map((speaker) => (
           <div
             key={speaker.user_id}
-            className="flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-lg px-2.5 py-1.5 transition-opacity"
-            style={{ opacity: speaker.is_speaking ? 1 : 0.5 }}
+            className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-all duration-200 ${
+              speaker.is_speaking
+                ? "bg-black/70 backdrop-blur-sm ring-1 ring-emerald-500/50"
+                : "bg-black/40 backdrop-blur-sm"
+            }`}
             data-testid={`overlay-speaker-${speaker.user_id}`}
           >
-            {/* Sprech-Indikator */}
+            {/* Avatar */}
             <div
-              className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0"
+              className={`relative h-7 w-7 shrink-0 overflow-hidden rounded-full ${
+                speaker.is_speaking ? "ring-2 ring-emerald-500" : ""
+              }`}
               style={{
-                backgroundColor: speaker.is_speaking ? `${SPEAKING_COLOR}20` : "transparent",
-                border: `2px solid ${speaker.is_speaking ? SPEAKING_COLOR : "#52525B"}`,
-                color: speaker.role_color || "#A1A1AA",
+                animation: speaker.is_speaking && settings.showSpeakingIndicator
+                  ? "overlay-pulse 1.5s ease-in-out infinite"
+                  : "none",
               }}
             >
-              {speaker.display_name?.[0]?.toUpperCase() || "?"}
+              {speaker.avatar_url ? (
+                <img src={speaker.avatar_url} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div
+                  className="flex h-full w-full items-center justify-center text-[10px] font-bold text-white"
+                  style={{ backgroundColor: speaker.role_color || "#3f3f46" }}
+                >
+                  {speaker.display_name?.[0]?.toUpperCase() || "?"}
+                </div>
+              )}
             </div>
 
             {/* Name + Status */}
-            <span
-              className="text-xs font-medium truncate max-w-[180px]"
-              style={{ color: speaker.role_color || "#E4E4E7" }}
-            >
-              {speaker.display_name}
-            </span>
+            {settings.showNames && (
+              <span
+                className={`truncate text-xs font-medium ${
+                  speaker.is_speaking ? "text-white" : "text-zinc-400"
+                }`}
+                style={{ color: speaker.is_speaking ? (speaker.role_color || "#fff") : undefined }}
+              >
+                {speaker.display_name}
+              </span>
+            )}
 
             {/* Mute/Deafen Icons */}
-            {speaker.is_muted && (
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="#EF4444" className="shrink-0">
-                <path d="M8 1a3 3 0 00-3 3v4a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                <path d="M2 2l12 12M1 7.5h2A5 5 0 008 12.5V15" stroke="#EF4444" strokeWidth="1.5" fill="none" />
-              </svg>
-            )}
-            {speaker.is_deafened && (
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="#EF4444" className="shrink-0">
-                <path d="M2 2l12 12M1 8a7 7 0 0114 0v3a2 2 0 01-2 2h-1v-4h2V8A5 5 0 003.5 4.6" stroke="#EF4444" strokeWidth="1.5" fill="none" />
-              </svg>
-            )}
+            <div className="ml-auto flex shrink-0 gap-1">
+              {speaker.is_muted && (
+                <MicrophoneSlash size={12} className="text-red-400" />
+              )}
+              {speaker.is_deafened && (
+                <SpeakerSlash size={12} className="text-red-400" />
+              )}
+              {!speaker.is_muted && !speaker.is_deafened && speaker.is_speaking && (
+                <Microphone size={12} className="text-emerald-400" />
+              )}
+            </div>
           </div>
         ))}
+
+        {/* Leerer State */}
+        {activeSpeakers.length === 0 && (
+          <div className="rounded-lg bg-black/40 backdrop-blur-sm px-2.5 py-1.5">
+            <span className="text-[10px] text-zinc-500">Kein Voice-Channel aktiv</span>
+          </div>
+        )}
       </div>
+
+      {/* CSS Animation für Sprechindikator */}
+      <style>{`
+        @keyframes overlay-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+          50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+        }
+      `}</style>
     </div>
   );
 }

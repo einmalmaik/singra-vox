@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   DesktopTower,
+  GameController,
   Lock,
   ShieldCheck,
   SignOut,
@@ -22,12 +23,14 @@ import AccountSettingsTab from "./global/AccountSettingsTab";
 import SecuritySettingsTab from "./global/SecuritySettingsTab";
 import PrivacySettingsTab from "./global/PrivacySettingsTab";
 import InstancesSettingsTab from "./global/InstancesSettingsTab";
+import OverlaySettingsTab from "./global/OverlaySettingsTab";
 
 const SECTION_ICONS = [
   <SlidersHorizontal key="v" size={16} />,
   <UserCircle key="a" size={16} />,
   <Lock key="s" size={16} />,
   <ShieldCheck key="p" size={16} />,
+  <GameController key="o" size={16} />,
   <DesktopTower key="i" size={16} />,
 ];
 
@@ -51,7 +54,8 @@ export default function GlobalSettingsOverlay({
       { id: "account",   icon: SECTION_ICONS[1], label: t("settings.account") },
       { id: "security",  icon: SECTION_ICONS[2], label: t("settings.security") },
       { id: "privacy",   icon: SECTION_ICONS[3], label: t("settings.privacy") },
-      { id: "instances", icon: SECTION_ICONS[4], label: t("settings.instances") },
+      { id: "overlay",   icon: SECTION_ICONS[4], label: "Overlay" },
+      { id: "instances", icon: SECTION_ICONS[5], label: t("settings.instances") },
     ],
     [t],
   );
@@ -86,6 +90,7 @@ export default function GlobalSettingsOverlay({
       )}
       {activeSection === "security" && <SecuritySettingsTab token={token} />}
       {activeSection === "privacy" && <PrivacySettingsTab />}
+      {activeSection === "overlay" && <OverlaySettingsTab />}
       {activeSection === "instances" && <InstancesSettingsTab />}
     </SettingsOverlayShell>
   );

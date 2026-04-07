@@ -3463,6 +3463,7 @@ from app.routes.webhooks import router as webhooks_router
 from app.routes.bots import router as bots_router
 from app.routes.files import router as files_router
 from app.routes.twofa import router as twofa_router
+from app.routes.friends import router as friends_router
 from app.services.notifications import send_notification as create_notification
 
 app.include_router(threads_router)
@@ -3479,6 +3480,7 @@ app.include_router(webhooks_router)
 app.include_router(bots_router)
 app.include_router(files_router)
 app.include_router(twofa_router)
+app.include_router(friends_router)
 
 # ── Singra Vox ID (Central Identity) ────────────────────────────────────────
 mount_identity_routes(app, db)
