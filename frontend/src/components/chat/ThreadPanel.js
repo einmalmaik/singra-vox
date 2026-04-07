@@ -9,7 +9,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { PaperPlaneRight, Paperclip, X } from "@phosphor-icons/react";
+import { PaperPlaneRight, Paperclip, X, Timer, ClockCountdown } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { toast } from "sonner";
 import { formatAppError } from "@/lib/appErrors";
@@ -39,11 +39,39 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
   const [highlightParent, setHighlightParent] = useState(false);
   const [decryptedParent, setDecryptedParent] = useState(null);
   const [decryptedReplies, setDecryptedReplies] = useState({});
+  const [selfDestructMenuOpen, setSelfDestructMenuOpen] = useState(false);
   const endRef = useRef(null);
   const parentRef = useRef(null);
   const parentHighlightTimeout = useRef(null);
   const isE2EEThread = Boolean(channel?.is_private);
   const canUseE2EEThread = !isE2EEThread || e2eeReady;
+
+  // Self-Destruct Timer-Optionen (Minuten)
+  const SELF_DESTRUCT_OPTIONS = [
+    { label: t("thread.selfDestruct.off", { defaultValue: "Aus" }), minutes: 0 },
+    { label: t("thread.selfDestruct.1h", { defaultValue: "1 Stunde" }), minutes: 60 },
+    { label: t("thread.selfDestruct.24h", { defaultValue: "24 Stunden" }), minutes: 1440 },
+    { label: t("thread.selfDestruct.7d", { defaultValue: "7 Tage" }), minutes: 10080 },
+    { label: t("thread.selfDestruct.30d", { defaultValue: "30 Tage" }), minutes: 43200 },
+  ];
+
+  // Self-Destruct Timer setzen
+  const setSelfDestruct = async (minutes) => {
+    try {
+      await api.patch(`/threads/${messageId}/self-destruct`, { duration_minutes: minutes });
+      toast.success(minutes > 0
+        ? t("thread.selfDestruct.set", { defaultValue: "Verfallsdatum gesetzt" })
+        : t("thread.selfDestruct.removed", { defaultValue: "Verfallsdatum entfernt" }));
+      setSelfDestructMenuOpen(false);
+      loadThread();
+    } catch (err) {
+      toast.error(formatAppError(t, err, { fallbackKey: "thread.selfDestruct.failed" }));
+    }
+  };
+
+  // Prüfe ob der Thread abgelaufen ist
+  const selfDestructAt = thread?.self_destruct_at;
+  const isExpired = selfDestructAt && new Date(selfDestructAt) < new Date();
 
   const loadThread = useCallback(async () => {
     try {
@@ -222,10 +250,66 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
     <div className="w-[360px] bg-[#121212] border-l border-[#27272A] flex flex-col shrink-0" data-testid="thread-panel">
       <div className="h-12 flex items-center justify-between px-4 border-b border-[#27272A] shrink-0">
         <h3 className="text-sm font-bold text-white" style={{ fontFamily: "Manrope" }}>{t("thread.title")}</h3>
-        <button onClick={onClose} data-testid="close-thread" className="text-[#71717A] hover:text-white transition-colors">
-          <X size={18} weight="bold" />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Self-Destruct Timer */}
+          <div className="relative">
+            <button
+              onClick={() => setSelfDestructMenuOpen(!selfDestructMenuOpen)}
+              className={`p-1.5 rounded-lg transition-colors ${
+                selfDestructAt
+                  ? "text-amber-400 bg-amber-400/10 hover:bg-amber-400/20"
+                  : "text-[#71717A] hover:text-white hover:bg-white/5"
+              }`}
+              title={selfDestructAt
+                ? `${t("thread.selfDestruct.active", { defaultValue: "Verfällt" })}: ${new Date(selfDestructAt).toLocaleString()}`
+                : t("thread.selfDestruct.set", { defaultValue: "Verfallsdatum setzen" })}
+              data-testid="thread-self-destruct-btn"
+            >
+              {selfDestructAt ? <ClockCountdown size={16} weight="fill" /> : <Timer size={16} />}
+            </button>
+            {selfDestructMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-44 bg-[#1A1A1A] border border-[#27272A] rounded-xl shadow-xl py-1"
+                   data-testid="self-destruct-menu">
+                {SELF_DESTRUCT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.minutes}
+                    onClick={() => setSelfDestruct(opt.minutes)}
+                    className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                      (opt.minutes === 0 && !selfDestructAt) || false
+                        ? "text-white bg-white/5"
+                        : "text-zinc-400 hover:text-white hover:bg-white/5"
+                    }`}
+                    data-testid={`self-destruct-${opt.minutes}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+                {selfDestructAt && (
+                  <div className="px-3 py-1.5 border-t border-[#27272A] mt-1">
+                    <p className="text-[10px] text-zinc-500">
+                      {t("thread.selfDestruct.expiresAt", { defaultValue: "Verfällt am" })}:{" "}
+                      {new Date(selfDestructAt).toLocaleString()}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} data-testid="close-thread" className="text-[#71717A] hover:text-white transition-colors">
+            <X size={18} weight="bold" />
+          </button>
+        </div>
       </div>
+
+      {/* Abgelaufener Thread – Hinweis */}
+      {isExpired && (
+        <div className="px-4 py-3 bg-amber-900/20 border-b border-amber-500/20">
+          <div className="flex items-center gap-2">
+            <ClockCountdown size={16} className="text-amber-400 shrink-0" />
+            <p className="text-xs text-amber-300">{t("thread.selfDestruct.expired", { defaultValue: "Dieser Thread ist abgelaufen und wird bald gelöscht." })}</p>
+          </div>
+        </div>
+      )}
 
       <div
         ref={parentRef}

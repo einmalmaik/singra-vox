@@ -11,6 +11,9 @@
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod native_capture;
 
+mod rich_presence;
+mod voice_overlay;
+
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tauri::{process::restart, Emitter, Manager, State};
@@ -802,6 +805,12 @@ fn main() {
             open_url,
             check_update_command,
             install_update_command,
+            rich_presence::detect_current_activity,
+            rich_presence::get_custom_apps,
+            rich_presence::save_custom_apps,
+            voice_overlay::create_overlay,
+            voice_overlay::toggle_overlay,
+            voice_overlay::update_overlay_speakers,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::list_capture_sources,
             #[cfg(any(target_os = "windows", target_os = "macos"))]

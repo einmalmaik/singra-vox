@@ -8,12 +8,26 @@
 """
 Singra Vox – Thread routes
 ============================
-Manages threaded replies within channels.
+Manages threaded replies within channels, including self-destructing threads.
+
+Self-Destruct Architektur
+-------------------------
+Threads können ein Verfallsdatum (`self_destruct_at`) haben. Das Verfallsdatum
+wird beim Erstellen des Threads gesetzt (optional, vom Thread-Ersteller gewählt).
+Die Löschung erfolgt CLIENTSEITIG: Das Frontend prüft beim Laden ob der Thread
+abgelaufen ist und zeigt eine "Thread abgelaufen"-Meldung. Der Backend-Endpoint
+`POST /api/threads/{id}/expire` wird vom Client aufgerufen um die tatsächliche
+DB-Löschung auszulösen. So bleibt die Kontrolle beim Client (Privacy-First).
+
+Ein Background-Cleanup-Task kann optional serverseitig laufen, um verwaiste
+abgelaufene Threads zu bereinigen (Defense in Depth).
 
 Routes
 ------
     GET    /api/messages/{message_id}/thread
     POST   /api/channels/{channel_id}/messages/{message_id}/reply
+    PATCH  /api/threads/{message_id}/self-destruct
+    POST   /api/threads/{message_id}/expire
     GET    /api/messages/{message_id}/revisions
 """
 from __future__ import annotations
@@ -92,7 +106,100 @@ async def get_thread(message_id: str, request: Request) -> dict:
         a = await db.users.find_one({"id": r["author_id"]}, {"_id": 0, "password_hash": 0})
         r["author"] = a
 
-    return {"parent": parent, "replies": replies, "reply_count": len(replies)}
+    return {"parent": parent, "replies": replies, "reply_count": len(replies),
+            "self_destruct_at": parent.get("self_destruct_at")}
+
+
+@router.patch("/threads/{message_id}/self-destruct")
+async def set_self_destruct(message_id: str, request: Request) -> dict:
+    """Setzt oder aktualisiert den Self-Destruct-Timer eines Threads.
+
+    Nur der Thread-Ersteller oder ein Server-Admin darf den Timer setzen.
+    `duration_minutes` kann 0 sein um den Timer zu entfernen, oder ein Wert
+    wie 60 (1h), 1440 (24h), 10080 (7 Tage), 43200 (30 Tage).
+    """
+    user = await _current_user(request)
+    body = await request.json()
+    duration_minutes = body.get("duration_minutes", 0)
+
+    parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not parent:
+        raise HTTPException(404, "Thread not found")
+
+    channel = await db.channels.find_one({"id": parent["channel_id"]}, {"_id": 0})
+    if not channel:
+        raise HTTPException(404, "Channel not found")
+
+    # Nur Thread-Ersteller oder jemand mit manage_messages darf den Timer setzen
+    is_author = parent["author_id"] == user["id"]
+    can_manage = await has_channel_permission(db, user["id"], channel, "manage_messages")
+    if not is_author and not can_manage:
+        raise HTTPException(403, "Nur der Thread-Ersteller oder ein Admin kann den Timer setzen")
+
+    if duration_minutes > 0:
+        from datetime import datetime, timezone, timedelta
+        self_destruct_at = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
+        await db.messages.update_one(
+            {"id": message_id},
+            {"$set": {"self_destruct_at": self_destruct_at.isoformat()}}
+        )
+        return {"self_destruct_at": self_destruct_at.isoformat(), "duration_minutes": duration_minutes}
+    else:
+        await db.messages.update_one(
+            {"id": message_id},
+            {"$unset": {"self_destruct_at": ""}}
+        )
+        return {"self_destruct_at": None, "duration_minutes": 0}
+
+
+@router.post("/threads/{message_id}/expire")
+async def expire_thread(message_id: str, request: Request) -> dict:
+    """Wird vom Client aufgerufen wenn ein Thread sein Verfallsdatum erreicht hat.
+
+    Löscht alle Replies und markiert die Parent-Message als gelöscht.
+    Prüft serverseitig nochmal ob der Timer tatsächlich abgelaufen ist
+    (Defense in Depth – Client könnte manipuliert sein).
+    """
+    user = await _current_user(request)
+
+    parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not parent:
+        raise HTTPException(404, "Thread not found")
+
+    channel = await db.channels.find_one({"id": parent["channel_id"]}, {"_id": 0})
+    if not channel or not await has_channel_permission(
+        db, user["id"], channel, "read_messages"
+    ):
+        raise HTTPException(403, "No permission")
+
+    # Serverseitige Prüfung: Ist der Timer wirklich abgelaufen?
+    self_destruct_at = parent.get("self_destruct_at")
+    if not self_destruct_at:
+        raise HTTPException(400, "Thread has no self-destruct timer")
+
+    from datetime import datetime as dt, timezone as tz
+    expiry = dt.fromisoformat(self_destruct_at) if isinstance(self_destruct_at, str) else self_destruct_at
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=tz.utc)
+    if expiry > dt.now(tz.utc):
+        raise HTTPException(400, "Thread has not expired yet")
+
+    # Thread-Replies löschen
+    deleted_count = await db.messages.delete_many({"thread_id": message_id}).deleted_count
+    # Parent-Nachricht als gelöscht markieren (Inhalt entfernen)
+    await db.messages.update_one(
+        {"id": message_id},
+        {"$set": {
+            "is_deleted": True,
+            "content": "[Thread abgelaufen]",
+            "ciphertext": "",
+            "nonce": "",
+            "key_envelopes": [],
+            "thread_count": 0,
+            "self_destruct_at": None,
+        }}
+    )
+    return {"expired": True, "deleted_replies": deleted_count}
 
 
 @router.post("/channels/{channel_id}/messages/{message_id}/reply")

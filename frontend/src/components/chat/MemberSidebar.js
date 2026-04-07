@@ -21,8 +21,8 @@
  *   - `MemberItem` ist eine eigenständige Komponente (wiederverwendbar)
  *   - Alle Texte über i18n
  */
-import { useMemo, useState } from "react";
-import { Crown, ChatCircle, UserMinus, Prohibit, Timer, MagnifyingGlass } from "@phosphor-icons/react";
+import { useMemo, useState, useEffect } from "react";
+import { Crown, ChatCircle, UserMinus, Prohibit, Timer, MagnifyingGlass, GameController, Code, MusicNotes, Monitor, Dot } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger
@@ -37,6 +37,15 @@ import { resolveAssetUrl } from "@/lib/assetUrls";
 // ── Status-Utilities ────────────────────────────────────────────────────────
 
 const ACTIVE_STATUSES = new Set(["online", "away", "dnd"]);
+
+// Aktivitäts-Icons nach Typ
+const ACTIVITY_ICONS = {
+  playing:   GameController,
+  coding:    Code,
+  listening: MusicNotes,
+  streaming: Monitor,
+  custom:    Dot,
+};
 
 function isActiveStatus(status) {
   return ACTIVE_STATUSES.has(status);
@@ -138,12 +147,16 @@ export function groupMembersByRole(members, roles) {
 
 // ── MemberItem Komponente ───────────────────────────────────────────────────
 
-function MemberItem({ member, roles, server, user, capabilities, config, onStartDM, onKick, onBan, onMute, t }) {
+function MemberItem({ member, roles, server, user, capabilities, config, activities, onStartDM, onKick, onBan, onMute, t }) {
   const memberStatus = member.user?.status || "offline";
   const isActive = isActiveStatus(memberStatus);
   const isSelf = member.user?.id === user?.id;
   const isServerOwner = server?.owner_id === member.user?.id;
   const canModerate = capabilities.canMuteMembers || capabilities.canKickMembers || capabilities.canBanMembers;
+
+  // Rich Presence: Aktivität des Members finden
+  const activity = activities?.find((a) => a.user_id === member.user?.id);
+  const activityIcon = activity ? ACTIVITY_ICONS[activity.type] || ACTIVITY_ICONS.custom : null;
 
   const roleColor = useMemo(() => {
     if (!member.roles?.length || !roles?.length) return "#A1A1AA";
@@ -188,6 +201,13 @@ function MemberItem({ member, roles, server, user, capabilities, config, onStart
               </span>
               {isAdmin && <Crown size={12} weight="fill" className="text-[#F59E0B] shrink-0" />}
             </div>
+            {/* Rich Presence Aktivität */}
+            {activity && activityIcon && (
+              <div className="flex items-center gap-1 mt-0.5" data-testid={`activity-${member.user?.username}`}>
+                {(() => { const Icon = activityIcon; return <Icon size={10} weight="fill" className="text-zinc-500 shrink-0" />; })()}
+                <span className="text-[10px] text-zinc-500 truncate">{activity.name}</span>
+              </div>
+            )}
           </div>
         </button>
       </DropdownMenuTrigger>
@@ -236,7 +256,28 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
   const { t } = useTranslation();
   const { config } = useRuntime();
   const [searchQuery, setSearchQuery] = useState("");
+  const [activities, setActivities] = useState([]);
   const capabilities = buildServerCapabilities({ user, server, viewerContext });
+
+  // Rich Presence: Aktivitäten für diesen Server laden
+  useEffect(() => {
+    if (!serverId) return undefined;
+    let cancelled = false;
+
+    const fetchActivities = async () => {
+      try {
+        const res = await api.get(`/presence/server/${serverId}`);
+        if (!cancelled) setActivities(res.data.activities || []);
+      } catch {
+        // Leise fehlschlagen – Presence ist nicht kritisch
+      }
+    };
+
+    fetchActivities();
+    // Alle 20s aktualisieren (etwas langsamer als das Sende-Intervall)
+    const interval = setInterval(fetchActivities, 20_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [serverId]);
 
   // Member-Suche: Name oder Username
   const filteredMembers = useMemo(() => {
@@ -332,6 +373,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
                 user={user}
                 capabilities={capabilities}
                 config={config}
+                activities={activities}
                 onStartDM={onStartDM}
                 onKick={handleKick}
                 onBan={handleBan}

@@ -3458,6 +3458,7 @@ from app.routes.gdpr import router as gdpr_router
 from app.routes.pins import router as pins_router
 from app.routes.notifications import router as notifications_router
 from app.routes.emojis import router as emojis_router
+from app.routes.presence import router as presence_router
 from app.routes.webhooks import router as webhooks_router
 from app.routes.bots import router as bots_router
 from app.routes.files import router as files_router
@@ -3473,6 +3474,7 @@ app.include_router(gdpr_router)
 app.include_router(pins_router)
 app.include_router(notifications_router)
 app.include_router(emojis_router)
+app.include_router(presence_router)
 app.include_router(webhooks_router)
 app.include_router(bots_router)
 app.include_router(files_router)
