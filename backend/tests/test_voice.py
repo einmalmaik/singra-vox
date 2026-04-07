@@ -11,7 +11,7 @@ import requests
 import os
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-ADMIN_EMAIL = "admin@singravox.local"
+ADMIN_EMAIL = "admin@mauntingstudios.de"
 ADMIN_PASSWORD = "Admin1234!"
 SERVER_ID = "03778528-7e75-4ddc-83df-f06260323967"
 CHANNEL_ID = "d0f0765a-35e1-4d3e-9acb-9f1ec22c0213"

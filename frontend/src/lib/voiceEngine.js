@@ -33,7 +33,7 @@
  */
 
 import api from "@/lib/api";
-import { Room, RoomEvent, Track, createLocalScreenTracks, createLocalVideoTrack } from "livekit-client";
+import { Room, RoomEvent, Track, DisconnectReason, createLocalScreenTracks, createLocalVideoTrack } from "livekit-client";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
 import { getDesktopCaptureFrame, startDesktopCapture, stopDesktopCapture } from "@/lib/desktop";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
@@ -783,7 +783,11 @@ export class VoiceEngine {
       canvas.height = this.nativeScreenShare.lastFrameSettings.height;
     }
 
-    const mediaStream = canvas.captureStream(resolution.frameRate || 30);
+    // captureStream(0) gibt uns volle Kontrolle: Frames werden NUR gerendert
+    // wenn wir explizit requestFrame() aufrufen – direkt nach putImageData.
+    // captureStream(fps) rendert asynchron und kann veraltete Canvas-Zustände
+    // erfassen, was zu schwarzen/eingefrorenen Streams in WebView2 führt.
+    const mediaStream = canvas.captureStream(0);
     const mediaStreamTrack = mediaStream.getVideoTracks()[0];
     if (!mediaStreamTrack) {
       await this._stopNativeDesktopScreenShare({ keepTracksArray: false });
@@ -832,12 +836,14 @@ export class VoiceEngine {
   }
 
   async _waitForNativeDesktopFrame() {
-    for (let attempt = 0; attempt < 30; attempt += 1) {
+    // 60 Versuche × 100ms = 6s Timeout – gibt crabgrab genug Zeit,
+    // den ersten Frame zu erfassen (besonders bei großen Displays)
+    for (let attempt = 0; attempt < 60; attempt += 1) {
       const updated = await this._pumpNativeDesktopFrame();
       if (updated) {
         return true;
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 50));
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
     return false;
   }
@@ -888,7 +894,12 @@ export class VoiceEngine {
         : new Uint8ClampedArray(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
       const imageData = new ImageData(rgbaView, frame.width, frame.height);
       this.nativeScreenShare.context.putImageData(imageData, 0, 0);
-      this.nativeScreenShare.mediaStreamTrack?.requestFrame?.();
+
+      // Explizit requestFrame() aufrufen – mit captureStream(0) ist das PFLICHT,
+      // damit der Stream ein neues Frame an LiveKit weiterleitet.
+      if (typeof this.nativeScreenShare.mediaStreamTrack?.requestFrame === "function") {
+        this.nativeScreenShare.mediaStreamTrack.requestFrame();
+      }
 
       this.nativeScreenShare.frameId = frame.frameId;
       this.nativeScreenShare.lastFrameSettings = {
@@ -1515,13 +1526,21 @@ export class VoiceEngine {
       this._emitSpeakingState();
     });
 
-    this.room.on(RoomEvent.Disconnected, () => {
+    this.room.on(RoomEvent.Disconnected, (reason) => {
       this.audioElements.forEach(({ element }) => element.remove());
       this.audioElements.clear();
       this.remoteVideoTracks.clear();
       this._resetSpeakingState();
       this._emitRemoteMediaUpdate();
-      this._emit("disconnected");
+      // Disconnect-Grund weiterleiten damit das Frontend zwischen
+      // gewolltem Leave und Kick durch Duplicate-Identity unterscheiden kann.
+      // DisconnectReason: 1=CLIENT_INITIATED, 2=DUPLICATE_IDENTITY, etc.
+      const reasonCode = typeof reason === "number" ? reason : -1;
+      this._emit("disconnected", {
+        reason: reasonCode,
+        wasClientInitiated: reasonCode === DisconnectReason.CLIENT_INITIATED,
+        wasDuplicateIdentity: reasonCode === DisconnectReason.DUPLICATE_IDENTITY,
+      });
     });
   }
 

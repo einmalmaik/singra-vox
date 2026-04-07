@@ -344,13 +344,29 @@ export default function ChannelSidebar({
           provider: null,
         });
         setMediaParticipants([]);
+
+        // Wenn die Trennung NICHT von uns initiiert wurde (z.B. weil ein
+        // anderer Client mit gleicher Identity beigetreten ist), VoiceEngine
+        // aufräumen und voiceChannel zurücksetzen. Die DB-Bereinigung erfolgt
+        // automatisch über den voice_join des anderen Clients.
+        if (!event.wasClientInitiated) {
+          if (voiceEngineRef?.current === engine) {
+            voiceEngineRef.current = null;
+          }
+          setVoiceChannel(null);
+        }
       }
     };
 
     engine.onStateChange = handleEvent;
     return engine.addStateListener(handleEvent);
-  }, []);
+  }, [voiceEngineRef]);
 
+  // ── Voice-State-Sync: Discord-Verhalten ──────────────────────────────────
+  // Wir synchronisieren voiceChannel NUR wenn ein lokaler VoiceEngine aktiv ist.
+  // Wenn der User von Tauri aus verbunden ist und die Web-App öffnet, soll die
+  // Web-App ihn NICHT automatisch als verbunden anzeigen – er muss den Kanal
+  // manuell neu joinen (wie bei Discord).
   useEffect(() => {
     if (!user?.id) {
       return;
@@ -361,15 +377,28 @@ export default function ChannelSidebar({
       && channel.voice_states?.some((state) => state.user_id === user.id)
     )) || null;
 
-    if (joinedVoiceChannel && voiceChannel?.id !== joinedVoiceChannel.id) {
+    const hasLocalEngine = Boolean(voiceEngineRef?.current?.room);
+
+    // Wenn die DB zeigt dass wir in einem Kanal sind, ABER kein lokaler
+    // VoiceEngine verbunden ist → NICHT automatisch als verbunden anzeigen.
+    // Der User muss den Kanal auf diesem Client explizit joinen.
+    if (joinedVoiceChannel && !hasLocalEngine && !voiceChannel) {
+      // Nichts tun – auf diesem Client ist der User nicht verbunden
+      return;
+    }
+
+    // Wenn der lokale Engine aktiv ist UND die DB einen anderen Kanal zeigt,
+    // updaten wir den State (z.B. nach Channel-Wechsel)
+    if (joinedVoiceChannel && hasLocalEngine && voiceChannel?.id !== joinedVoiceChannel.id) {
       setVoiceChannel(joinedVoiceChannel);
       return;
     }
 
+    // Wenn die DB zeigt dass der User NICHT mehr verbunden ist, aufräumen
     if (!joinedVoiceChannel && voiceChannel) {
       setVoiceChannel(null);
     }
-  }, [channels, user?.id, voiceChannel]);
+  }, [channels, user?.id, voiceChannel, voiceEngineRef]);
 
   useEffect(() => {
     if (!voiceChannel || !user?.id) return;

@@ -260,7 +260,10 @@ export async function openExternalUrl(url) {
       await invoke("open_url", { url });
       return;
     } catch (err) {
-      console.warn("[desktop] open_url IPC failed, fallback:", err);
+      // Wenn der IPC-Call fehlschlägt, loggen wir den Fehler und fallen
+      // NICHT auf window.open zurück – das ist in WebView2 ebenfalls blockiert.
+      console.error("[desktop] open_url IPC fehlgeschlagen:", err);
+      return;
     }
   }
   window.open(url, "_blank", "noopener,noreferrer");

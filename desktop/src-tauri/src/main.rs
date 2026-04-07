@@ -558,8 +558,14 @@ fn open_url(url: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &url])
+        // rundll32 url.dll,FileProtocolHandler ist der zuverlässigste Weg unter
+        // Windows, URLs im Standard-Browser zu öffnen – `cmd /C start` kann in
+        // WebView2-Sandboxen und bei Sonderzeichen in der URL fehlschlagen.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Konnte Browser nicht öffnen: {e}"))?;
     }
@@ -593,6 +599,8 @@ struct UpdateInfo {
 
 /// Wird beim App-Start im Hintergrund aufgerufen.
 /// Sendet update-checking → update-available oder update-not-available.
+/// Bricht nach 15 Sekunden ab, damit die App nicht hängt wenn der
+/// GitHub-Endpoint unerreichbar ist.
 async fn check_for_update(app: tauri::AppHandle) {
     // Dem Frontend signalisieren, dass wir gerade prüfen
     let current_version = app.package_info().version.to_string();
@@ -606,8 +614,15 @@ async fn check_for_update(app: tauri::AppHandle) {
         }
     };
 
-    match updater.check().await {
-        Ok(Some(update)) => {
+    // 15s Timeout: Verhindert dass ein unerreichbarer Endpoint die App blockiert
+    let check_result = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        updater.check(),
+    )
+    .await;
+
+    match check_result {
+        Ok(Ok(Some(update))) => {
             let _ = app.emit(
                 "update-available",
                 UpdateInfo {
@@ -618,14 +633,20 @@ async fn check_for_update(app: tauri::AppHandle) {
                 },
             );
         }
-        Ok(None) => {
+        Ok(Ok(None)) => {
             let _ = app.emit("update-not-available", ());
         }
-        Err(e) => {
-            // Fehler an Frontend senden für Debugging
+        Ok(Err(e)) => {
             let _ = app.emit(
                 "update-error",
                 serde_json::json!({ "error": e.to_string() }),
+            );
+        }
+        Err(_elapsed) => {
+            // Timeout – leise ignorieren, Update-Check beim nächsten Start erneut
+            let _ = app.emit(
+                "update-error",
+                serde_json::json!({ "error": "Update-Check Timeout (15s)" }),
             );
         }
     }
