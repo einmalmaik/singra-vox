@@ -1029,6 +1029,7 @@ class RoleCreateInput(BaseModel):
     color: str = "#99AAB5"
     permissions: dict = {}
     mentionable: bool = False
+    hoist: bool = False
 
 class InviteCreateInput(BaseModel):
     max_uses: int = Field(default=0, ge=0)
@@ -2416,7 +2417,8 @@ async def create_role(server_id: str, inp: RoleCreateInput, request: Request):
         "id": new_id(), "server_id": server_id, "name": inp.name,
         "color": inp.color, "permissions": {**DEFAULT_PERMISSIONS, **inp.permissions},
         "position": await db.roles.count_documents({"server_id": server_id}),
-        "is_default": False, "mentionable": bool(inp.mentionable), "created_at": now_utc()
+        "is_default": False, "mentionable": bool(inp.mentionable),
+        "hoist": bool(inp.hoist), "created_at": now_utc()
     }
     await db.roles.insert_one(role)
     role.pop("_id", None)
@@ -2432,7 +2434,7 @@ async def update_role(server_id: str, role_id: str, request: Request):
     if not role:
         raise HTTPException(404, "Role not found")
     body = await request.json()
-    allowed_keys = ("permissions",) if role.get("is_default") else ("name", "color", "permissions", "position", "mentionable")
+    allowed_keys = ("permissions",) if role.get("is_default") else ("name", "color", "permissions", "position", "mentionable", "hoist")
     updates = {k: v for k, v in body.items() if k in allowed_keys}
     if "permissions" in updates:
         updates["permissions"] = {**DEFAULT_PERMISSIONS, **updates["permissions"]}

@@ -98,7 +98,7 @@ export default function ServerSettingsOverlay({
   const [activeDragId, setActiveDragId] = useState(null);
   const [collapsedCategories, setCollapsedCategories] = useState({});
   const [channelDraft, setChannelDraft] = useState({ name: "", topic: "", is_private: false, parent_id: "__root__", type: "text" });
-  const [roleDraft, setRoleDraft] = useState({ name: "", color: "#6366F1", permissions: {}, mentionable: false });
+  const [roleDraft, setRoleDraft] = useState({ name: "", color: "#6366F1", permissions: {}, mentionable: false, hoist: false });
   const [ownershipTargetId, setOwnershipTargetId] = useState("");
   const [transferringOwnership, setTransferringOwnership] = useState(false);
   const [leavingServer, setLeavingServer] = useState(false);
@@ -190,7 +190,7 @@ export default function ServerSettingsOverlay({
 
   useEffect(() => {
     if (!selectedRole) {
-      setRoleDraft({ name: "", color: "#6366F1", permissions: {}, mentionable: false });
+      setRoleDraft({ name: "", color: "#6366F1", permissions: {}, mentionable: false, hoist: false });
       return;
     }
 
@@ -199,6 +199,7 @@ export default function ServerSettingsOverlay({
       color: selectedRole.color || "#6366F1",
       permissions: { ...(selectedRole.permissions || {}) },
       mentionable: !!selectedRole.mentionable,
+      hoist: !!selectedRole.hoist,
     });
   }, [selectedRole]);
 
@@ -543,6 +544,7 @@ export default function ServerSettingsOverlay({
         name: newRoleName.trim(),
         color: newRoleColor,
         mentionable: newRoleMentionable,
+        hoist: false,
       });
       setNewRoleName("");
       setNewRoleMentionable(false);
@@ -563,6 +565,7 @@ export default function ServerSettingsOverlay({
             color: roleDraft.color,
             permissions: roleDraft.permissions,
             mentionable: roleDraft.mentionable,
+            hoist: roleDraft.hoist,
           };
       await api.put(`/servers/${server.id}/roles/${selectedRole.id}`, payload);
       toast.success(t("serverSettings.roleUpdated"));
@@ -1076,6 +1079,20 @@ export default function ServerSettingsOverlay({
                     <Switch
                       checked={!!roleDraft.mentionable}
                       onCheckedChange={(checked) => setRoleDraft((previous) => ({ ...previous, mentionable: checked }))}
+                    />
+                  </div>
+                )}
+
+                {/* Role Hoisting – Separat in der Mitgliederliste anzeigen */}
+                {!selectedRole?.is_default && (
+                  <div className="flex items-center justify-between" data-testid="role-hoist-toggle">
+                    <div>
+                      <p className="text-sm text-white">{t("serverSettings.hoistRole", { defaultValue: "Separat in Mitgliederliste anzeigen" })}</p>
+                      <p className="text-xs text-[#71717A]">{t("serverSettings.hoistRoleHelp", { defaultValue: "Mitglieder mit dieser Rolle werden in einer eigenen Gruppe angezeigt" })}</p>
+                    </div>
+                    <Switch
+                      checked={!!roleDraft.hoist}
+                      onCheckedChange={(checked) => setRoleDraft((previous) => ({ ...previous, hoist: checked }))}
                     />
                   </div>
                 )}
