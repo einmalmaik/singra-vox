@@ -113,8 +113,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signing Key ohne Passwort – GitHub Secrets erlauben keine leeren Werte,
+          # daher wird TAURI_SIGNING_PRIVATE_KEY_PASSWORD NICHT gesetzt.
+          # tauri-action erkennt automatisch dass kein Passwort nötig ist.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
