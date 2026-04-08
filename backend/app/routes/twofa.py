@@ -19,12 +19,13 @@ Routes:
     POST /api/auth/2fa/verify    – Verify TOTP during login (called after password)
     GET  /api/auth/2fa/status    – Check if 2FA is enabled for current user
 """
-from datetime import datetime, timezone
-
 import bcrypt
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from app.core.database import db
+from app.core.utils import now_utc
+from app.dependencies import current_user
 from app.identity.totp import (
     generate_backup_codes,
     generate_totp_secret,
@@ -32,6 +33,8 @@ from app.identity.totp import (
     normalize_backup_code,
     verify_totp_code,
 )
+from app.services.auth_flow import issue_auth_response, verify_pw
+from app.services.presence import broadcast_presence_update, log_status_history
 
 router = APIRouter(prefix="/api/auth/2fa", tags=["2fa"])
 
@@ -58,17 +61,6 @@ class TwoFAVerifyInput(BaseModel):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _current_user_from_request(request: Request) -> dict:
-    """Load user from auth header/cookie, raise 401 if invalid."""
-    from app.main import current_user
-    return await current_user(request)
-
-
-async def _get_db():
-    from app.main import db
-    return db
-
-
 def _hash_backup_code(code: str) -> str:
     """BCrypt-hash a backup code for storage."""
     normalized = normalize_backup_code(code)
@@ -86,8 +78,7 @@ def _verify_backup_code(code: str, hashed: str) -> bool:
 @router.get("/status")
 async def twofa_status(request: Request):
     """Check if 2FA is enabled for the current user."""
-    user = await _current_user_from_request(request)
-    db = await _get_db()
+    user = await current_user(request)
     totp_record = await db.totp_secrets.find_one(
         {"user_id": user["id"], "confirmed": True},
         {"_id": 0, "user_id": 1},
@@ -105,8 +96,7 @@ async def twofa_setup(request: Request):
     Returns the secret, QR URI, and a hint to use Singra Vault.
     User must confirm with /confirm before 2FA is active.
     """
-    user = await _current_user_from_request(request)
-    db = await _get_db()
+    user = await current_user(request)
 
     # Check if already confirmed
     existing = await db.totp_secrets.find_one(
@@ -127,7 +117,7 @@ async def twofa_setup(request: Request):
         "user_id": user["id"],
         "secret": secret,
         "confirmed": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now_utc(),
     })
 
     return {
@@ -144,8 +134,7 @@ async def twofa_confirm(inp: TwoFAConfirmInput, request: Request):
     Confirm 2FA setup by providing the first valid TOTP code.
     This activates 2FA and generates backup codes.
     """
-    user = await _current_user_from_request(request)
-    db = await _get_db()
+    user = await current_user(request)
 
     # Find the pending (unconfirmed) secret
     pending = await db.totp_secrets.find_one(
@@ -168,7 +157,7 @@ async def twofa_confirm(inp: TwoFAConfirmInput, request: Request):
         {"user_id": user["id"], "confirmed": False},
         {"$set": {
             "confirmed": True,
-            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+            "confirmed_at": now_utc(),
             "backup_codes": hashed_codes,
         }},
     )
@@ -190,9 +179,7 @@ async def twofa_confirm(inp: TwoFAConfirmInput, request: Request):
 @router.post("/disable")
 async def twofa_disable(inp: TwoFADisableInput, request: Request):
     """Disable 2FA. Requires the user's password for security."""
-    user = await _current_user_from_request(request)
-    db = await _get_db()
-    from app.main import verify_pw
+    user = await current_user(request)
 
     # Verify password
     full_user = await db.users.find_one({"id": user["id"]}, {"_id": 0})
@@ -223,8 +210,6 @@ async def twofa_verify(inp: TwoFAVerifyInput, request: Request, response: Respon
     ``issue_auth_response`` can set HttpOnly auth cookies on the
     *actual* outgoing HTTP response – critical for cookie-based web auth.
     """
-    db = await _get_db()
-
     totp_record = await db.totp_secrets.find_one(
         {"user_id": inp.user_id, "confirmed": True},
         {"_id": 0},
@@ -257,9 +242,6 @@ async def twofa_verify(inp: TwoFAVerifyInput, request: Request, response: Respon
 
     if not verified:
         raise HTTPException(401, "Invalid 2FA code")
-
-    # Issue full auth token (complete login)
-    from app.main import issue_auth_response, now_utc, log_status_history, broadcast_presence_update
 
     user = await db.users.find_one({"id": inp.user_id}, {"_id": 0})
     if not user:

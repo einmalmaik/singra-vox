@@ -34,10 +34,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc, new_id
-from app.core.constants import E2EE_DEVICE_HEADER
+from app.dependencies import current_user, require_verified_device
 from app.pagination import clamp_page_limit
 from app.permissions import (
     assert_channel_access,
@@ -49,30 +48,12 @@ from app.permissions import (
 router = APIRouter(prefix="/api", tags=["threads"])
 
 
-async def _current_user(request: Request) -> dict:
-    user, _ = await load_current_user(db, request)
-    user.pop("password_hash", None)
-    return user
-
-
-async def _require_verified_device(request: Request, user: dict) -> dict:
-    device_id = (request.headers.get(E2EE_DEVICE_HEADER) or "").strip() or None
-    if not device_id:
-        raise HTTPException(400, "E2EE device header required")
-    device = await db.e2ee_devices.find_one(
-        {"user_id": user["id"], "device_id": device_id}, {"_id": 0}
-    )
-    if not device or device.get("revoked_at") or not device.get("verified_at"):
-        raise HTTPException(403, "E2EE device is not trusted")
-    return device
-
-
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/messages/{message_id}/thread")
 async def get_thread(message_id: str, request: Request) -> dict:
     """Return the parent message and all its replies."""
-    user = await _current_user(request)
+    user = await current_user(request)
 
     parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
     if not parent:
@@ -118,7 +99,7 @@ async def set_self_destruct(message_id: str, request: Request) -> dict:
     `duration_minutes` kann 0 sein um den Timer zu entfernen, oder ein Wert
     wie 60 (1h), 1440 (24h), 10080 (7 Tage), 43200 (30 Tage).
     """
-    user = await _current_user(request)
+    user = await current_user(request)
     body = await request.json()
     duration_minutes = body.get("duration_minutes", 0)
 
@@ -160,7 +141,7 @@ async def expire_thread(message_id: str, request: Request) -> dict:
     Prüft serverseitig nochmal ob der Timer tatsächlich abgelaufen ist
     (Defense in Depth – Client könnte manipuliert sein).
     """
-    user = await _current_user(request)
+    user = await current_user(request)
 
     parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
     if not parent:
@@ -205,7 +186,7 @@ async def expire_thread(message_id: str, request: Request) -> dict:
 @router.post("/channels/{channel_id}/messages/{message_id}/reply")
 async def reply_in_thread(channel_id: str, message_id: str, request: Request) -> dict:
     """Post a reply in a message thread."""
-    user = await _current_user(request)
+    user = await current_user(request)
     body = await request.json()
 
     parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
@@ -240,7 +221,7 @@ async def reply_in_thread(channel_id: str, message_id: str, request: Request) ->
             if u:
                 mention_ids.append(u["id"])
     else:
-        device = await _require_verified_device(request, user)
+        device = await require_verified_device(request, user)
         if not all([body.get("is_e2ee"), body.get("ciphertext"), body.get("nonce"), body.get("sender_device_id")]):
             raise HTTPException(400, "Encrypted threads require a full E2EE payload")
         if body.get("sender_device_id") != device["device_id"]:
@@ -285,7 +266,7 @@ async def reply_in_thread(channel_id: str, message_id: str, request: Request) ->
 @router.get("/messages/{message_id}/revisions")
 async def get_revisions(message_id: str, request: Request) -> list:
     """Return edit history for a message."""
-    user = await _current_user(request)
+    user = await current_user(request)
 
     parent = await db.messages.find_one({"id": message_id}, {"_id": 0})
     if not parent:
