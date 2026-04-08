@@ -140,4 +140,39 @@ describe("VoiceEngine native cleanup", () => {
     expect(track.attach).toHaveBeenCalledWith(element);
     expect(element.muted).toBe(true);
   });
+
+  it("does not report the local native proxy as a remote live-media participant", () => {
+    const engine = new VoiceEngine();
+    const localProxyVideoTrack = {
+      kind: "video",
+      source: "screen_share",
+    };
+    const remoteVideoTrack = {
+      kind: "video",
+      source: "screen_share",
+    };
+
+    engine.userId = "user-1";
+    engine.remoteVideoTracks.set("user-1:screen_share", {
+      track: localProxyVideoTrack,
+      participantId: "user-1",
+      participantIdentity: "screen-share:channel:user-1",
+      source: "screen_share",
+    });
+    engine.remoteVideoTracks.set("user-2:screen_share", {
+      track: remoteVideoTrack,
+      participantId: "user-2",
+      participantIdentity: "screen-share:channel:user-2",
+      source: "screen_share",
+    });
+
+    expect(engine._buildRemoteMediaParticipants()).toEqual([
+      {
+        userId: "user-2",
+        hasCamera: false,
+        hasScreenShare: true,
+        hasScreenShareAudio: false,
+      },
+    ]);
+  });
 });

@@ -1604,6 +1604,9 @@ export class VoiceEngine {
     const participants = new Map();
 
     this.remoteVideoTracks.forEach(({ participantId, source }) => {
+      if (!participantId || participantId === this.userId) {
+        return;
+      }
       const nextState = participants.get(participantId) || {
         userId: participantId,
         hasCamera: false,
@@ -1620,6 +1623,9 @@ export class VoiceEngine {
     });
 
     this.audioElements.forEach(({ participantId, source }) => {
+      if (!participantId || participantId === this.userId) {
+        return;
+      }
       if (source !== Track.Source.ScreenShareAudio) {
         return;
       }

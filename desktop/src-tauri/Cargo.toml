@@ -23,7 +23,9 @@ crabgrab = { version = "0.4.0", features = ["bitmap"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 base64 = "0.22"
 libwebrtc = "0.3.29"
-livekit = "0.7.36"
+# LiveKit Cloud performs an HTTPS region preflight before the WSS connection.
+# The desktop client therefore needs an explicit TLS backend at build time.
+livekit = { version = "0.7.36", features = ["rustls-tls-native-roots"] }
 rdev = "0.5.3"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
