@@ -155,6 +155,22 @@ function playVoiceTone(audioCtxRef, type) {
   } catch { /* Kein Sound ohne Nutzerinteraktion */ }
 }
 
+function closeSocketManually(socket, code, reason) {
+  if (!socket) {
+    return;
+  }
+  socket.__singravoxManualClose = true;
+  try {
+    socket.close(code, reason);
+  } catch {
+    // Ignore close races on already-closing sockets.
+  }
+}
+
+function isManualSocketClose(socket) {
+  return Boolean(socket?.__singravoxManualClose);
+}
+
 export default function MainLayout() {
   const { t } = useTranslation();
   const { user, token, logout, setUser, clearAuthState } = useAuth();
@@ -176,6 +192,10 @@ export default function MainLayout() {
   const currentServerRef = useRef(null);
   const currentChannelRef = useRef(null);
   const currentDmUserRef = useRef(null);
+  const loadServerSnapshotRef = useRef(null);
+  const loadDmConversationsRef = useRef(null);
+  const handleWsEventRef = useRef(null);
+  const connectWsRef = useRef(null);
   const userStatusRef = useRef(user?.status);
   const latestChannelLoadRef = useRef(0);
   const notificationPreferencesRef = useRef({
@@ -332,6 +352,10 @@ export default function MainLayout() {
     }
   }, []);
 
+  useEffect(() => {
+    loadDmConversationsRef.current = loadDmConversations;
+  }, [loadDmConversations]);
+
   // Group-DMs laden
   const loadGroupDMs = useCallback(async () => {
     try {
@@ -434,6 +458,10 @@ export default function MainLayout() {
     setChannelHistoryCursor(null);
     setChannelHasOlderMessages(false);
   }, [loadChannelMessages]);
+
+  useEffect(() => {
+    loadServerSnapshotRef.current = loadServerSnapshot;
+  }, [loadServerSnapshot]);
 
   const selectChannel = useCallback(async (channel) => {
     currentChannelRef.current = channel;
@@ -604,7 +632,7 @@ export default function MainLayout() {
         }
         if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
           try {
-            wsRef.current.close(4001, "session_revoked");
+            closeSocketManually(wsRef.current, 4001, "session_revoked");
           } catch {
             // Ignore close failures for already-closing sockets.
           }
@@ -857,11 +885,15 @@ export default function MainLayout() {
     }
   }, [clearAuthState, config?.isDesktop, handleRemovedFromServer, loadDmConversations, loadServers, navigate, refreshUnread, setUser, t, user?.id]);
 
+  useEffect(() => {
+    handleWsEventRef.current = handleWsEvent;
+  }, [handleWsEvent]);
+
   const connectWs = useCallback(() => {
     if (!token || !config?.wsBase || sessionInvalidatedRef.current) return;
 
     if (wsRef.current) {
-      wsRef.current.close();
+      closeSocketManually(wsRef.current);
     }
 
     const platform = config?.isDesktop ? "desktop" : "web";
@@ -882,10 +914,10 @@ export default function MainLayout() {
       }, 20000);
 
       if (currentServerRef.current?.id) {
-        void loadServerSnapshot(currentServerRef.current.id);
+        void loadServerSnapshotRef.current?.(currentServerRef.current.id);
       }
       if (currentDmUserRef.current?.id) {
-        void loadDmConversations();
+        void loadDmConversationsRef.current?.();
       }
     };
 
@@ -895,7 +927,7 @@ export default function MainLayout() {
         if (data.type === "pong") {
           return;
         }
-        void handleWsEvent(data);
+        void handleWsEventRef.current?.(data);
       } catch {
         // Ignore malformed socket payloads.
       }
@@ -910,17 +942,23 @@ export default function MainLayout() {
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
       }
-      if (sessionInvalidatedRef.current) {
+      if (sessionInvalidatedRef.current || isManualSocketClose(ws)) {
         return;
       }
       // Exponential Backoff: 1s → 2s → 4s → 8s → max 30s
       const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 30000);
       reconnectAttempt.current += 1;
-      reconnectTimer.current = setTimeout(connectWs, delay);
+      reconnectTimer.current = setTimeout(() => {
+        connectWsRef.current?.();
+      }, delay);
     };
 
     ws.onerror = () => ws.close();
-  }, [config?.isDesktop, config?.wsBase, handleWsEvent, loadDmConversations, loadServerSnapshot, token]);
+  }, [config?.isDesktop, config?.wsBase, token]);
+
+  useEffect(() => {
+    connectWsRef.current = connectWs;
+  }, [connectWs]);
 
   useEffect(() => {
     void loadServers();
@@ -1011,7 +1049,7 @@ export default function MainLayout() {
 
     return () => {
       if (wsRef.current) {
-        wsRef.current.close();
+        closeSocketManually(wsRef.current);
       }
       if (heartbeatTimer.current) {
         clearInterval(heartbeatTimer.current);

@@ -34,8 +34,10 @@
 
 import api from "@/lib/api";
 import { Room, RoomEvent, Track, DisconnectReason, createLocalScreenTracks, createLocalVideoTrack } from "livekit-client";
+import { createSingleFlightController } from "@/lib/asyncControl";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
 import { getDesktopCaptureFrame, startDesktopCapture, stopDesktopCapture } from "@/lib/desktop";
+import { NATIVE_CAPTURE_MODE, verifyCanvasStreamPullMode } from "@/lib/nativeCaptureProbe";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
 import { AudioAnalyzer } from "@/lib/AudioAnalyzer";
 
@@ -150,6 +152,7 @@ export class VoiceEngine {
     this.screenShareAudioSourceNode = null; // MediaStreamSource vom Capture
     this.screenShareAudioDest = null;       // MediaStreamDestination
     this.screenShareAudioVolume = 100;      // 0-200%, Default 100%
+    this.runSingleFlight = createSingleFlightController();
   }
 
   addStateListener(listener) {
@@ -443,32 +446,136 @@ export class VoiceEngine {
     await this._applyMuteState();
   }
 
-  async disconnect() {
+  _runLifecycleAction(key, task) {
+    return this.runSingleFlight(key, task);
+  }
+
+  _buildDisconnectedPayload(reason = DisconnectReason.CLIENT_INITIATED) {
+    const reasonCode = typeof reason === "number" ? reason : -1;
+    return {
+      reason: reasonCode,
+      wasClientInitiated: reasonCode === DisconnectReason.CLIENT_INITIATED,
+      wasDuplicateIdentity: reasonCode === DisconnectReason.DUPLICATE_IDENTITY,
+    };
+  }
+
+  _clearRemoteMediaState() {
     this.audioElements.forEach(({ element }) => {
-      element.pause();
-      element.remove();
+      try {
+        element.pause?.();
+      } catch {
+        // Ignore paused/removed element races during disconnect cleanup.
+      }
+      element.remove?.();
     });
     this.audioElements.clear();
     this.remoteVideoTracks.clear();
+    this._resetSpeakingState();
+    this._emitRemoteMediaUpdate();
+  }
 
-    if (this.room && this.localTrackPublication?.track) {
-      await this.room.localParticipant.unpublishTrack(this.localTrackPublication.track, false);
+  _emitScreenShareDisabled(stopReason = "manual", previousCaptureMode = null) {
+    this._emitRemoteMediaUpdate();
+    this._emit("screen_share_change", {
+      enabled: false,
+      provider: null,
+      sourceId: null,
+      sourceKind: null,
+      sourceLabel: null,
+      hasAudio: false,
+      actualCaptureSettings: null,
+      captureMode: null,
+      previousCaptureMode,
+      stopReason,
+    });
+  }
+
+  forceCleanupForUnload(stopReason = "window_unload", { disconnectRoom = true } = {}) {
+    const hadScreenShare = Boolean(this.nativeScreenShare) || this.screenShareTracks.length > 0;
+    const hadCamera = Boolean(this.cameraTrack);
+    const activeShare = this.nativeScreenShare;
+    const previousCaptureMode = activeShare?.captureMode || null;
+
+    if (activeShare?.pumpTimer) {
+      window.clearTimeout(activeShare.pumpTimer);
+    }
+
+    activeShare?.mediaStream?.getTracks?.().forEach((track) => track.stop?.());
+    activeShare?.descriptor?.stop?.();
+    this.screenShareTracks.forEach((track) => track.stop?.());
+    this.screenShareTracks = [];
+    this.nativeScreenShare = null;
+    this._cleanupScreenShareAudioGain();
+
+    if (this.cameraTrack) {
+      this.cameraTrack.stop?.();
+      this.cameraTrack = null;
     }
 
     this.localTrackPublication = null;
-    await this.stopCamera();
-    await this.stopScreenShare();
     this._stopLocalTrackResources();
-    await this.stopMicTest();
+    void Promise.resolve(this.stopMicTest?.()).catch(() => null);
+    void Promise.resolve(stopDesktopCapture?.()).catch(() => null);
 
-    if (this.room) {
-      this.room.disconnect();
+    if (disconnectRoom && this.room) {
+      try {
+        void this.room.disconnect();
+      } catch {
+        // Ignore room teardown failures during page close.
+      }
     }
-    this.room = null;
-    this.mediaE2EEController = null;
-    this._resetSpeakingState();
-    this._emitRemoteMediaUpdate();
-    this._emit("disconnected");
+
+    if (hadCamera) {
+      if (!hadScreenShare) {
+        this._emitRemoteMediaUpdate();
+      }
+      this._emit("camera_change", { enabled: false });
+    }
+    if (hadScreenShare) {
+      this._emitScreenShareDisabled(stopReason, previousCaptureMode);
+    }
+  }
+
+  async disconnect() {
+    return this._runLifecycleAction("disconnect", async () => {
+      const room = this.room;
+
+      const safeCleanup = async (label, task) => {
+        try {
+          await task();
+        } catch (error) {
+          console.warn(`[VoiceEngine] ${label} cleanup failed:`, error?.message || error);
+        }
+      };
+
+      // Privacy-first: stop the local share path before transport teardown so
+      // native capture does not keep recording after the user leaves voice.
+      await safeCleanup("screen share", () => this.stopScreenShare({ stopReason: "disconnect" }));
+
+      if (room?.localParticipant && this.localTrackPublication?.track) {
+        await safeCleanup("microphone", () => room.localParticipant.unpublishTrack(this.localTrackPublication.track, false));
+      }
+
+      this.localTrackPublication = null;
+      await safeCleanup("camera", () => this.stopCamera());
+      this._stopLocalTrackResources();
+      await safeCleanup("mic test", () => this.stopMicTest());
+
+      this.room = null;
+      this.mediaE2EEController = null;
+
+      if (room) {
+        try {
+          await room.disconnect();
+          return;
+        } catch (error) {
+          console.warn("[VoiceEngine] room disconnect failed:", error?.message || error);
+        }
+      }
+
+      this._clearRemoteMediaState();
+      this._emit("disconnected", this._buildDisconnectedPayload());
+    });
   }
 
   async syncEncryptedMediaParticipants(participantUserIds, reason = "membership") {
@@ -495,8 +602,14 @@ export class VoiceEngine {
   }
 
   async stopCamera() {
-    if (!this.room || !this.cameraTrack) return;
-    await this.room.localParticipant.unpublishTrack(this.cameraTrack, false);
+    if (!this.cameraTrack) return;
+    if (this.room?.localParticipant) {
+      try {
+        await this.room.localParticipant.unpublishTrack(this.cameraTrack, false);
+      } catch (error) {
+        console.warn("[VoiceEngine] camera unpublish failed:", error?.message || error);
+      }
+    }
     this.cameraTrack.stop();
     this.cameraTrack = null;
     this._emitRemoteMediaUpdate();
@@ -661,31 +774,37 @@ export class VoiceEngine {
       sourceLabel: null,
       hasAudio,
       actualCaptureSettings: screenShareVideoTrack?.mediaStreamTrack?.getSettings?.() || null,
+      captureMode: null,
     });
     return true;
   }
 
-  async stopScreenShare() {
-    if (!this.room || this.screenShareTracks.length === 0) return;
-    if (this.nativeScreenShare) {
-      await this._stopNativeDesktopScreenShare();
-      return;
-    }
-    await Promise.all(
-      this.screenShareTracks.map((track) => this.room.localParticipant.unpublishTrack(track.unpublishTarget || track, false)),
-    );
-    this.screenShareTracks.forEach((track) => track.stop?.());
-    this.screenShareTracks = [];
-    this._cleanupScreenShareAudioGain();
-    this._emitRemoteMediaUpdate();
-    this._emit("screen_share_change", {
-      enabled: false,
-      provider: null,
-      sourceId: null,
-      sourceKind: null,
-      sourceLabel: null,
-      hasAudio: false,
-      actualCaptureSettings: null,
+  async stopScreenShare({ stopReason = "manual" } = {}) {
+    return this._runLifecycleAction("stopScreenShare", async () => {
+      if (!this.nativeScreenShare && this.screenShareTracks.length === 0) {
+        return;
+      }
+
+      if (this.nativeScreenShare) {
+        await this._stopNativeDesktopScreenShare({ stopReason });
+        return;
+      }
+
+      const tracksToStop = [...this.screenShareTracks];
+      try {
+        if (this.room?.localParticipant) {
+          await Promise.all(
+            tracksToStop.map((track) => this.room.localParticipant.unpublishTrack(track.unpublishTarget || track, false)),
+          );
+        }
+      } catch (error) {
+        console.warn("[VoiceEngine] screen share unpublish failed:", error?.message || error);
+      } finally {
+        tracksToStop.forEach((track) => track.stop?.());
+        this.screenShareTracks = [];
+        this._cleanupScreenShareAudioGain();
+        this._emitScreenShareDisabled(stopReason);
+      }
     });
   }
 
@@ -785,6 +904,7 @@ export class VoiceEngine {
       pumpTimer: null,
       frameIntervalMs: Math.max(Math.round(1000 / Math.max(resolution.frameRate || 30, 1)), 16),
       lastFrameSettings: null,
+      captureMode: null,
     };
 
     // Pull at least one frame before publishing so the local stage and the
@@ -806,62 +926,24 @@ export class VoiceEngine {
     // Dort nutzen wir captureStream(fps) – der Browser erzeugt den Stream
     // automatisch aus dem Canvas-Zustand in Intervallen.
     //
-    // Erkennung: Wenn requestFrame() auf dem Track existiert UND aufgerufen
-    // werden kann, nutzen wir Modus 0. Sonst fps-Modus.
+    // Erkennung: Pull-Mode gilt erst dann als zuverlässig, wenn ein Probe-Video
+    // nach requestFrame() tatsächlich ein Frame empfängt. So fallen wir in
+    // WebView2 automatisch auf den robusteren FPS-Modus zurück.
     const targetFps = resolution.frameRate || 30;
-    let usePullMode = false;
-    const mediaStream = canvas.captureStream(targetFps);
-    const mediaStreamTrack = mediaStream.getVideoTracks()[0];
+    const verifiedPullCapture = await this._createVerifiedNativePullCapture(canvas);
+    const activeCapture = verifiedPullCapture || this._createFpsNativeCapture(canvas, targetFps);
+    const descriptor = createSyntheticVideoTrackDescriptor(
+      activeCapture.track,
+      Track.Source.ScreenShare,
+      () => activeCapture.track.stop(),
+    );
 
-    if (mediaStreamTrack && typeof mediaStreamTrack.requestFrame === "function") {
-      // Prüfen ob requestFrame() tatsächlich funktioniert (WebView2 hat es
-      // manchmal als no-op). Wir testen es einmal – wenn kein Fehler, Pull-Mode.
-      try {
-        mediaStreamTrack.requestFrame();
-        // Jetzt auf captureStream(0) umschalten für Effizienz
-        const pullStream = canvas.captureStream(0);
-        const pullTrack = pullStream.getVideoTracks()[0];
-        if (pullTrack) {
-          mediaStreamTrack.stop();
-          // Ersetze den Stream und Track
-          const finalStream = pullStream;
-          const finalTrack = pullTrack;
-          finalTrack.contentHint = "detail";
-          usePullMode = true;
-
-          const descriptor = createSyntheticVideoTrackDescriptor(
-            finalTrack,
-            Track.Source.ScreenShare,
-            () => finalTrack.stop(),
-          );
-
-          this.nativeScreenShare.mediaStream = finalStream;
-          this.nativeScreenShare.mediaStreamTrack = finalTrack;
-          this.nativeScreenShare.descriptor = descriptor;
-          this.nativeScreenShare.usePullMode = true;
-          this.screenShareTracks = [descriptor];
-        }
-      } catch {
-        // requestFrame() nicht nutzbar → fps-Modus beibehalten
-      }
-    }
-
-    if (!usePullMode) {
-      // fps-Modus: Browser generiert Frames automatisch aus Canvas
-      mediaStreamTrack.contentHint = "detail";
-
-      const descriptor = createSyntheticVideoTrackDescriptor(
-        mediaStreamTrack,
-        Track.Source.ScreenShare,
-        () => mediaStreamTrack.stop(),
-      );
-
-      this.nativeScreenShare.mediaStream = mediaStream;
-      this.nativeScreenShare.mediaStreamTrack = mediaStreamTrack;
-      this.nativeScreenShare.descriptor = descriptor;
-      this.nativeScreenShare.usePullMode = false;
-      this.screenShareTracks = [descriptor];
-    }
+    this.nativeScreenShare.mediaStream = activeCapture.stream;
+    this.nativeScreenShare.mediaStreamTrack = activeCapture.track;
+    this.nativeScreenShare.descriptor = descriptor;
+    this.nativeScreenShare.usePullMode = activeCapture.captureMode === NATIVE_CAPTURE_MODE.PULL;
+    this.nativeScreenShare.captureMode = activeCapture.captureMode;
+    this.screenShareTracks = [descriptor];
 
     // Track-Referenz für publishTrack – kann im Pull-Mode ein anderer sein
     const publishTrack = this.nativeScreenShare.mediaStreamTrack;
@@ -895,9 +977,45 @@ export class VoiceEngine {
         height: resolution.height,
         frameRate: resolution.frameRate,
       },
+      captureMode: this.nativeScreenShare.captureMode,
       audioRequested: Boolean(audio),
     });
     return true;
+  }
+
+  async _createVerifiedNativePullCapture(canvas) {
+    const pullStream = canvas.captureStream(0);
+    const pullTrack = pullStream.getVideoTracks()[0];
+
+    const verified = await verifyCanvasStreamPullMode({
+      stream: pullStream,
+      track: pullTrack,
+    }).catch(() => false);
+
+    if (!verified || !pullTrack) {
+      pullStream?.getTracks?.().forEach((track) => track.stop?.());
+      return null;
+    }
+
+    pullTrack.contentHint = "detail";
+    return {
+      stream: pullStream,
+      track: pullTrack,
+      captureMode: NATIVE_CAPTURE_MODE.PULL,
+    };
+  }
+
+  _createFpsNativeCapture(canvas, targetFps) {
+    const stream = canvas.captureStream(targetFps);
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      track.contentHint = "detail";
+    }
+    return {
+      stream,
+      track,
+      captureMode: NATIVE_CAPTURE_MODE.FPS,
+    };
   }
 
   async _waitForNativeDesktopFrame() {
@@ -982,6 +1100,7 @@ export class VoiceEngine {
         sourceLabel: this.nativeScreenShare.sourceLabel,
         hasAudio: false,
         actualCaptureSettings: this.nativeScreenShare.lastFrameSettings,
+        captureMode: this.nativeScreenShare.captureMode,
       });
       return true;
     } finally {
@@ -991,39 +1110,30 @@ export class VoiceEngine {
     }
   }
 
-  async _stopNativeDesktopScreenShare({ keepTracksArray = false } = {}) {
-    if (!this.room) {
-      return;
-    }
-
+  async _stopNativeDesktopScreenShare({ keepTracksArray = false, stopReason = "manual" } = {}) {
     const activeShare = this.nativeScreenShare;
+    const previousCaptureMode = activeShare?.captureMode || null;
     if (activeShare?.pumpTimer) {
       window.clearTimeout(activeShare.pumpTimer);
     }
 
-    if (activeShare?.mediaStreamTrack) {
-      await this.room.localParticipant.unpublishTrack(activeShare.mediaStreamTrack, false);
+    try {
+      if (activeShare?.mediaStreamTrack && this.room?.localParticipant) {
+        await this.room.localParticipant.unpublishTrack(activeShare.mediaStreamTrack, false);
+      }
+    } catch (error) {
+      console.warn("[VoiceEngine] native screen share unpublish failed:", error?.message || error);
+    } finally {
+      activeShare?.mediaStream?.getTracks?.().forEach((track) => track.stop?.());
+      activeShare?.descriptor?.stop?.();
+      await Promise.resolve(stopDesktopCapture?.()).catch(() => null);
+
+      if (!keepTracksArray) {
+        this.screenShareTracks = [];
+      }
+      this.nativeScreenShare = null;
+      this._emitScreenShareDisabled(stopReason, previousCaptureMode);
     }
-
-    activeShare?.mediaStream?.getTracks?.().forEach((track) => track.stop());
-    activeShare?.descriptor?.stop?.();
-
-    await stopDesktopCapture().catch(() => null);
-
-    if (!keepTracksArray) {
-      this.screenShareTracks = [];
-    }
-    this.nativeScreenShare = null;
-    this._emitRemoteMediaUpdate();
-    this._emit("screen_share_change", {
-      enabled: false,
-      provider: null,
-      sourceId: null,
-      sourceKind: null,
-      sourceLabel: null,
-      hasAudio: false,
-      actualCaptureSettings: null,
-    });
   }
 
   /**
@@ -1593,20 +1703,14 @@ export class VoiceEngine {
     });
 
     this.room.on(RoomEvent.Disconnected, (reason) => {
-      this.audioElements.forEach(({ element }) => element.remove());
-      this.audioElements.clear();
-      this.remoteVideoTracks.clear();
-      this._resetSpeakingState();
-      this._emitRemoteMediaUpdate();
+      this.forceCleanupForUnload("room_disconnected", { disconnectRoom: false });
+      this.room = null;
+      this.mediaE2EEController = null;
+      this._clearRemoteMediaState();
       // Disconnect-Grund weiterleiten damit das Frontend zwischen
       // gewolltem Leave und Kick durch Duplicate-Identity unterscheiden kann.
       // DisconnectReason: 1=CLIENT_INITIATED, 2=DUPLICATE_IDENTITY, etc.
-      const reasonCode = typeof reason === "number" ? reason : -1;
-      this._emit("disconnected", {
-        reason: reasonCode,
-        wasClientInitiated: reasonCode === DisconnectReason.CLIENT_INITIATED,
-        wasDuplicateIdentity: reasonCode === DisconnectReason.DUPLICATE_IDENTITY,
-      });
+      this._emit("disconnected", this._buildDisconnectedPayload(reason));
     });
   }
 

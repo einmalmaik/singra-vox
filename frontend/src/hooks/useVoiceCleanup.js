@@ -23,8 +23,10 @@ export function useVoiceCleanup({ serverId, voiceChannelId, voiceEngineRef }) {
       const cid = channelIdRef.current;
       if (!sid || !cid) return;
 
-      // VoiceEngine-Room trennen (synchron-sicher, best-effort)
-      try { voiceEngineRef?.current?.room?.disconnect(); } catch { /* ignore */ }
+      // Local media must stop immediately on unload so native capture does not
+      // continue recording after the user closed the app or tab.
+      try { voiceEngineRef?.current?.forceCleanupForUnload?.("pagehide"); } catch { /* ignore */ }
+      try { void voiceEngineRef?.current?.disconnect?.(); } catch { /* ignore */ }
 
       // Backend-State per sendBeacon aufräumen. Cookies (access_token)
       // werden automatisch mitgesendet → Auth funktioniert.
