@@ -64,6 +64,7 @@ package-lock.json
 # ── Rust / Tauri ──────────────────────────────────────────────────────────────
 desktop/src-tauri/target/
 desktop/node_modules/
+t/
 
 # ── Docker ───────────────────────────────────────────────────────────────────
 docker-compose.override.yml
