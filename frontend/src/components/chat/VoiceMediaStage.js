@@ -31,6 +31,7 @@ import { useTranslation } from "react-i18next";
 import { MonitorPlay, VideoCamera } from "@phosphor-icons/react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import { observeVideoReadiness } from "@/lib/videoReadiness";
 
 // ─── Konstanten ────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,7 @@ export default function VoiceMediaStage({
   // ── Callback: Video hat Daten und spielt → Loading beenden ────────────────
 
   const handleVideoPlaying = useCallback(() => {
+    setVideoError(false);
     setVideoLoading(false);
   }, []);
 
@@ -95,6 +97,7 @@ export default function VoiceMediaStage({
     // loadeddata feuert bevor playing – wir warten lieber auf playing,
     // setzen aber trotzdem Loading auf false falls playing nicht kommt
     // (z.B. bei muted autoplay ohne explizites play-Event)
+    setVideoError(false);
     setVideoLoading(false);
   }, []);
 
@@ -108,6 +111,7 @@ export default function VoiceMediaStage({
 
     const videoElement = videoRef.current;
     let detachFn = null;
+    let stopReadinessObserver = null;
     let retryCount = 0;
     let retryTimer = null;
     let cancelled = false;
@@ -132,6 +136,14 @@ export default function VoiceMediaStage({
       } else if (detachFn) {
         // Track erfolgreich angehängt – play() erzwingen für den Fall
         // dass autoplay vom Browser blockiert wurde
+        stopReadinessObserver?.();
+        stopReadinessObserver = observeVideoReadiness(videoElement, () => {
+          if (cancelled) {
+            return;
+          }
+          setVideoError(false);
+          setVideoLoading(false);
+        });
         void videoElement.play?.().catch(() => {});
       } else {
         // Alle Retries aufgebraucht, kein Track verfügbar
@@ -161,6 +173,7 @@ export default function VoiceMediaStage({
       if (retryTimer) {
         clearTimeout(retryTimer);
       }
+      stopReadinessObserver?.();
       videoElement?.pause?.();
       detachFn?.();
     };

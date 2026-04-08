@@ -96,6 +96,7 @@ import { useDesktopPtt } from "@/hooks/useDesktopPtt";
 import { useVoiceCleanup } from "@/hooks/useVoiceCleanup";
 import { getDesktopCaptureSession, listDesktopCaptureSources } from "@/lib/desktop";
 import {
+  DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID,
   DEFAULT_SCREEN_SHARE_PRESET_ID,
   SCREEN_SHARE_PRESET_OPTIONS,
   getScreenSharePreset,
@@ -131,7 +132,9 @@ export default function ChannelSidebar({
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [screenShareDialogOpen, setScreenShareDialogOpen] = useState(false);
-  const [screenShareQuality, setScreenShareQuality] = useState(DEFAULT_SCREEN_SHARE_PRESET_ID);
+  const [screenShareQuality, setScreenShareQuality] = useState(() => (
+    isDesktop ? DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID : DEFAULT_SCREEN_SHARE_PRESET_ID
+  ));
   // Systemaudio ist standardmäßig AUS – Nutzer aktiviert es explizit
   const [screenShareAudio, setScreenShareAudio] = useState(false);
   // Lautstärke des geteilten Audios (0-200%, Default 100%)

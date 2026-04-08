@@ -135,6 +135,14 @@ export const SCREEN_SHARE_PRESET_OPTIONS = Object.values(SCREEN_SHARE_PRESETS).m
 export const DEFAULT_SCREEN_SHARE_PRESET_ID = "1080p60";
 
 /**
+ * Der native Desktop-Pfad rendert Frames in Tauri aktuell über einen Canvas-
+ * Zwischenschritt. Für diesen JS-seitigen Pfad ist 1080p60 auf Windows/WebView2
+ * unnötig teuer und führt schnell zu Rucklern. Deshalb startet Desktop-Capture
+ * standardmäßig konservativer, der Nutzer kann aber weiterhin manuell hochdrehen.
+ */
+export const DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID = "720p30";
+
+/**
  * Gibt das vollständige Preset-Objekt zurück.
  * Fällt auf den Default zurück, wenn die ID ungültig ist.
  */

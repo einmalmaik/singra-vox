@@ -140,4 +140,69 @@ describe("VoiceEngine native cleanup", () => {
     expect(engine.nativeScreenShare).toBeNull();
     expect(engine.screenShareTracks).toEqual([]);
   });
+
+  it("replays the last native frame when no fresh desktop frame arrives", async () => {
+    const engine = new VoiceEngine();
+    const cachedFrame = { width: 2, height: 1 };
+    const putImageData = jest.fn();
+    const clearRect = jest.fn();
+    const requestFrame = jest.fn();
+
+    engine.nativeScreenShare = {
+      drawInFlight: false,
+      frameId: 42,
+      lastFrameImageData: cachedFrame,
+      lastReplayAt: 0,
+      canvas: { width: 2, height: 1 },
+      context: { putImageData, clearRect, drawImage: jest.fn() },
+      mediaStreamTrack: { requestFrame },
+      usePullMode: true,
+    };
+
+    const { getDesktopCaptureFrame } = require("@/lib/desktop");
+    getDesktopCaptureFrame.mockResolvedValue(null);
+
+    await expect(engine._pumpNativeDesktopFrame()).resolves.toBe(true);
+
+    expect(putImageData).toHaveBeenCalledWith(cachedFrame, 0, 0);
+    expect(clearRect).toHaveBeenCalledWith(0, 0, 2, 1);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+  });
+
+  it("forces a native frame replay when attaching the local screen-share preview", () => {
+    const engine = new VoiceEngine();
+    const cachedFrame = { width: 1, height: 1 };
+    const putImageData = jest.fn();
+    const clearRect = jest.fn();
+    const requestFrame = jest.fn();
+    const track = {
+      attach: jest.fn(),
+      detach: jest.fn(),
+      kind: "video",
+      source: "screen_share",
+    };
+    const element = {
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+    };
+
+    engine.userId = "user-1";
+    engine.nativeScreenShare = {
+      lastFrameImageData: cachedFrame,
+      lastReplayAt: 0,
+      canvas: { width: 1, height: 1 },
+      context: { putImageData, clearRect, drawImage: jest.fn() },
+      mediaStreamTrack: { requestFrame },
+      usePullMode: true,
+    };
+    engine.screenShareTracks = [track];
+
+    const detach = engine.attachParticipantMediaElement("user-1", "screen_share", element);
+
+    expect(typeof detach).toBe("function");
+    expect(track.attach).toHaveBeenCalledWith(element);
+    expect(putImageData).toHaveBeenCalledWith(cachedFrame, 0, 0);
+    expect(clearRect).toHaveBeenCalledWith(0, 0, 1, 1);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+  });
 });

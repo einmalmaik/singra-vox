@@ -93,6 +93,19 @@ function createSyntheticVideoTrackDescriptor(mediaStreamTrack, source, stop) {
   };
 }
 
+const NATIVE_FRAME_REPLAY_INTERVAL_MS = 250;
+
+function createNativeFrameSurface(width, height) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false, desynchronized: true });
+  if (!context) {
+    return null;
+  }
+  return { canvas, context };
+}
+
 export class VoiceEngine {
   constructor() {
     this.room = null;
@@ -904,6 +917,9 @@ export class VoiceEngine {
       pumpTimer: null,
       frameIntervalMs: Math.max(Math.round(1000 / Math.max(resolution.frameRate || 30, 1)), 16),
       lastFrameSettings: null,
+      lastFrameImageData: null,
+      lastReplayAt: 0,
+      frameSurface: null,
       captureMode: null,
     };
 
@@ -1061,7 +1077,7 @@ export class VoiceEngine {
     try {
       const frame = await getDesktopCaptureFrame(this.nativeScreenShare.frameId);
       if (!frame?.data?.length) {
-        return false;
+        return this._replayNativeDesktopFrame();
       }
 
       if (
@@ -1076,7 +1092,15 @@ export class VoiceEngine {
         ? frame.data
         : new Uint8ClampedArray(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength);
       const imageData = new ImageData(rgbaView, frame.width, frame.height);
-      this.nativeScreenShare.context.putImageData(imageData, 0, 0);
+      const frameSurface = this._ensureNativeFrameSurface(frame.width, frame.height);
+      frameSurface?.context?.putImageData(imageData, 0, 0);
+      this.nativeScreenShare.context.clearRect(0, 0, frame.width, frame.height);
+      if (frameSurface?.canvas) {
+        this.nativeScreenShare.context.drawImage(frameSurface.canvas, 0, 0);
+      } else {
+        this.nativeScreenShare.context.putImageData(imageData, 0, 0);
+      }
+      this.nativeScreenShare.lastFrameImageData = imageData;
 
       // Nur im Pull-Mode (captureStream(0)) muss requestFrame() aufgerufen
       // werden. Im fps-Modus macht der Browser das automatisch.
@@ -1086,6 +1110,7 @@ export class VoiceEngine {
       }
 
       this.nativeScreenShare.frameId = frame.frameId;
+      this.nativeScreenShare.lastReplayAt = Date.now();
       this.nativeScreenShare.lastFrameSettings = {
         width: frame.width,
         height: frame.height,
@@ -1136,6 +1161,65 @@ export class VoiceEngine {
     }
   }
 
+  _replayNativeDesktopFrame({ force = false } = {}) {
+    if (!this.nativeScreenShare?.context) {
+      return false;
+    }
+
+    const now = Date.now();
+    if (!force && (now - (this.nativeScreenShare.lastReplayAt || 0)) < NATIVE_FRAME_REPLAY_INTERVAL_MS) {
+      return false;
+    }
+
+    const { lastFrameImageData, canvas, context } = this.nativeScreenShare;
+    const replayWidth = lastFrameImageData?.width || this.nativeScreenShare.lastFrameSettings?.width;
+    const replayHeight = lastFrameImageData?.height || this.nativeScreenShare.lastFrameSettings?.height;
+    if (!replayWidth || !replayHeight) {
+      return false;
+    }
+
+    if (canvas.width !== replayWidth || canvas.height !== replayHeight) {
+      canvas.width = replayWidth;
+      canvas.height = replayHeight;
+    }
+
+    context.clearRect(0, 0, replayWidth, replayHeight);
+    const frameSurface = this.nativeScreenShare.frameSurface;
+    if (frameSurface?.canvas) {
+      context.drawImage(frameSurface.canvas, 0, 0);
+    } else if (lastFrameImageData) {
+      context.putImageData(lastFrameImageData, 0, 0);
+    } else {
+      return false;
+    }
+    if (this.nativeScreenShare.usePullMode
+        && typeof this.nativeScreenShare.mediaStreamTrack?.requestFrame === "function") {
+      this.nativeScreenShare.mediaStreamTrack.requestFrame();
+    }
+
+    this.nativeScreenShare.lastReplayAt = now;
+    return true;
+  }
+
+  _ensureNativeFrameSurface(width, height) {
+    if (!this.nativeScreenShare) {
+      return null;
+    }
+
+    const currentSurface = this.nativeScreenShare.frameSurface;
+    if (
+      currentSurface?.canvas?.width === width
+      && currentSurface?.canvas?.height === height
+      && currentSurface.context
+    ) {
+      return currentSurface;
+    }
+
+    const nextSurface = createNativeFrameSurface(width, height);
+    this.nativeScreenShare.frameSurface = nextSurface;
+    return nextSurface;
+  }
+
   /**
    * Hängt einen Video-Track (Kamera oder Screen-Share) an ein <video>-Element.
    *
@@ -1168,6 +1252,12 @@ export class VoiceEngine {
     // Eigenen Stream stumm schalten um Echo-Feedback zu vermeiden
     element.muted = participantId === this.userId;
     track.attach(element);
+
+    if (participantId === this.userId
+        && normalizedSource === Track.Source.ScreenShare
+        && this.nativeScreenShare) {
+      this._replayNativeDesktopFrame({ force: true });
+    }
 
     // play() kann durch Browser-Autoplay-Policy blockiert werden.
     // Wir versuchen es sofort und nochmal nach einer kurzen Verzögerung.
