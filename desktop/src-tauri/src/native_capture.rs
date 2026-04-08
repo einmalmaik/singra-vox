@@ -32,7 +32,7 @@ struct DesktopCaptureState {
 
 #[cfg(target_os = "windows")]
 #[derive(Debug, Clone)]
-enum CaptureSourceHandle {
+pub(crate) enum CaptureSourceHandle {
     Display(CapturableDisplay),
     Window(CapturableWindow),
 }
@@ -208,53 +208,60 @@ fn encode_frame_to_rgba(frame: crabgrab::prelude::VideoFrame) -> Result<LatestCa
 }
 
 #[cfg(target_os = "windows")]
-async fn start_capture_inner(
-    source_id: String,
-    requested_width: u32,
-    requested_height: u32,
-    requested_frame_rate: u32,
+pub(crate) async fn refresh_capture_sources(
     store: &DesktopCaptureStore,
-) -> Result<DesktopCaptureSessionInfo, String> {
-    let token = match CaptureStream::test_access(true) {
-        Some(token) => token,
-        None => CaptureStream::request_access(true)
-            .await
-            .ok_or_else(|| "Native capture access was denied by Windows.".to_string())?,
-    };
+) -> Result<Vec<DesktopCaptureSourceSummary>, String> {
+    let sources = enumerate_sources().await?;
+    let mut guard = store
+        .inner
+        .lock()
+        .map_err(|_| "Native capture state is unavailable.".to_string())?;
 
+    guard.sources.clear();
+    let mut summaries = Vec::with_capacity(sources.len());
+    for source in sources {
+        summaries.push(source.summary.clone());
+        guard.sources.insert(source.summary.id.clone(), source.handle);
+    }
+
+    Ok(summaries)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) async fn ensure_capture_source_handle(
+    store: &DesktopCaptureStore,
+    source_id: &str,
+) -> Result<CaptureSourceHandle, String> {
     let source_known = {
         let guard = store
             .inner
             .lock()
             .map_err(|_| "Native capture state is unavailable.".to_string())?;
-        guard.sources.contains_key(&source_id)
+        guard.sources.contains_key(source_id)
     };
 
     if !source_known {
-        let fresh_sources = enumerate_sources().await?;
-        let mut guard = store
-            .inner
-            .lock()
-            .map_err(|_| "Native capture state is unavailable.".to_string())?;
-        guard.sources.clear();
-        for source in fresh_sources {
-            guard.sources.insert(source.summary.id.clone(), source.handle);
-        }
+        let _ = refresh_capture_sources(store).await?;
     }
 
-    let source_handle = {
-        let guard = store
-            .inner
-            .lock()
-            .map_err(|_| "Native capture state is unavailable.".to_string())?;
-        guard
-            .sources
-            .get(&source_id)
-            .cloned()
-            .ok_or_else(|| "The selected capture source is no longer available.".to_string())?
-    };
+    let guard = store
+        .inner
+        .lock()
+        .map_err(|_| "Native capture state is unavailable.".to_string())?;
+    guard
+        .sources
+        .get(source_id)
+        .cloned()
+        .ok_or_else(|| "The selected capture source is no longer available.".to_string())
+}
 
-    let (source_kind, source_label, config) = match source_handle {
+#[cfg(target_os = "windows")]
+pub(crate) fn build_capture_config(
+    source_handle: CaptureSourceHandle,
+    requested_width: u32,
+    requested_height: u32,
+) -> Result<(String, String, CaptureConfig), String> {
+    let built = match source_handle {
         CaptureSourceHandle::Display(display) => {
             let rect = display.rect();
             let output_size = fit_output_size(
@@ -293,6 +300,28 @@ async fn start_capture_inner(
             )
         }
     };
+
+    Ok(built)
+}
+
+#[cfg(target_os = "windows")]
+async fn start_capture_inner(
+    source_id: String,
+    requested_width: u32,
+    requested_height: u32,
+    requested_frame_rate: u32,
+    store: &DesktopCaptureStore,
+) -> Result<DesktopCaptureSessionInfo, String> {
+    let token = match CaptureStream::test_access(true) {
+        Some(token) => token,
+        None => CaptureStream::request_access(true)
+            .await
+            .ok_or_else(|| "Native capture access was denied by Windows.".to_string())?,
+    };
+
+    let source_handle = ensure_capture_source_handle(store, &source_id).await?;
+    let (source_kind, source_label, config) =
+        build_capture_config(source_handle, requested_width, requested_height)?;
 
     let latest_frame = Arc::new(Mutex::new(None));
     let latest_frame_ref = latest_frame.clone();
@@ -370,20 +399,7 @@ pub async fn list_capture_sources(
 ) -> Result<Vec<DesktopCaptureSourceSummary>, String> {
     #[cfg(target_os = "windows")]
     {
-        let sources = enumerate_sources().await?;
-        let mut guard = store
-            .inner
-            .lock()
-            .map_err(|_| "Native capture state is unavailable.".to_string())?;
-
-        guard.sources.clear();
-        let mut summaries = Vec::with_capacity(sources.len());
-        for source in sources {
-            summaries.push(source.summary.clone());
-            guard.sources.insert(source.summary.id.clone(), source.handle);
-        }
-
-        return Ok(summaries);
+        return refresh_capture_sources(&store).await;
     }
 
     #[cfg(not(target_os = "windows"))]

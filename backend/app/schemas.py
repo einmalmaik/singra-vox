@@ -190,3 +190,8 @@ class ProfileUpdateInput(BaseModel):
 class VoiceTokenInput(BaseModel):
     server_id: str
     channel_id: str
+
+
+class NativeScreenShareTokenInput(BaseModel):
+    server_id: str
+    channel_id: str

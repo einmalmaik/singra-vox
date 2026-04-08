@@ -249,7 +249,28 @@ export async function getDesktopCaptureFrame(lastFrameId = null) {
 export async function getDesktopCaptureSession() {
   const invoke = await getInvoke();
   if (!invoke) return null;
-  return invoke("get_desktop_capture_session");
+  return invoke("get_native_screen_share_session");
+}
+
+export async function startNativeScreenShare(input) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("start_native_screen_share", { input });
+}
+
+export async function stopNativeScreenShare() {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("stop_native_screen_share");
+}
+
+export async function updateNativeScreenShareKey(sharedMediaKeyB64, keyIndex = 0) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("update_native_screen_share_key", {
+    sharedMediaKeyB64,
+    keyIndex,
+  });
 }
 
 export async function openExternalUrl(url) {

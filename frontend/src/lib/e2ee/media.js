@@ -62,6 +62,23 @@ export async function createEncryptedMediaController(config, channelId) {
 
   let currentKeyVersion = null;
   let currentParticipants = [];
+  let currentMediaKeyB64 = null;
+  const keyListeners = new Set();
+
+  const emitKeyUpdate = () => {
+    const nextState = {
+      keyVersion: currentKeyVersion,
+      participantUserIds: [...currentParticipants],
+      sharedMediaKeyB64: currentMediaKeyB64,
+    };
+    keyListeners.forEach((listener) => {
+      try {
+        listener(nextState);
+      } catch {
+        // Ignore listener errors so the media controller remains authoritative.
+      }
+    });
+  };
 
   const applyCurrentPackage = async (identity, keyPackage) => {
     if (!keyPackage) {
@@ -81,8 +98,10 @@ export async function createEncryptedMediaController(config, channelId) {
       identity.devicePrivateKey,
     );
     await keyProvider.setKey(base64ToArrayBuffer(messageKey));
+    currentMediaKeyB64 = messageKey;
     currentKeyVersion = keyPackage.key_version || null;
     currentParticipants = normalizeParticipantIds(keyPackage.participant_user_ids || []);
+    emitKeyUpdate();
     return true;
   };
 
@@ -103,8 +122,10 @@ export async function createEncryptedMediaController(config, channelId) {
     });
 
     await keyProvider.setKey(base64ToArrayBuffer(mediaKeyB64));
+    currentMediaKeyB64 = mediaKeyB64;
     currentKeyVersion = keyVersion;
     currentParticipants = [...participantUserIds];
+    emitKeyUpdate();
     return {
       rotated: true,
       keyVersion,
@@ -140,6 +161,29 @@ export async function createEncryptedMediaController(config, channelId) {
       return {
         keyVersion: currentKeyVersion,
         participantUserIds: [...currentParticipants],
+      };
+    },
+    getNativeBridgeState() {
+      return {
+        keyVersion: currentKeyVersion,
+        participantUserIds: [...currentParticipants],
+        sharedMediaKeyB64: currentMediaKeyB64,
+      };
+    },
+    subscribeNativeKey(listener) {
+      if (typeof listener !== "function") {
+        return () => {};
+      }
+      keyListeners.add(listener);
+      if (currentMediaKeyB64) {
+        listener({
+          keyVersion: currentKeyVersion,
+          participantUserIds: [...currentParticipants],
+          sharedMediaKeyB64: currentMediaKeyB64,
+        });
+      }
+      return () => {
+        keyListeners.delete(listener);
       };
     },
   };

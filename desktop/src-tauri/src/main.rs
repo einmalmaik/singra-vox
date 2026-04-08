@@ -10,6 +10,8 @@
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod native_capture;
+#[cfg(target_os = "windows")]
+mod native_livekit;
 
 mod rich_presence;
 mod voice_overlay;
@@ -774,6 +776,8 @@ fn main() {
     // DesktopCaptureStore wird nur auf Windows/macOS kompiliert (crabgrab)
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     let builder = builder.manage(native_capture::DesktopCaptureStore::default());
+    #[cfg(target_os = "windows")]
+    let builder = builder.manage(native_livekit::NativeScreenShareStore::default());
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -815,6 +819,14 @@ fn main() {
             voice_overlay::is_fullscreen_game_active,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::list_capture_sources,
+            #[cfg(target_os = "windows")]
+            native_livekit::start_native_screen_share,
+            #[cfg(target_os = "windows")]
+            native_livekit::stop_native_screen_share,
+            #[cfg(target_os = "windows")]
+            native_livekit::update_native_screen_share_key,
+            #[cfg(target_os = "windows")]
+            native_livekit::get_native_screen_share_session,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             native_capture::start_desktop_capture,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
