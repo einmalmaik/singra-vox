@@ -827,14 +827,6 @@ fn main() {
             native_livekit::update_native_screen_share_key,
             #[cfg(target_os = "windows")]
             native_livekit::get_native_screen_share_session,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::start_desktop_capture,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::stop_desktop_capture,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::get_desktop_capture_frame,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::get_desktop_capture_session,
         ])
         .run(tauri::generate_context!())
         .expect("error running Singra Vox desktop");

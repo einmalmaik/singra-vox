@@ -29,7 +29,6 @@
  * Erweiterung:
  *   Neue Qualitätsprofile → screenSharePresets.js
  *   LiveKit-Transport-Abstraktion → LiveKitTransport.js (noch nicht vollständig migriert)
- *   Audio-Analyse → AudioAnalyzer.js
  */
 
 import api from "@/lib/api";
@@ -38,7 +37,7 @@ import { createSingleFlightController } from "@/lib/asyncControl";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
 import { startNativeScreenShare, stopNativeScreenShare, updateNativeScreenShareKey } from "@/lib/desktop";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
-import { AudioAnalyzer } from "@/lib/AudioAnalyzer";
+import { createParticipantMediaRegistry } from "@/lib/participantMediaRegistry";
 
 // ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
 
@@ -50,7 +49,7 @@ function clampUnit(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 }
 
-// Legacy shim – kept for the synthetic video track helper below
+// Browser compatibility helper for Web Audio initialization.
 function getAudioContextCtor() {
   if (typeof window === "undefined") return null;
   return window.AudioContext || window.webkitAudioContext || null;
@@ -78,11 +77,12 @@ export class VoiceEngine {
     this.preferences = getDefaultVoicePreferences();
     this.runtimeConfig = null;
     // Audio and video can arrive from multiple sources per participant
-    // (microphone, screen-share audio, camera, screen-share video). We track
-    // them separately so adding a screen share does not overwrite the user's
-    // microphone path.
+    // (microphone, screen-share audio, camera, screen-share video). Audio
+    // element state stays local to the engine while participant/video mapping
+    // lives in a dedicated registry so LiveKit identity changes do not leak
+    // into UI state keys.
     this.audioElements = new Map();
-    this.remoteVideoTracks = new Map();
+    this.participantMediaRegistry = createParticipantMediaRegistry();
     this.onStateChange = null;
     this.listeners = new Set();
 
@@ -442,7 +442,7 @@ export class VoiceEngine {
       element.remove?.();
     });
     this.audioElements.clear();
-    this.remoteVideoTracks.clear();
+    this.participantMediaRegistry.clear();
     this._resetSpeakingState();
     this._emitRemoteMediaUpdate();
   }
@@ -851,8 +851,41 @@ export class VoiceEngine {
     return this.screenShareAudioDest.stream.getAudioTracks()[0] || rawAudioTrack;
   }
 
+  _resolveParticipantIdentity(participant) {
+    return participant?.identity || participant?.participantIdentity || null;
+  }
+
+  _syncParticipantStateFromLiveKit(participant) {
+    const participantEntry = this.participantMediaRegistry.upsertParticipant(participant);
+    if (!participantEntry) {
+      return null;
+    }
+
+    this.audioElements.forEach((audioState) => {
+      if (audioState.participantIdentity !== participantEntry.participantIdentity) {
+        return;
+      }
+      audioState.participantId = participantEntry.userId;
+    });
+
+    if (
+      participantEntry.previousUserId
+      && participantEntry.previousUserId !== participantEntry.userId
+    ) {
+      this.remoteSpeakerIds = this.remoteSpeakerIds.map((speakerId) => (
+        speakerId === participantEntry.previousUserId ? participantEntry.userId : speakerId
+      ));
+      this.activeSpeakerIds = this.activeSpeakerIds.map((speakerId) => (
+        speakerId === participantEntry.previousUserId ? participantEntry.userId : speakerId
+      ));
+      this._emitSpeakingState();
+    }
+
+    return participantEntry;
+  }
+
   _resolveParticipantUserId(participant) {
-    return participant?.attributes?.owner_user_id || participant?.identity || null;
+    return this._syncParticipantStateFromLiveKit(participant)?.userId || null;
   }
 
   _collectCurrentVoiceParticipantUserIds() {
@@ -971,10 +1004,7 @@ export class VoiceEngine {
     }
 
     const normalizedSource = source || Track.Source.Camera;
-    const track = participantId === this.userId
-      ? (this._getLocalVideoTrack(normalizedSource)
-        || this.remoteVideoTracks.get(this._trackKey(participantId, normalizedSource))?.track)
-      : this.remoteVideoTracks.get(this._trackKey(participantId, normalizedSource))?.track;
+    const track = this._resolveStageTrack(participantId, normalizedSource);
 
     // Kein Track verfügbar → null zurückgeben damit der Aufrufer retrien kann
     if (!track) {
@@ -1160,26 +1190,32 @@ export class VoiceEngine {
     // Control the LiveKit subscription at the publication layer, not only on
     // the attached HTMLAudioElement. This keeps local deafen/mute authoritative
     // even when remote PTT or track restarts cause a fresh media pipeline.
-    const remoteParticipant = this.room?.remoteParticipants?.get(userId);
-    remoteParticipant?.audioTrackPublications?.forEach((publication) => {
-      if (!publication) {
+    this.room?.remoteParticipants?.forEach((remoteParticipant) => {
+      const participantUserId = this._resolveParticipantUserId(remoteParticipant);
+      if (participantUserId !== userId) {
         return;
       }
 
-      if (typeof publication.setSubscribed === "function" && publication.isDesired !== shouldReceiveAudio) {
-        publication.setSubscribed(shouldReceiveAudio);
-      }
+      remoteParticipant.audioTrackPublications?.forEach((publication) => {
+        if (!publication) {
+          return;
+        }
 
-      if (typeof remoteParticipant.setVolume === "function") {
-        const source = publication.source === Track.Source.ScreenShareAudio
-          ? Track.Source.ScreenShareAudio
-          : Track.Source.Microphone;
-        remoteParticipant.setVolume(desiredVolume, source);
-      }
+        if (typeof publication.setSubscribed === "function" && publication.isDesired !== shouldReceiveAudio) {
+          publication.setSubscribed(shouldReceiveAudio);
+        }
 
-      if (typeof publication.track?.setVolume === "function") {
-        publication.track.setVolume(desiredVolume);
-      }
+        if (typeof remoteParticipant.setVolume === "function") {
+          const source = publication.source === Track.Source.ScreenShareAudio
+            ? Track.Source.ScreenShareAudio
+            : Track.Source.Microphone;
+          remoteParticipant.setVolume(desiredVolume, source);
+        }
+
+        if (typeof publication.track?.setVolume === "function") {
+          publication.track.setVolume(desiredVolume);
+        }
+      });
     });
 
     this.audioElements.forEach((state) => {
@@ -1412,11 +1448,12 @@ export class VoiceEngine {
 
     this.room.on(RoomEvent.TrackSubscribed, async (track, publication, participant) => {
       const source = track.source || Track.Source.Unknown;
-      const participantUserId = this._resolveParticipantUserId(participant);
-      if (!participantUserId) {
+      const participantIdentity = this._resolveParticipantIdentity(participant);
+      const participantEntry = this._syncParticipantStateFromLiveKit(participant);
+      if (!participantIdentity || !participantEntry?.userId) {
         return;
       }
-      const trackKey = this._trackKey(participantUserId, source);
+      const trackKey = this._trackKey(participantIdentity, source);
 
       if (track.kind === Track.Kind.Audio) {
         const audioEl = track.attach();
@@ -1427,14 +1464,15 @@ export class VoiceEngine {
         this.audioElements.set(trackKey, {
           element: audioEl,
           track,
-          participantId: participantUserId,
+          participantId: participantEntry.userId,
+          participantIdentity,
           source,
           publication,
           subscriptionEnabled: true,
           attached: true,
           playbackPaused: false,
         });
-        this._applyParticipantAudio(participantUserId);
+        this._applyParticipantAudio(participantEntry.userId);
 
         if (this.preferences.outputDeviceId && typeof audioEl.setSinkId === "function") {
           try {
@@ -1444,25 +1482,25 @@ export class VoiceEngine {
           }
         }
       } else if (track.kind === Track.Kind.Video) {
-        this.remoteVideoTracks.set(trackKey, {
+        this.participantMediaRegistry.upsertVideoTrack({
+          participant,
           track,
-          participantId: participantUserId,
-          participantIdentity: participant.identity,
           source,
         });
       }
 
       this._emitRemoteMediaUpdate();
-      this._emit("peer_connected", { userId: participantUserId, source, kind: track.kind });
+      this._emit("peer_connected", { userId: participantEntry.userId, source, kind: track.kind });
     });
 
     this.room.on(RoomEvent.TrackUnsubscribed, (track, _publication, participant) => {
       const source = track.source || Track.Source.Unknown;
+      const participantIdentity = this._resolveParticipantIdentity(participant);
       const participantUserId = this._resolveParticipantUserId(participant);
-      if (!participantUserId) {
+      if (!participantIdentity || !participantUserId) {
         return;
       }
-      const trackKey = this._trackKey(participantUserId, source);
+      const trackKey = this._trackKey(participantIdentity, source);
 
       if (track.kind === Track.Kind.Audio) {
         const existing = this.audioElements.get(trackKey);
@@ -1472,7 +1510,7 @@ export class VoiceEngine {
           this.audioElements.delete(trackKey);
         }
       } else if (track.kind === Track.Kind.Video) {
-        this.remoteVideoTracks.delete(trackKey);
+        this.participantMediaRegistry.removeVideoTrack(participantIdentity, source);
       }
 
       this._setRemoteSpeakerIds(
@@ -1481,6 +1519,16 @@ export class VoiceEngine {
       this._applyParticipantAudio(participantUserId);
       this._emitRemoteMediaUpdate();
       this._emit("peer_disconnected", { userId: participantUserId, source, kind: track.kind });
+    });
+
+    this.room.on(RoomEvent.ParticipantAttributesChanged, (_changedAttributes, participant) => {
+      const participantEntry = this._syncParticipantStateFromLiveKit(participant);
+      if (!participantEntry?.userId) {
+        return;
+      }
+
+      this._applyParticipantAudio(participantEntry.userId);
+      this._emitRemoteMediaUpdate();
     });
 
     const reapplyRemoteAudioState = (publication, participant, status = null) => {
@@ -1596,50 +1644,43 @@ export class VoiceEngine {
     return null;
   }
 
-  _trackKey(participantId, source) {
-    return `${participantId}:${source || "unknown"}`;
+  _getNativeScreenShareProxyTrack() {
+    if (!this.nativeScreenShare?.participantIdentity) {
+      return null;
+    }
+
+    return this.participantMediaRegistry.getVideoTrackByIdentity(
+      this.nativeScreenShare.participantIdentity,
+      Track.Source.ScreenShare,
+    )?.track || null;
+  }
+
+  _resolveStageTrack(participantId, source) {
+    if (participantId === this.userId) {
+      const localTrack = this._getLocalVideoTrack(source);
+      if (localTrack) {
+        return localTrack;
+      }
+
+      if (source === Track.Source.ScreenShare) {
+        return this._getNativeScreenShareProxyTrack();
+      }
+
+      return null;
+    }
+
+    return this.participantMediaRegistry.findVideoTrackByUserId(participantId, source)?.track || null;
+  }
+
+  _trackKey(participantIdentity, source) {
+    return `${participantIdentity}:${source || "unknown"}`;
   }
 
   _buildRemoteMediaParticipants() {
-    const participants = new Map();
-
-    this.remoteVideoTracks.forEach(({ participantId, source }) => {
-      if (!participantId || participantId === this.userId) {
-        return;
-      }
-      const nextState = participants.get(participantId) || {
-        userId: participantId,
-        hasCamera: false,
-        hasScreenShare: false,
-        hasScreenShareAudio: false,
-      };
-      if (source === Track.Source.Camera) {
-        nextState.hasCamera = true;
-      }
-      if (source === Track.Source.ScreenShare) {
-        nextState.hasScreenShare = true;
-      }
-      participants.set(participantId, nextState);
+    return this.participantMediaRegistry.listRemoteMediaParticipants({
+      localUserId: this.userId,
+      audioStates: Array.from(this.audioElements.values()),
     });
-
-    this.audioElements.forEach(({ participantId, source }) => {
-      if (!participantId || participantId === this.userId) {
-        return;
-      }
-      if (source !== Track.Source.ScreenShareAudio) {
-        return;
-      }
-      const nextState = participants.get(participantId) || {
-        userId: participantId,
-        hasCamera: false,
-        hasScreenShare: false,
-        hasScreenShareAudio: false,
-      };
-      nextState.hasScreenShareAudio = true;
-      participants.set(participantId, nextState);
-    });
-
-    return Array.from(participants.values());
   }
 
   _emitRemoteMediaUpdate() {

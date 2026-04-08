@@ -94,13 +94,18 @@ import GlobalSettingsOverlay from "@/components/settings/GlobalSettingsOverlay";
 import VoiceMediaStage from "@/components/chat/VoiceMediaStage";
 import { useDesktopPtt } from "@/hooks/useDesktopPtt";
 import { useVoiceCleanup } from "@/hooks/useVoiceCleanup";
-import { getDesktopCaptureSession, listDesktopCaptureSources } from "@/lib/desktop";
+import { getNativeScreenShareSession, listDesktopCaptureSources } from "@/lib/desktop";
+import { getScreenShareCapabilities } from "@/lib/screenShareCapabilities";
 import {
   DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID,
   DEFAULT_SCREEN_SHARE_PRESET_ID,
   SCREEN_SHARE_PRESET_OPTIONS,
   getScreenSharePreset,
 } from "@/lib/screenSharePresets";
+
+function resolveParticipantDisplayName(participant, t) {
+  return participant?.display_name || participant?.username || t("common.unknown");
+}
 
 export default function ChannelSidebar({
   server,
@@ -123,6 +128,10 @@ export default function ChannelSidebar({
   const { config } = useRuntime();
   const { ready: e2eeReady, isDesktopCapable } = useE2EE();
   const isDesktop = Boolean(config?.isDesktop);
+  const screenShareCapabilities = useMemo(
+    () => getScreenShareCapabilities({ isDesktop }),
+    [isDesktop],
+  );
   const [showCreate, setShowCreate] = useState(false);
   const [chName, setChName] = useState("");
   const [chType, setChType] = useState("text");
@@ -228,7 +237,7 @@ export default function ChannelSidebar({
     if (user?.id && cameraEnabled) {
       entries.push({
         userId: user.id,
-        participantName: user.display_name || t("common.unknown"),
+        participantName: resolveParticipantDisplayName(user, t),
         source: "camera",
         badge: t("channel.liveCameraBadge"),
         hasAudio: false,
@@ -238,7 +247,7 @@ export default function ChannelSidebar({
     if (user?.id && screenShareEnabled) {
       entries.push({
         userId: user.id,
-        participantName: user.display_name || t("common.unknown"),
+        participantName: resolveParticipantDisplayName(user, t),
         source: "screen_share",
         badge: t("channel.liveStreamBadge"),
         hasAudio: Boolean(screenShareMeta.hasAudio),
@@ -276,8 +285,7 @@ export default function ChannelSidebar({
     screenShareEnabled,
     screenShareMeta.hasAudio,
     t,
-    user?.display_name,
-    user?.id,
+    user,
   ]);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -457,7 +465,7 @@ export default function ChannelSidebar({
       try {
         const [sources, activeSession] = await Promise.all([
           listDesktopCaptureSources(),
-          getDesktopCaptureSession().catch(() => null),
+          getNativeScreenShareSession().catch(() => null),
         ]);
 
         if (cancelled) {
@@ -494,6 +502,12 @@ export default function ChannelSidebar({
       cancelled = true;
     };
   }, [isDesktop, screenShareDialogOpen, t]);
+
+  useEffect(() => {
+    if (!screenShareCapabilities.supportsSystemAudio && screenShareAudio) {
+      setScreenShareAudio(false);
+    }
+  }, [screenShareAudio, screenShareCapabilities.supportsSystemAudio]);
 
   useEffect(() => {
     if (!voiceChannel?.is_private || !voiceEngineRef?.current || currentVoiceParticipantIds.length === 0) {
@@ -1668,38 +1682,38 @@ export default function ChannelSidebar({
                   </select>
                 </div>
 
-                <div className="workspace-card space-y-3 px-4 py-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
-                      <p className="text-xs text-zinc-400">
-                        {t("channel.shareSystemAudioHelp")}
-                      </p>
-                    </div>
-                    <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
-                  </div>
-                  {/* Lautstärkeregler – nur sichtbar wenn Systemaudio aktiv */}
-                  {screenShareAudio && (
-                    <div className="space-y-2 pt-1 border-t border-white/5">
-                      <div className="flex items-center justify-between text-xs text-zinc-400">
-                        <span>{t("channel.shareAudioVolume", { defaultValue: "Audio-Lautstärke" })}</span>
-                        <span>{screenShareAudioVolume}%</span>
+                {screenShareCapabilities.supportsSystemAudio && (
+                  <div className="workspace-card space-y-3 px-4 py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">{t("channel.shareSystemAudio")}</p>
+                        <p className="text-xs text-zinc-400">
+                          {t("channel.shareSystemAudioHelp")}
+                        </p>
                       </div>
-                      <Slider
-                        value={[screenShareAudioVolume]}
-                        min={0}
-                        max={200}
-                        step={5}
-                        onValueChange={([value]) => {
-                          setScreenShareAudioVolume(value);
-                          // Lautstärke sofort an den VoiceEngine weiterleiten
-                          voiceEngineRef?.current?.setScreenShareAudioVolume?.(value);
-                        }}
-                        data-testid="screen-share-audio-volume-slider"
-                      />
+                      <Switch checked={screenShareAudio} onCheckedChange={setScreenShareAudio} />
                     </div>
-                  )}
-                </div>
+                    {screenShareAudio && screenShareCapabilities.supportsAudioVolumeControl && (
+                      <div className="space-y-2 pt-1 border-t border-white/5">
+                        <div className="flex items-center justify-between text-xs text-zinc-400">
+                          <span>{t("channel.shareAudioVolume", { defaultValue: "Audio-Lautstärke" })}</span>
+                          <span>{screenShareAudioVolume}%</span>
+                        </div>
+                        <Slider
+                          value={[screenShareAudioVolume]}
+                          min={0}
+                          max={200}
+                          step={5}
+                          onValueChange={([value]) => {
+                            setScreenShareAudioVolume(value);
+                            voiceEngineRef?.current?.setScreenShareAudioVolume?.(value);
+                          }}
+                          data-testid="screen-share-audio-volume-slider"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="workspace-card space-y-2 px-4 py-3 text-xs text-zinc-400">
                   <p>{t("channel.nativeShareHint")}</p>

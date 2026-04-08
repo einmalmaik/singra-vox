@@ -9,7 +9,9 @@
  */
 jest.mock("livekit-client", () => ({
   Room: jest.fn(),
-  RoomEvent: {},
+  RoomEvent: {
+    ParticipantAttributesChanged: "participantAttributesChanged",
+  },
   Track: {
     Kind: { Audio: "audio", Video: "video" },
     Source: {
@@ -44,12 +46,10 @@ jest.mock("@/lib/voicePreferences", () => ({
 }), { virtual: true });
 
 jest.mock("@/lib/asyncControl", () => jest.requireActual("../asyncControl"), { virtual: true });
-jest.mock("@/lib/nativeCaptureProbe", () => jest.requireActual("../nativeCaptureProbe"), { virtual: true });
+jest.mock("@/lib/participantMediaRegistry", () => jest.requireActual("../participantMediaRegistry"), { virtual: true });
 
 jest.mock("@/lib/desktop", () => ({
-  getDesktopCaptureFrame: jest.fn(),
   startNativeScreenShare: jest.fn(),
-  stopDesktopCapture: jest.fn(() => Promise.resolve(true)),
   stopNativeScreenShare: jest.fn(() => Promise.resolve(true)),
   updateNativeScreenShareKey: jest.fn(() => Promise.resolve(true)),
 }), { virtual: true });
@@ -127,10 +127,16 @@ describe("VoiceEngine native cleanup", () => {
     };
 
     engine.userId = "user-1";
-    engine.remoteVideoTracks.set("user-1:screen_share", {
-      track,
-      participantId: "user-1",
+    engine.nativeScreenShare = {
       participantIdentity: "screen-share:channel:user-1",
+      keySubscriptionCleanup: jest.fn(),
+    };
+    engine.participantMediaRegistry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel:user-1",
+        attributes: { owner_user_id: "user-1" },
+      },
+      track,
       source: "screen_share",
     });
 
@@ -153,16 +159,20 @@ describe("VoiceEngine native cleanup", () => {
     };
 
     engine.userId = "user-1";
-    engine.remoteVideoTracks.set("user-1:screen_share", {
+    engine.participantMediaRegistry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel:user-1",
+        attributes: { owner_user_id: "user-1" },
+      },
       track: localProxyVideoTrack,
-      participantId: "user-1",
-      participantIdentity: "screen-share:channel:user-1",
       source: "screen_share",
     });
-    engine.remoteVideoTracks.set("user-2:screen_share", {
+    engine.participantMediaRegistry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel:user-2",
+        attributes: { owner_user_id: "user-2" },
+      },
       track: remoteVideoTrack,
-      participantId: "user-2",
-      participantIdentity: "screen-share:channel:user-2",
       source: "screen_share",
     });
 
