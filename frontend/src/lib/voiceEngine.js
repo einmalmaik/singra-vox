@@ -128,6 +128,10 @@ export class VoiceEngine {
     this.cameraTrack = null;
     this.screenShareTracks = [];
     this.nativeScreenShare = null;
+    this.localVideoTrackRevisions = {
+      camera: { track: null, revision: 0 },
+      screenShare: { track: null, revision: 0 },
+    };
 
     // ── Screen-Share Audio Gain ──────────────────────────────────────────────
     // Ermöglicht es dem Nutzer, die Lautstärke des geteilten System-/Spielaudios
@@ -1704,6 +1708,28 @@ export class VoiceEngine {
     return null;
   }
 
+  _captureLocalTrackRevision(source, track) {
+    const slotKey = source === Track.Source.Camera
+      ? "camera"
+      : (source === Track.Source.ScreenShare ? "screenShare" : null);
+    if (!slotKey) {
+      return 0;
+    }
+
+    const slot = this.localVideoTrackRevisions[slotKey];
+    if (!track) {
+      slot.track = null;
+      return slot.revision;
+    }
+
+    if (slot.track !== track) {
+      slot.track = track;
+      slot.revision += 1;
+    }
+
+    return slot.revision;
+  }
+
   _getNativeScreenShareProxyTrack() {
     if (!this.nativeScreenShare?.participantIdentity) {
       return null;
@@ -1747,6 +1773,14 @@ export class VoiceEngine {
     const localCameraTrack = this._getLocalVideoTrack(Track.Source.Camera);
     const localScreenShareTrack = this._getLocalVideoTrack(Track.Source.ScreenShare)
       || this._getNativeScreenShareProxyTrack();
+    const localCameraTrackRevision = this._captureLocalTrackRevision(
+      Track.Source.Camera,
+      localCameraTrack,
+    );
+    const localScreenShareTrackRevision = this._captureLocalTrackRevision(
+      Track.Source.ScreenShare,
+      localScreenShareTrack,
+    );
 
     this._emit("media_tracks_update", {
       participants: this._buildRemoteMediaParticipants(),
@@ -1754,9 +1788,11 @@ export class VoiceEngine {
         userId: this.userId,
         hasCamera: Boolean(this.cameraTrack),
         hasCameraTrack: Boolean(localCameraTrack),
+        cameraTrackRevision: localCameraTrackRevision,
         hasScreenShare: Boolean(this.nativeScreenShare)
           || this.screenShareTracks.some((track) => track.kind === Track.Kind.Video),
         hasScreenShareTrack: Boolean(localScreenShareTrack),
+        screenShareTrackRevision: localScreenShareTrackRevision,
         hasScreenShareAudio: this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
       },
     });

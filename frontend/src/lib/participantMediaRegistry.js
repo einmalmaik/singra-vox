@@ -19,6 +19,16 @@ function buildTrackKey(participantIdentity, source) {
   return `${participantIdentity}:${normalizeSource(source)}`;
 }
 
+function buildNextTrackRevision(previousTrackState, nextTrack) {
+  if (!nextTrack) {
+    return previousTrackState?.revision || 0;
+  }
+  if (previousTrackState?.track === nextTrack) {
+    return previousTrackState?.revision || 1;
+  }
+  return (previousTrackState?.revision || 0) + 1;
+}
+
 function parseScreenShareProxyOwnerUserId(participantIdentity) {
   if (!participantIdentity?.startsWith(`${SCREEN_SHARE_PROXY_IDENTITY_PREFIX}:`)) {
     return null;
@@ -101,12 +111,14 @@ export class ParticipantMediaRegistry {
 
     const normalizedSource = normalizeSource(source);
     const trackKey = buildTrackKey(participantEntry.participantIdentity, normalizedSource);
+    const previousTrackState = this.videoTracksByKey.get(trackKey) || null;
     const nextTrackState = {
       trackKey,
       track,
       source: normalizedSource,
       participantIdentity: participantEntry.participantIdentity,
       participantId: participantEntry.userId,
+      revision: buildNextTrackRevision(previousTrackState, track),
     };
 
     this.videoTracksByKey.set(trackKey, nextTrackState);
@@ -156,13 +168,23 @@ export class ParticipantMediaRegistry {
         hasCamera: false,
         hasScreenShare: false,
         hasScreenShareAudio: false,
+        cameraTrackRevision: 0,
+        screenShareTrackRevision: 0,
       };
 
       if (trackState.source === Track.Source.Camera) {
         nextState.hasCamera = true;
+        nextState.cameraTrackRevision = Math.max(
+          nextState.cameraTrackRevision,
+          trackState.revision || 0,
+        );
       }
       if (trackState.source === Track.Source.ScreenShare) {
         nextState.hasScreenShare = true;
+        nextState.screenShareTrackRevision = Math.max(
+          nextState.screenShareTrackRevision,
+          trackState.revision || 0,
+        );
       }
       participants.set(trackState.participantId, nextState);
     });
@@ -180,6 +202,8 @@ export class ParticipantMediaRegistry {
         hasCamera: false,
         hasScreenShare: false,
         hasScreenShareAudio: false,
+        cameraTrackRevision: 0,
+        screenShareTrackRevision: 0,
       };
       nextState.hasScreenShareAudio = true;
       participants.set(audioState.participantId, nextState);

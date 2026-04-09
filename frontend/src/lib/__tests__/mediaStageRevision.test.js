@@ -35,17 +35,74 @@ describe("mediaStageRevision", () => {
   it("stays stable for identical remote participant sets regardless of order", () => {
     const revisionA = buildMediaStageRevision({
       mediaParticipants: [
-        { userId: "user-2", hasCamera: false, hasScreenShare: true, hasScreenShareAudio: false },
-        { userId: "user-3", hasCamera: true, hasScreenShare: false, hasScreenShareAudio: false },
+        {
+          userId: "user-2",
+          hasCamera: false,
+          hasScreenShare: true,
+          hasScreenShareAudio: false,
+          cameraTrackRevision: 0,
+          screenShareTrackRevision: 1,
+        },
+        {
+          userId: "user-3",
+          hasCamera: true,
+          hasScreenShare: false,
+          hasScreenShareAudio: false,
+          cameraTrackRevision: 1,
+          screenShareTrackRevision: 0,
+        },
       ],
     });
     const revisionB = buildMediaStageRevision({
       mediaParticipants: [
-        { userId: "user-3", hasCamera: true, hasScreenShare: false, hasScreenShareAudio: false },
-        { userId: "user-2", hasCamera: false, hasScreenShare: true, hasScreenShareAudio: false },
+        {
+          userId: "user-3",
+          hasCamera: true,
+          hasScreenShare: false,
+          hasScreenShareAudio: false,
+          cameraTrackRevision: 1,
+          screenShareTrackRevision: 0,
+        },
+        {
+          userId: "user-2",
+          hasCamera: false,
+          hasScreenShare: true,
+          hasScreenShareAudio: false,
+          cameraTrackRevision: 0,
+          screenShareTrackRevision: 1,
+        },
       ],
     });
 
     expect(revisionA).toBe(revisionB);
+  });
+
+  it("changes when a remote participant replaces the screen-share track without changing availability", () => {
+    const beforeReplacement = buildMediaStageRevision({
+      mediaParticipants: [
+        {
+          userId: "user-2",
+          hasCamera: false,
+          hasScreenShare: true,
+          hasScreenShareAudio: false,
+          cameraTrackRevision: 0,
+          screenShareTrackRevision: 1,
+        },
+      ],
+    });
+    const afterReplacement = buildMediaStageRevision({
+      mediaParticipants: [
+        {
+          userId: "user-2",
+          hasCamera: false,
+          hasScreenShare: true,
+          hasScreenShareAudio: false,
+          cameraTrackRevision: 0,
+          screenShareTrackRevision: 2,
+        },
+      ],
+    });
+
+    expect(afterReplacement).not.toBe(beforeReplacement);
   });
 });

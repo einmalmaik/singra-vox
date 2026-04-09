@@ -10,15 +10,17 @@
 export const EMPTY_LOCAL_MEDIA_STATE = Object.freeze({
   hasCamera: false,
   hasCameraTrack: false,
+  cameraTrackRevision: 0,
   hasScreenShare: false,
   hasScreenShareTrack: false,
+  screenShareTrackRevision: 0,
   hasScreenShareAudio: false,
 });
 
 function buildRemoteMediaSignature(mediaParticipants = []) {
   return [...mediaParticipants]
     .map((participant) => (
-      `${participant.userId}:${Number(participant.hasCamera)}:${Number(participant.hasScreenShare)}:${Number(participant.hasScreenShareAudio)}`
+      `${participant.userId}:${Number(participant.hasCamera)}:${Number(participant.hasScreenShare)}:${Number(participant.hasScreenShareAudio)}:${participant.cameraTrackRevision || 0}:${participant.screenShareTrackRevision || 0}`
     ))
     .sort()
     .join("|");
@@ -36,7 +38,9 @@ export function buildMediaStageRevision({
     Number(cameraEnabled),
     Number(screenShareEnabled),
     Number(Boolean(localMediaState?.hasCameraTrack)),
+    Number(localMediaState?.cameraTrackRevision || 0),
     Number(Boolean(localMediaState?.hasScreenShareTrack)),
+    Number(localMediaState?.screenShareTrackRevision || 0),
     remoteSignature,
   ].join(":");
 }

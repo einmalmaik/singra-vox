@@ -70,4 +70,34 @@ describe("ParticipantMediaRegistry", () => {
       registry.findVideoTrackByUserId("user-2", Track.Source.ScreenShare),
     ).toBeNull();
   });
+
+  it("increments the remote screen-share revision when the track object is replaced", () => {
+    const registry = createParticipantMediaRegistry();
+
+    registry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel-1:user-2",
+        attributes: { owner_user_id: "user-2" },
+      },
+      track: { id: "track-a" },
+      source: Track.Source.ScreenShare,
+    });
+
+    const firstRevision = registry.listRemoteMediaParticipants({ localUserId: "user-1" })[0];
+
+    registry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel-1:user-2",
+        attributes: { owner_user_id: "user-2" },
+      },
+      track: { id: "track-b" },
+      source: Track.Source.ScreenShare,
+    });
+
+    const secondRevision = registry.listRemoteMediaParticipants({ localUserId: "user-1" })[0];
+
+    expect(firstRevision.screenShareTrackRevision).toBe(1);
+    expect(secondRevision.screenShareTrackRevision).toBe(2);
+    expect(secondRevision.hasScreenShare).toBe(true);
+  });
 });

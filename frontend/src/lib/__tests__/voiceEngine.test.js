@@ -188,6 +188,8 @@ describe("VoiceEngine native cleanup", () => {
         hasCamera: false,
         hasScreenShare: true,
         hasScreenShareAudio: false,
+        cameraTrackRevision: 0,
+        screenShareTrackRevision: 1,
       },
     ]);
   });
@@ -232,6 +234,55 @@ describe("VoiceEngine native cleanup", () => {
       local: expect.objectContaining({
         hasScreenShare: true,
         hasScreenShareTrack: true,
+        screenShareTrackRevision: 1,
+      }),
+    }));
+  });
+
+  it("increments the local native screen-share revision when the proxy track is replaced", () => {
+    const engine = new VoiceEngine();
+    const listener = jest.fn();
+
+    engine.userId = "user-1";
+    engine.nativeScreenShare = {
+      participantIdentity: "screen-share:channel:user-1",
+      keySubscriptionCleanup: jest.fn(),
+    };
+    engine.addStateListener(listener);
+
+    engine.participantMediaRegistry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel:user-1",
+        attributes: { owner_user_id: "user-1" },
+      },
+      track: {
+        kind: "video",
+        source: "screen_share",
+        id: "track-a",
+      },
+      source: "screen_share",
+    });
+    engine._emitRemoteMediaUpdate();
+
+    engine.participantMediaRegistry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel:user-1",
+        attributes: { owner_user_id: "user-1" },
+      },
+      track: {
+        kind: "video",
+        source: "screen_share",
+        id: "track-b",
+      },
+      source: "screen_share",
+    });
+    engine._emitRemoteMediaUpdate();
+
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "media_tracks_update",
+      local: expect.objectContaining({
+        hasScreenShareTrack: true,
+        screenShareTrackRevision: 2,
       }),
     }));
   });
