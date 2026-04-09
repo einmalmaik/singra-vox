@@ -78,6 +78,7 @@ export class VoiceEngine {
     this.cameraTrack = null;
     this.screenShareTracks = [];
     this.nativeScreenShare = null;
+    this.nativeScreenShareSyncTimer = null;
     this.localVideoTrackRevisions = {
       camera: { track: null, revision: 0 },
       screenShare: { track: null, revision: 0 },

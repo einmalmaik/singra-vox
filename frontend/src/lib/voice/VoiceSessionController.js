@@ -195,6 +195,7 @@ export const voiceSessionMethods = {
   },
 
   _clearRemoteMediaState() {
+    this._clearNativeScreenShareSync?.();
     this.audioElements.forEach(({ element }) => {
       try {
         element.pause?.();
@@ -233,6 +234,7 @@ export const voiceSessionMethods = {
     const previousCaptureMode = null;
 
     activeShare?.keySubscriptionCleanup?.();
+    this._clearNativeScreenShareSync?.();
     this.screenShareTracks.forEach((track) => track.stop?.());
     this.screenShareTracks = [];
     this.nativeScreenShare = null;

@@ -58,6 +58,10 @@ export const remoteMediaMethods = {
     }
 
     this.room.on(RoomEvent.ParticipantConnected, (participant) => {
+      this.logger.debug("participant connected", {
+        event: "participant_connected",
+        participantIdentity: this._resolveParticipantIdentity(participant),
+      });
       this._syncParticipantStateFromLiveKit(participant);
       participant.trackPublications?.forEach?.((publication) => {
         const publicationKind = publication?.kind || publication?.track?.kind || null;
@@ -69,6 +73,12 @@ export const remoteMediaMethods = {
     });
 
     this.room.on(RoomEvent.TrackPublished, (publication, participant) => {
+      this.logger.debug("track published", {
+        event: "track_published",
+        participantIdentity: this._resolveParticipantIdentity(participant),
+        source: publication?.source || publication?.track?.source || null,
+        kind: publication?.kind || publication?.track?.kind || null,
+      });
       const publicationKind = publication?.kind || publication?.track?.kind || null;
       if (publicationKind === Track.Kind.Video && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
         publication.setSubscribed(true);
@@ -84,6 +94,13 @@ export const remoteMediaMethods = {
       if (!participantIdentity || !participantEntry?.userId) {
         return;
       }
+      this.logger.debug("track subscribed", {
+        event: "track_subscribed",
+        participantIdentity,
+        participantId: participantEntry.userId,
+        source,
+        kind: track.kind,
+      });
       if (track.kind === Track.Kind.Audio) {
         await this._attachRemoteAudioTrack(
           track,
@@ -107,6 +124,13 @@ export const remoteMediaMethods = {
       if (!participantIdentity || !participantUserId) {
         return;
       }
+      this.logger.debug("track unsubscribed", {
+        event: "track_unsubscribed",
+        participantIdentity,
+        participantId: participantUserId,
+        source,
+        kind: track.kind,
+      });
       if (track.kind === Track.Kind.Audio) {
         this._detachRemoteAudioTrack(track, participantIdentity, source);
       } else if (track.kind === Track.Kind.Video) {
@@ -166,6 +190,12 @@ export const remoteMediaMethods = {
     this.room.on(RoomEvent.TrackSubscriptionStatusChanged, (publication, status, participant) => {
       reapplyRemoteAudioState(publication, participant, status);
       if ((publication?.kind || publication?.track?.kind) === Track.Kind.Video) {
+        this.logger.debug("video subscription status changed", {
+          event: "track_subscription_status_changed",
+          participantIdentity: this._resolveParticipantIdentity(participant),
+          source: publication?.source || publication?.track?.source || null,
+          status,
+        });
         this._syncParticipantStateFromLiveKit(participant);
         this._emitRemoteMediaUpdate();
       }
@@ -176,11 +206,18 @@ export const remoteMediaMethods = {
         return;
       }
 
+      this.logger.debug("video stream state changed", {
+        event: "track_stream_state_changed",
+        participantIdentity: this._resolveParticipantIdentity(participant),
+        source: publication?.source || publication?.track?.source || null,
+        streamState: publication?.streamState || null,
+      });
       this._syncParticipantStateFromLiveKit(participant);
       this._emitRemoteMediaUpdate();
     });
 
     this.room.on(RoomEvent.Reconnected, () => {
+      this.logger.debug("room reconnected", { event: "room_reconnected" });
       this._syncExistingRemoteVideoPublications({ ensureSubscribed: true });
     });
 

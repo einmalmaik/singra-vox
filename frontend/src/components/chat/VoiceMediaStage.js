@@ -7,26 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-/**
- * VoiceMediaStage – Vollbild-Vorschau für Kamera- und Screen-Share-Tracks
- *
- * Kernaufgabe:
- *   Ein Dialog zeigt das <video>-Element eines bestimmten Teilnehmers (lokal oder remote).
- *   Der Track wird über `voiceEngine.attachParticipantMediaElement()` an das Element gehängt.
- *
- * Retry-Mechanismus:
- *   Wenn der Track zum Zeitpunkt des Öffnens noch nicht bereit ist (z.B. Screen-Share
- *   wurde gerade erst gestartet und die Publikation an LiveKit läuft noch), versucht
- *   die Komponente bis zu MAX_RETRIES mal im Abstand von RETRY_INTERVAL_MS erneut.
- *   Dadurch wird der Black-Screen-Bug zuverlässig verhindert.
- *
- * Sichtbarkeits-Optimierung:
- *   Wenn der Browser-Tab nicht sichtbar ist (`document.hidden`), wird das Video
- *   pausiert und ein Hinweistext angezeigt. Das spart CPU und verhindert
- *   Chromium-Throttling-Artefakte.
- */
-
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MonitorPlay, VideoCamera } from "@phosphor-icons/react";
 import {
@@ -39,23 +20,20 @@ import {
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { observeVideoReadiness } from "@/lib/videoReadiness";
 
-// ─── Konstanten ────────────────────────────────────────────────────────────────
-
-/** Maximale Anzahl von Attach-Versuchen bevor wir aufgeben */
 const MAX_RETRIES = 8;
-
-/** Millisekunden zwischen jedem Retry-Versuch */
 const RETRY_INTERVAL_MS = 500;
-
-/** Zeitfenster, in dem nach einem erfolgreichen attach der erste Frame kommen muss. */
 const FRAME_READY_GRACE_MS = 1_500;
-
-/** Maximale Wartezeit in ms bevor Loading aufgegeben wird. Danach wird
- *  ein Fehlerzustand angezeigt statt endlosem Spinner. */
 const LOADING_TIMEOUT_MS = 10_000;
 
-// ─── Komponente ────────────────────────────────────────────────────────────────
-
+/**
+ * The stage renders exactly one selected LiveKit-backed track ref.
+ *
+ * Why the retry path still exists:
+ * LiveKit can report an attachable publication before Chromium produces
+ * the first renderable frame. The stage therefore retries only the
+ * attach window and otherwise relies on Room events plus track refs as
+ * the single source of truth.
+ */
 export default function VoiceMediaStage({
   open,
   onClose,
@@ -70,18 +48,11 @@ export default function VoiceMediaStage({
   const videoRef = useRef(null);
   const stageSurfaceRef = useRef(null);
 
-  // Verfolgt ob der Browser-Tab aktuell sichtbar ist
   const [documentHidden, setDocumentHidden] = useState(() => document.hidden);
-
-  // Zeigt einen Lade-Indikator wenn der Track noch nicht bereit ist
   const [videoLoading, setVideoLoading] = useState(true);
-
-  // Zeigt eine Fehlermeldung wenn der Track nicht geladen werden konnte
   const [videoError, setVideoError] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const [fullscreenActive, setFullscreenActive] = useState(false);
-
-  // ── Sichtbarkeits-Tracking ────────────────────────────────────────────────
 
   useEffect(() => {
     const handleVisibilityChange = () => setDocumentHidden(document.hidden);
@@ -106,8 +77,6 @@ export default function VoiceMediaStage({
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  // ── Loading-State zurücksetzen wenn sich der Track/Teilnehmer ändert ───────
-
   useEffect(() => {
     if (open) {
       setVideoLoading(true);
@@ -116,17 +85,12 @@ export default function VoiceMediaStage({
     }
   }, [open, source, trackRefId]);
 
-  // ── Callback: Video hat Daten und spielt → Loading beenden ────────────────
-
   const handleVideoPlaying = useCallback(() => {
     setVideoError(false);
     setVideoLoading(false);
   }, []);
 
   const handleVideoLoadedData = useCallback(() => {
-    // loadeddata feuert bevor playing – wir warten lieber auf playing,
-    // setzen aber trotzdem Loading auf false falls playing nicht kommt
-    // (z.B. bei muted autoplay ohne explizites play-Event)
     setVideoError(false);
     setVideoLoading(false);
   }, []);
@@ -156,13 +120,12 @@ export default function VoiceMediaStage({
     selectedTrackRef?.streamState || "none",
   ].join(":");
 
-  // ── Track-Attach mit Retry-Logik ─────────────────────────────────────────
-
   useEffect(() => {
     if (documentHidden || !open || !voiceEngineRef?.current || !trackRefId || !source || !videoRef.current) {
       return undefined;
     }
 
+    const engine = voiceEngineRef.current;
     const videoElement = videoRef.current;
     let detachFn = null;
     let stopReadinessObserver = null;
@@ -188,6 +151,11 @@ export default function VoiceMediaStage({
       cleanupAttachment();
       setVideoLoading(false);
       setVideoError(true);
+      engine.logger?.warn?.("stage attach failed before first frame", {
+        event: "stage_attach_failed",
+        trackRefId,
+        source,
+      });
     };
 
     const scheduleRetry = () => {
@@ -209,11 +177,21 @@ export default function VoiceMediaStage({
       clearTimeout(frameReadyTimer);
       cleanupAttachment();
 
-      // LiveKit can hand us an attachable track before the decoder has produced
-      // a renderable frame. Treating attach() as success causes the stage to
-      // stall until some unrelated room event forces another bind.
-      detachFn = voiceEngineRef.current?.attachTrackRefElement(trackRefId, videoElement);
+      engine.logger?.debug?.("stage attach requested", {
+        event: "stage_attach_requested",
+        trackRefId,
+        source,
+        retryCount,
+      });
+
+      detachFn = engine.attachTrackRefElement(trackRefId, videoElement);
       if (!detachFn) {
+        engine.logger?.debug?.("stage attach pending", {
+          event: "stage_attach_pending",
+          trackRefId,
+          source,
+          retryCount,
+        });
         scheduleRetry();
         return;
       }
@@ -224,6 +202,11 @@ export default function VoiceMediaStage({
         }
         frameReady = true;
         clearTimeout(frameReadyTimer);
+        engine.logger?.debug?.("stage first frame observed", {
+          event: "stage_first_frame",
+          trackRefId,
+          source,
+        });
         setVideoError(false);
         setVideoLoading(false);
       });
@@ -232,6 +215,12 @@ export default function VoiceMediaStage({
         if (cancelled || frameReady) {
           return;
         }
+        engine.logger?.debug?.("stage attach retry after missing frame", {
+          event: "stage_attach_retry",
+          trackRefId,
+          source,
+          retryCount,
+        });
         scheduleRetry();
       }, FRAME_READY_GRACE_MS);
     };
@@ -256,8 +245,6 @@ export default function VoiceMediaStage({
     };
   }, [documentHidden, open, retryNonce, source, trackRefId, trackStateKey, voiceEngineRef]);
 
-  // ── Rendering ─────────────────────────────────────────────────────────────
-
   const isScreenShare = source === "screen_share";
   const title = isScreenShare
     ? t("mediaStage.screenShareTitle", { name: participantName || t("common.unknown") })
@@ -278,7 +265,7 @@ export default function VoiceMediaStage({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div ref={stageSurfaceRef} className="overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 relative">
+          <div ref={stageSurfaceRef} className="relative overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80">
             <div className="absolute right-4 top-4 z-20">
               <button
                 type="button"
@@ -297,7 +284,6 @@ export default function VoiceMediaStage({
               </div>
             ) : (
               <>
-                {/* Lade-Indikator über dem Video – verschwindet sobald Daten ankommen */}
                 {videoLoading && !videoError && (
                   <div
                     className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
@@ -305,20 +291,23 @@ export default function VoiceMediaStage({
                   >
                     <div className="flex flex-col items-center gap-3">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-                      <p className="text-sm text-zinc-400">{t("mediaStage.loading", { defaultValue: "Stream wird geladen..." })}</p>
+                      <p className="text-sm text-zinc-400">
+                        {t("mediaStage.loading", { defaultValue: "Stream wird geladen..." })}
+                      </p>
                     </div>
                   </div>
                 )}
-                {/* Fehler-Anzeige wenn Track nicht geladen werden konnte */}
                 {videoError && (
                   <div
                     className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
                     data-testid="media-stage-error"
                   >
-                    <div className="flex flex-col items-center gap-3 max-w-sm text-center">
+                    <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                       <MonitorPlay size={32} className="text-zinc-500" />
                       <p className="text-sm text-zinc-400">
-                        {t("mediaStage.loadFailed", { defaultValue: "Stream konnte nicht geladen werden. Die Quelle ist m\u00F6glicherweise nicht mehr verf\u00FCgbar." })}
+                        {t("mediaStage.loadFailed", {
+                          defaultValue: "Stream konnte nicht geladen werden. Die Quelle ist möglicherweise nicht mehr verfügbar.",
+                        })}
                       </p>
                       <button
                         type="button"
@@ -327,7 +316,7 @@ export default function VoiceMediaStage({
                           setVideoLoading(true);
                           setRetryNonce((currentValue) => currentValue + 1);
                         }}
-                        className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-white hover:bg-white/15 transition-colors"
+                        className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-white/15"
                         data-testid="media-stage-retry"
                       >
                         {t("common.retry", { defaultValue: "Erneut versuchen" })}
@@ -351,9 +340,7 @@ export default function VoiceMediaStage({
           <p className="text-xs text-zinc-500">
             {documentHidden
               ? t("mediaStage.previewPausedHint")
-              : (config?.isDesktop
-                ? t("mediaStage.desktopHint")
-                : t("mediaStage.webHint"))}
+              : (config?.isDesktop ? t("mediaStage.desktopHint") : t("mediaStage.webHint"))}
           </p>
         </div>
       </DialogContent>

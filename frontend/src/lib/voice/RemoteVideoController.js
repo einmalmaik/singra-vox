@@ -21,6 +21,63 @@ import {
 } from "@/lib/videoTrackRefs";
 
 export const remoteVideoMethods = {
+  _clearNativeScreenShareSync() {
+    if (this.nativeScreenShareSyncTimer) {
+      clearTimeout(this.nativeScreenShareSyncTimer);
+      this.nativeScreenShareSyncTimer = null;
+    }
+  },
+
+  _scheduleNativeScreenShareSync(reason, {
+    attempt = 0,
+    maxAttempts = 24,
+    intervalMs = 250,
+  } = {}) {
+    this._clearNativeScreenShareSync();
+
+    if (!this.nativeScreenShare?.participantIdentity || !this.room) {
+      return;
+    }
+
+    const runSync = () => {
+      if (!this.nativeScreenShare?.participantIdentity || !this.room) {
+        this._clearNativeScreenShareSync();
+        return;
+      }
+
+      this.logger.debug("native screen-share sync tick", {
+        event: "native_screen_share_sync",
+        reason,
+        attempt,
+      });
+      this._syncExistingRemoteVideoPublications({ ensureSubscribed: true });
+
+      const { publication } = this._getNativeScreenShareProxyPublicationState();
+      const hasTrack = Boolean(publication?.track);
+      if (hasTrack || attempt >= maxAttempts) {
+        if (!hasTrack && attempt >= maxAttempts) {
+          this.logger.warn("native screen-share proxy track did not appear in time", {
+            event: "native_screen_share_sync_timeout",
+            reason,
+            attempts: attempt + 1,
+          });
+        }
+        this._clearNativeScreenShareSync();
+        return;
+      }
+
+      this.nativeScreenShareSyncTimer = setTimeout(() => {
+        this._scheduleNativeScreenShareSync(reason, {
+          attempt: attempt + 1,
+          maxAttempts,
+          intervalMs,
+        });
+      }, intervalMs);
+    };
+
+    runSync();
+  },
+
   _clearRemoteVideoTrackRevisions() {
     this.remoteVideoTrackRevisions.clear();
   },
@@ -203,6 +260,10 @@ export const remoteVideoMethods = {
 
     if (typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
       publication.setSubscribed(true);
+    }
+
+    if (isProxyBackedLocalTrack && !publication.track) {
+      this._scheduleNativeScreenShareSync("ensure_subscribed");
     }
 
     return Boolean(publication.track || trackRef.track);
@@ -438,19 +499,35 @@ export const remoteVideoMethods = {
       return null;
     }
 
-    if (!this.videoTrackRefsById.has(trackRefId)) {
-      this._syncVideoTrackRefs();
-    }
-
+    this.logger.debug("track attach requested", {
+      event: "track_attach_requested",
+      trackRefId,
+    });
+    // Rebuild the track-ref projection around the current Room publications
+    // before we read from it again. Native proxy-backed screen shares can gain
+    // their renderable track between UI events, so relying on the previous
+    // cached track ref here is exactly what caused "another stream wakes this
+    // stream up" behaviour in the stage.
     this._ensureTrackRefSubscribed(trackRefId);
-
-    if (!this.videoTrackRefsById.has(trackRefId)) {
-      this._syncVideoTrackRefs();
-    }
+    this._syncVideoTrackRefs();
 
     const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
     const track = trackRef?.track || null;
     if (!track) {
+      const isProxyBackedLocalTrack = Boolean(
+        trackRef?.isLocal
+        && trackRef?.source === Track.Source.ScreenShare
+        && trackRef?.provider === "tauri-native-livekit"
+      );
+      if (isProxyBackedLocalTrack) {
+        this._scheduleNativeScreenShareSync("attach_pending");
+      }
+      this.logger.debug("track attach deferred because no track is available yet", {
+        event: "track_attach_pending",
+        trackRefId,
+        participantId: trackRef?.participantId || null,
+        source: trackRef?.source || null,
+      });
       return null;
     }
 
@@ -464,12 +541,24 @@ export const remoteVideoMethods = {
     };
     tryPlay();
     const playRetryTimer = setTimeout(tryPlay, 150);
+    this.logger.debug("track attached to stage element", {
+      event: "track_attach_bound",
+      trackRefId,
+      participantId: trackRef?.participantId || null,
+      source: trackRef?.source || null,
+    });
 
     return () => {
       clearTimeout(playRetryTimer);
       try {
         element.pause?.();
         track.detach(element);
+        this.logger.debug("track detached from stage element", {
+          event: "track_attach_released",
+          trackRefId,
+          participantId: trackRef?.participantId || null,
+          source: trackRef?.source || null,
+        });
       } catch {
         // Ignore detach races during rapid overlay changes.
       }

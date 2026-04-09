@@ -1,82 +1,103 @@
 # Voice / Streaming
 
-## Zusammenfassung
+## Summary
 
-Der Voice- und Streaming-Stack bleibt nach auÃŸen bei `new VoiceEngine()`, ist intern aber in kleine Verantwortungen zerlegt. Dadurch lassen sich Voice-Join, lokale Medien, Screen Share, Remote-Media-Sync und Desktop-Bridges getrennt testen und Ã¤ndern.
+The voice and streaming stack keeps `new VoiceEngine()` as the stable public
+frontend API, but the implementation is now split into smaller modules with
+single responsibilities. LiveKit remains the only source of truth for room,
+publication, subscription, and track state.
 
-## Frontend-Module
+## Frontend modules
 
 - `frontend/src/lib/voiceEngine.js`
-  Stabile Fassade fÃ¼r die bestehende UI-API und Event-Namen.
+  Stable facade for the existing UI API and event names.
 - `frontend/src/lib/voice/VoiceSessionController.js`
-  Join, Disconnect, E2EE-Bootstrap, Reconnect-Cleanup und Event-Emission.
+  Join, disconnect, reconnect cleanup, and E2EE bootstrap.
 - `frontend/src/lib/voice/LocalAudioController.js`
-  Mikrofon, Mute/Deafen/PTT, Analyse, Monitoring und Output-Routing.
+  Microphone lifecycle, mute, deafen, PTT, and mic test.
 - `frontend/src/lib/voice/LocalVideoController.js`
-  Kamera-Lifecycle.
+  Camera lifecycle and restarts.
 - `frontend/src/lib/voice/ScreenShareController.js`
-  Browser- und Desktop-Screenshare, Rehydrate, Audio-Regelung und QualitÃ¤tsprofile.
+  Browser and desktop screen share, quality presets, audio options, and
+  native-session rehydrate.
 - `frontend/src/lib/voice/RemoteMediaController.js`
-  LiveKit-Room-Events, Remote-Audio, TrackRef-Projektion und Preview-Subscription.
+  LiveKit room events and speaking-state coordination.
+- `frontend/src/lib/voice/RemoteAudioController.js`
+  Remote audio elements, sink-device routing, and cleanup.
+- `frontend/src/lib/voice/RemoteVideoController.js`
+  Track-ref projection, proxy-backed local screen-share sync, and stage attach.
 - `frontend/src/lib/voice/ScreenShareProxyMap.js`
-  Kleines Proxy-Identity-zu-Owner-Mapping fÃ¼r den nativen Desktop-Screenshare.
+  Proxy identity to owner-user mapping for native desktop screen share.
 
-## Viewer-Lifecycle
+## Sidebar integration
 
-- LiveKit `publication + track` ist die einzige Quelle der Wahrheit fÃ¼r Remote-Video.
-- `RemoteMediaController` baut daraus `videoTrackRefs`.
-- `VoiceMediaStage` attached nur den selektierten Track und enthÃ¤lt die einzige Sonderlogik fÃ¼r "Track attachbar, aber erster Frame fehlt noch".
-- Das SchlieÃŸen der Preview deaktiviert keine Remote-Publications manuell; `adaptiveStream` bleibt bei LiveKit.
+- `frontend/src/components/chat/ChannelSidebar.js`
+  Public facade used by `MainLayout`.
+- `frontend/src/components/chat/sidebar/useChannelSidebarController.js`
+  Container hook that composes the sidebar state.
+- `frontend/src/components/chat/sidebar/hooks/`
+  Smaller hooks for channel creation, channel tree, media stage, screen-share
+  dialog, and voice-channel state.
+- `frontend/src/components/chat/sidebar/*`
+  Presentational UI modules only. They do not call the API or the voice engine
+  directly.
 
-## Desktop-Struktur
+## Viewer lifecycle
+
+- Remote and proxy-backed video is projected from LiveKit publications.
+- `videoTrackRefs` is only a UI-friendly projection. It is not a second media
+  engine.
+- `VoiceMediaStage` attaches exactly one selected track ref.
+- Closing the stage only detaches the element. It does not manually disable a
+  LiveKit publication.
+- The stage keeps a small retry window for one specific case: a publication is
+  attachable, but Chromium has not produced the first renderable frame yet.
+
+## Native desktop path
 
 - `desktop/src-tauri/src/screen_share/commands.rs`
-  Einheitliche Tauri-Commands fÃ¼r Capture-Quellen, Start/Stop, Session und Audio-Regelung.
+  Public Tauri commands for capture-source listing, start/stop, session lookup,
+  and audio-volume updates.
 - `desktop/src-tauri/src/screen_share/session.rs`
-  Geteilte Session- und Capability-Typen.
+  Shared screen-share session DTOs and capability reporting.
 - `desktop/src-tauri/src/screen_share/publisher.rs`
-  Plattformneutrale Publisher-HÃ¼lle.
+  Shared publisher entrypoints that route to platform-specific implementations.
 - `desktop/src-tauri/src/screen_share/capture/*`
-  OS-spezifische Capture-Adapter.
+  Platform-specific capture adapters.
 - `desktop/src-tauri/src/screen_share/audio/*`
-  OS-spezifische Audio-Adapter.
+  Platform-specific audio adapters.
 
-## Desktop-Capabilities
+## Capability rules
 
-- `get_desktop_runtime_info` ist die Quelle der Wahrheit fÃ¼r Desktop-Screenshare-FÃ¤higkeiten.
-- Das Frontend darf Desktop-Capture und Systemaudio nicht implizit annehmen; die UI liest die Capability-Matrix aus der Runtime-Bridge.
-- Aktueller Stand:
-  - Windows: nativer Capture-Pfad mit Systemaudio und Audio-LautstÃ¤rke-Regelung
-  - macOS 13+: nativer Capture-Pfad ohne Systemaudio
-  - Linux: kein nativer Capture-Adapter in diesem Build; die Desktop-UI fÃ¤llt auf den nicht-nativen Picker zurÃ¼ck
+- `get_desktop_runtime_info` is the only desktop capability truth source for
+  the frontend.
+- Desktop UI must not assume native capture or system-audio support without
+  reading that runtime capability matrix first.
 
-## Weitere Modul-Schnitte
+Current platform status:
 
-- `frontend/src/lib/voice/RemoteAudioController.js`
-  Haelt Audio-Elemente, Sink-Device-Anwendung und Audio-Cleanup getrennt vom Room-Event-Code.
-- `frontend/src/lib/voice/RemoteVideoController.js`
-  Haelt TrackRef-Projektion, Video-Revisionszaehlung und Stage-Attach getrennt vom Room-Event-Code.
-- `frontend/src/hooks/useDesktopCaptureSources.js`
-  Haelt Desktop-Source-Laden und Session-Rehydrate in einem kleinen, separat testbaren Hook.
+- Windows:
+  Native capture and native system audio are implemented.
+- macOS 13+:
+  Native capture is implemented. Native system audio is not complete yet.
+- Linux:
+  Native PipeWire or portal-backed publishing is not complete yet. The desktop
+  UI must gate unsupported options instead of pretending support exists.
 
-## Sidebar-Integration
+## Important debugging signal
 
-- `frontend/src/components/chat/ChannelSidebar.js` bleibt der oeffentliche Einstiegspunkt fuer `MainLayout`.
-- `frontend/src/components/chat/sidebar/useChannelSidebarController.js` kapselt Sidebar-State, Dialoge, Voice-Join/Leave, Screen-Share-Start/Stop und Stage-Auswahl.
-- `frontend/src/components/chat/sidebar/*` rendert nur noch Props und loest keine direkten API- oder LiveKit-Aktionen aus.
+The most important viewer failure mode we have seen is stale UI track state:
+the LiveKit publication already has a renderable track, but the cached track ref
+still says `pending`. The attach path now refreshes the projected track refs
+from the current room publications before binding the stage element. That avoids
+the old behavior where an unrelated stream event could "wake up" another stream.
 
-Damit bleibt die Sidebar eine UI-Orchestrierung ueber dem Voice-/Streaming-Stack und baut keine zweite Medien-Engine im Frontend auf.
+## Manual verification
 
-## Logging
-
-- Backend-Voice-Routen loggen Join, Leave, State-Updates und Token-Ausgabe mit `server_id`, `channel_id`, `user_id`, `participant_identity`, `room_name`, `platform`, `event` und `result`.
-- Frontend-/Desktop-Logs bleiben klein und konzentrieren sich auf Voice-/Stream-Fehlerpfade.
-
-## Manuelle PrÃ¼fung
-
-1. Tauri-Client in Voice-Channel joinen.
-2. Stream starten und Self-Preview Ã¶ffnen.
-3. Zweiten Browser- oder Desktop-Client joinen und Stream direkt Ã¶ffnen.
-4. Preview schlieÃŸen und erneut Ã¶ffnen.
-5. Tab kurz verlassen und zurÃ¼ckkehren.
-6. Zweiten Stream starten/stoppen und prÃ¼fen, dass der erste Stream stabil bleibt.
+1. Desktop client joins a voice channel.
+2. Start screen share and open self-preview.
+3. Join the same channel from a second browser or desktop client.
+4. Open the remote stream once.
+5. Close and reopen the preview.
+6. Switch tabs and return.
+7. Start and stop a second stream and confirm the first stream stays stable.

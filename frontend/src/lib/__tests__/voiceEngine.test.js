@@ -302,6 +302,53 @@ describe("VoiceEngine native cleanup", () => {
     }));
   });
 
+  it("polls the native proxy publication until the local screen-share track becomes available", () => {
+    jest.useFakeTimers();
+    const engine = new VoiceEngine();
+    const listener = jest.fn();
+    const publication = createVideoPublication(null, {
+      isDesired: false,
+      subscriptionStatus: "unsubscribed",
+    });
+    const participant = createRemoteParticipant("screen-share:channel:user-1", "user-1", publication);
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
+    engine.nativeScreenShare = {
+      participantIdentity: "screen-share:channel:user-1",
+      keySubscriptionCleanup: jest.fn(),
+    };
+    engine.logger = {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    };
+    engine.addStateListener(listener);
+
+    engine._scheduleNativeScreenShareSync("test", { intervalMs: 100, maxAttempts: 3 });
+    expect(publication.setSubscribed).toHaveBeenCalledWith(true);
+
+    publication.track = {
+      kind: "video",
+      source: "screen_share",
+      id: "track-ready",
+    };
+    jest.advanceTimersByTime(110);
+
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "media_tracks_update",
+      local: expect.objectContaining({
+        hasScreenShare: true,
+        hasScreenShareTrack: true,
+      }),
+    }));
+    expect(engine.nativeScreenShareSyncTimer).toBeNull();
+    jest.useRealTimers();
+  });
+
   it("emits the effective native capture settings returned by the desktop publisher", async () => {
     const engine = new VoiceEngine();
     const listener = jest.fn();
@@ -480,6 +527,55 @@ describe("VoiceEngine native cleanup", () => {
     expect(livePublication.setEnabled).not.toHaveBeenCalled();
     expect(stalePublication.setSubscribed).not.toHaveBeenCalled();
     expect(stalePublication.setEnabled).not.toHaveBeenCalled();
+  });
+
+  it("refreshes a stale native self-preview track ref before attach", () => {
+    const engine = new VoiceEngine();
+    const track = {
+      kind: "video",
+      source: "screen_share",
+      attach: jest.fn(),
+      detach: jest.fn(),
+    };
+    const publication = createVideoPublication(track, {
+      subscriptionStatus: "desired",
+      isDesired: false,
+      setSubscribed: jest.fn(),
+    });
+    const participant = createRemoteParticipant(
+      "screen-share:channel:user-1",
+      "user-1",
+      publication,
+    );
+    const element = {
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+    };
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map(),
+    };
+    engine.nativeScreenShare = {
+      participantIdentity: "screen-share:channel:user-1",
+      keySubscriptionCleanup: jest.fn(),
+    };
+
+    engine._emitRemoteMediaUpdate();
+    const trackRefId = engine.listVideoTrackRefs().find((trackRef) => (
+      trackRef.isLocal && trackRef.source === "screen_share"
+    ))?.id;
+
+    engine.room.remoteParticipants.set(participant.identity, participant);
+
+    const detach = engine.attachTrackRefElement(trackRefId, element);
+
+    expect(typeof detach).toBe("function");
+    expect(track.attach).toHaveBeenCalledWith(element);
+    expect(engine.getVideoTrackRef(trackRefId)).toEqual(expect.objectContaining({
+      state: "ready",
+      participantIdentity: "screen-share:channel:user-1",
+    }));
   });
 
   it("does not manually disable remote publications when the stage closes", () => {
