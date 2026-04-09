@@ -101,8 +101,8 @@ import { findVideoTrackRef } from "@/lib/videoTrackRefs";
 import {
   DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID,
   DEFAULT_SCREEN_SHARE_PRESET_ID,
-  SCREEN_SHARE_PRESET_OPTIONS,
-  getScreenSharePreset,
+  getScreenSharePresetOptions,
+  resolveScreenSharePreset,
 } from "@/lib/screenSharePresets";
 
 function resolveParticipantDisplayName(participant, t) {
@@ -132,6 +132,10 @@ export default function ChannelSidebar({
   const isDesktop = Boolean(config?.isDesktop);
   const screenShareCapabilities = useMemo(
     () => getScreenShareCapabilities({ isDesktop }),
+    [isDesktop],
+  );
+  const screenSharePresetOptions = useMemo(
+    () => getScreenSharePresetOptions({ isDesktop }),
     [isDesktop],
   );
   const [showCreate, setShowCreate] = useState(false);
@@ -805,7 +809,10 @@ export default function ChannelSidebar({
       }
 
       const selectedSource = captureSources.find((source) => source.id === selectedCaptureSourceId) || null;
-      const selectedPreset = getScreenSharePreset(screenShareQuality);
+      const selectedPreset = resolveScreenSharePreset(screenShareQuality, {
+        isDesktop,
+        source: selectedSource,
+      });
 
       // Audio-Lautstärke VOR dem Start setzen, damit der GainNode
       // mit dem richtigen Wert initialisiert wird
@@ -1664,7 +1671,7 @@ export default function ChannelSidebar({
                     onChange={(event) => setScreenShareQuality(event.target.value)}
                     className="h-12 w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-4 text-sm text-white outline-none transition focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/20"
                   >
-                    {SCREEN_SHARE_PRESET_OPTIONS.map((preset) => (
+                    {screenSharePresetOptions.map((preset) => (
                       <option key={preset.id} value={preset.id} className="bg-zinc-950 text-white">
                         {preset.label}
                       </option>
@@ -1761,7 +1768,7 @@ export default function ChannelSidebar({
                 onChange={(event) => setScreenShareQuality(event.target.value)}
                 className="h-12 w-full rounded-2xl border border-white/10 bg-zinc-950/70 px-4 text-sm text-white outline-none transition focus:border-cyan-400/60 focus:ring-2 focus:ring-cyan-400/20"
               >
-                {SCREEN_SHARE_PRESET_OPTIONS.map((preset) => (
+                {screenSharePresetOptions.map((preset) => (
                   <option key={preset.id} value={preset.id} className="bg-zinc-950 text-white">
                     {preset.label}
                   </option>
