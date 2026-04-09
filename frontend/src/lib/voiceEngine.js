@@ -1861,6 +1861,17 @@ export class VoiceEngine {
     )?.track || null;
   }
 
+  _getNativeScreenShareProxyTrackState() {
+    if (!this.nativeScreenShare?.participantIdentity) {
+      return null;
+    }
+
+    return this.participantMediaRegistry.getVideoTrackByIdentity(
+      this.nativeScreenShare.participantIdentity,
+      Track.Source.ScreenShare,
+    ) || null;
+  }
+
   _buildVideoTrackRefs() {
     const remoteScreenShareAudioParticipantIds = new Set(
       Array.from(this.audioElements.values())
@@ -1869,8 +1880,10 @@ export class VoiceEngine {
         .filter(Boolean),
     );
     const localCameraTrack = this._getLocalVideoTrack(Track.Source.Camera);
+    const nativeScreenShareProxyTrackState = this._getNativeScreenShareProxyTrackState();
     const localScreenShareTrack = this._getLocalVideoTrack(Track.Source.ScreenShare)
-      || this._getNativeScreenShareProxyTrack();
+      || nativeScreenShareProxyTrackState?.track
+      || null;
     const localCameraTrackRevision = this._captureLocalTrackRevision(
       Track.Source.Camera,
       localCameraTrack,
@@ -1918,6 +1931,9 @@ export class VoiceEngine {
         provider: this.nativeScreenShare?.provider || "livekit-local",
         sourceKind: this.nativeScreenShare?.sourceKind || null,
         sourceLabel: this.nativeScreenShare?.sourceLabel || null,
+        publication: nativeScreenShareProxyTrackState?.publication || null,
+        subscriptionStatus: nativeScreenShareProxyTrackState?.subscriptionStatus || null,
+        streamState: nativeScreenShareProxyTrackState?.streamState || null,
         track: localScreenShareTrack,
       });
     }
@@ -2049,18 +2065,30 @@ export class VoiceEngine {
     }
 
     const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
-    if (!trackRef || trackRef.isLocal) {
-      return Boolean(trackRef?.track);
+    if (!trackRef) {
+      return false;
     }
 
     const nextWidth = Math.max(0, Math.round(width || 0));
     const nextHeight = Math.max(0, Math.round(height || 0));
+    const isProxyBackedLocalTrack = Boolean(
+      trackRef.isLocal
+      && trackRef.source === Track.Source.ScreenShare
+      && trackRef.provider === "tauri-native-livekit",
+    );
+    if (trackRef.isLocal && !isProxyBackedLocalTrack) {
+      return Boolean(trackRef.track);
+    }
+
+    const publicationLookupIdentity = isProxyBackedLocalTrack
+      ? (this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity)
+      : trackRef.participantIdentity;
     const { participant, publication } = trackRef.publication
       ? {
-        participant: this._getRemoteParticipantByIdentity(trackRef.participantIdentity),
+        participant: this._getRemoteParticipantByIdentity(publicationLookupIdentity),
         publication: trackRef.publication,
       }
-      : this._findRemoteVideoPublication(trackRef.participantIdentity, trackRef.source);
+      : this._findRemoteVideoPublication(publicationLookupIdentity, trackRef.source);
 
     if (!publication) {
       return Boolean(trackRef.track);
@@ -2114,12 +2142,22 @@ export class VoiceEngine {
     }
 
     const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
-    if (!trackRef || trackRef.isLocal) {
+    const isProxyBackedLocalTrack = Boolean(
+      trackRef?.isLocal
+      && trackRef?.source === Track.Source.ScreenShare
+      && trackRef?.provider === "tauri-native-livekit",
+    );
+    if (!trackRef || (trackRef.isLocal && !isProxyBackedLocalTrack)) {
       return false;
     }
 
     const publication = trackRef.publication
-      || this._findRemoteVideoPublication(trackRef.participantIdentity, trackRef.source).publication;
+      || this._findRemoteVideoPublication(
+        isProxyBackedLocalTrack
+          ? (this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity)
+          : trackRef.participantIdentity,
+        trackRef.source,
+      ).publication;
     if (!publication) {
       return false;
     }
