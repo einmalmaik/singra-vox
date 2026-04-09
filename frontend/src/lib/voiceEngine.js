@@ -23,6 +23,8 @@ import { createVoiceLogger } from "./voice/VoiceLogger";
 import { createScreenShareProxyMap } from "./voice/ScreenShareProxyMap";
 import { localAudioMethods } from "./voice/LocalAudioController";
 import { localVideoMethods } from "./voice/LocalVideoController";
+import { remoteAudioMethods } from "./voice/RemoteAudioController";
+import { remoteVideoMethods } from "./voice/RemoteVideoController";
 import { remoteMediaMethods } from "./voice/RemoteMediaController";
 import { screenShareMethods } from "./voice/ScreenShareController";
 import { voiceSessionMethods } from "./voice/VoiceSessionController";
@@ -101,6 +103,8 @@ Object.assign(
   voiceSessionMethods,
   localAudioMethods,
   localVideoMethods,
+  remoteAudioMethods,
+  remoteVideoMethods,
   screenShareMethods,
   remoteMediaMethods,
 );

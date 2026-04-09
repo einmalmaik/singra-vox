@@ -14,5 +14,5 @@ use crate::screen_share::session::DesktopCaptureSourceSummary;
 pub async fn list_capture_sources(
     _store: State<'_, DesktopCaptureStore>,
 ) -> Result<Vec<DesktopCaptureSourceSummary>, String> {
-    Err("Native desktop capture publishing is not implemented for Linux yet.".into())
+    Err("Native Linux capture requires an xdg-desktop-portal + PipeWire backend and is not implemented in this build yet.".into())
 }

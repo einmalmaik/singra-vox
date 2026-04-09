@@ -18,14 +18,14 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
 # Screen/audio capture – only on platforms that support it
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-crabgrab = { version = "0.4.0", features = ["bitmap"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
 base64 = "0.22"
+crabgrab = { version = "0.4.0", features = ["bitmap"] }
 libwebrtc = "0.3.29"
 # LiveKit Cloud performs an HTTPS region preflight before the WSS connection.
 # The desktop client therefore needs an explicit TLS backend at build time.
 livekit = { version = "0.7.36", features = ["rustls-tls-native-roots"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
 rdev = "0.5.3"
 windows = { version = "0.61", features = [
     "Win32_Media_Audio",

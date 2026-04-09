@@ -93,8 +93,8 @@ import ServerSettingsOverlay from "@/components/settings/ServerSettingsOverlay";
 import GlobalSettingsOverlay from "@/components/settings/GlobalSettingsOverlay";
 import VoiceMediaStage from "@/components/chat/VoiceMediaStage";
 import { useDesktopPtt } from "@/hooks/useDesktopPtt";
+import { useDesktopCaptureSources } from "@/hooks/useDesktopCaptureSources";
 import { useVoiceCleanup } from "@/hooks/useVoiceCleanup";
-import { getNativeScreenShareSession, listDesktopCaptureSources } from "@/lib/desktop";
 import { getScreenShareCapabilities } from "@/lib/screenShareCapabilities";
 import { EMPTY_LOCAL_MEDIA_STATE, findVideoTrackRef } from "@/lib/videoTrackRefs";
 import {
@@ -126,16 +126,17 @@ export default function ChannelSidebar({
   serverSettingsRequest,
 }) {
   const { t } = useTranslation();
-  const { config } = useRuntime();
+  const { config, runtimeInfo } = useRuntime();
   const { ready: e2eeReady, isDesktopCapable } = useE2EE();
   const isDesktop = Boolean(config?.isDesktop);
   const screenShareCapabilities = useMemo(
-    () => getScreenShareCapabilities({ isDesktop }),
-    [isDesktop],
+    () => getScreenShareCapabilities({ isDesktop, runtimeInfo }),
+    [isDesktop, runtimeInfo],
   );
+  const useNativeScreenShare = Boolean(isDesktop && screenShareCapabilities.supportsNativeCapture);
   const screenSharePresetOptions = useMemo(
-    () => getScreenSharePresetOptions({ isDesktop }),
-    [isDesktop],
+    () => getScreenSharePresetOptions({ isDesktop: useNativeScreenShare }),
+    [useNativeScreenShare],
   );
   const [showCreate, setShowCreate] = useState(false);
   const [chName, setChName] = useState("");
@@ -146,18 +147,12 @@ export default function ChannelSidebar({
   const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
   const [userSettingsOpen, setUserSettingsOpen] = useState(false);
   const [screenShareDialogOpen, setScreenShareDialogOpen] = useState(false);
-  const [screenShareQuality, setScreenShareQuality] = useState(() => (
-    isDesktop ? DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID : DEFAULT_SCREEN_SHARE_PRESET_ID
-  ));
+  const [screenShareQuality, setScreenShareQuality] = useState(DEFAULT_SCREEN_SHARE_PRESET_ID);
   // Systemaudio ist standardmäßig AUS – Nutzer aktiviert es explizit
   const [screenShareAudio, setScreenShareAudio] = useState(false);
   // Lautstärke des geteilten Audios (0-200%, Default 100%)
   const [screenShareAudioVolume, setScreenShareAudioVolume] = useState(100);
   const [screenShareSurface, setScreenShareSurface] = useState("monitor");
-  const [captureSourcesStatus, setCaptureSourcesStatus] = useState("idle");
-  const [captureSources, setCaptureSources] = useState([]);
-  const [captureSourceType, setCaptureSourceType] = useState("display");
-  const [selectedCaptureSourceId, setSelectedCaptureSourceId] = useState(null);
   const [screenShareMeta, setScreenShareMeta] = useState({
     hasAudio: false,
     actualCaptureSettings: null,
@@ -197,10 +192,6 @@ export default function ChannelSidebar({
   const categories = useMemo(
     () => channelOrganization.topLevelItems.filter((channel) => channel.type === "category"),
     [channelOrganization],
-  );
-  const filteredCaptureSources = useMemo(
-    () => captureSources.filter((source) => source.kind === captureSourceType),
-    [captureSourceType, captureSources],
   );
   const currentVoiceParticipantIds = useMemo(() => {
     if (!voiceChannel?.id) {
@@ -274,6 +265,21 @@ export default function ChannelSidebar({
       },
     }),
   );
+  const handleCaptureSourcesLoadError = useCallback((error) => {
+    toast.error(formatAppError(t, error, { fallbackKey: "errors.nativeCaptureSourcesLoadFailed" }));
+  }, [t]);
+  const {
+    captureSourcesStatus,
+    captureSources,
+    captureSourceType,
+    selectedCaptureSourceId,
+    filteredCaptureSources,
+    setCaptureSourceType,
+    setSelectedCaptureSourceId,
+  } = useDesktopCaptureSources({
+    enabled: Boolean(screenShareDialogOpen && useNativeScreenShare),
+    onError: handleCaptureSourcesLoadError,
+  });
 
   const pttDebug = useDesktopPtt({
     enabled: Boolean(isDesktop && localVoicePreferences.pttEnabled),
@@ -441,54 +447,15 @@ export default function ChannelSidebar({
   }, [server?.id, serverSettingsRequest]);
 
   useEffect(() => {
-    if (!isDesktop || !screenShareDialogOpen) {
-      return undefined;
+    const validPresetIds = new Set(screenSharePresetOptions.map((preset) => preset.id));
+    if (validPresetIds.has(screenShareQuality)) {
+      return;
     }
 
-    let cancelled = false;
-
-    const loadCaptureSources = async () => {
-      setCaptureSourcesStatus("loading");
-      try {
-        const [sources, activeSession] = await Promise.all([
-          listDesktopCaptureSources(),
-          getNativeScreenShareSession().catch(() => null),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setCaptureSources(Array.isArray(sources) ? sources : []);
-        setCaptureSourcesStatus("ready");
-
-        const preferredSourceKind = activeSession?.sourceKind || "display";
-        const nextSelectedSourceId = activeSession?.sourceId
-          || (Array.isArray(sources)
-            ? (sources.find((source) => source.kind === preferredSourceKind)?.id || sources[0]?.id || null)
-            : null);
-        const nextSelectedSource = (sources || []).find((source) => source.id === nextSelectedSourceId) || null;
-        if (nextSelectedSourceId) {
-          setSelectedCaptureSourceId(nextSelectedSourceId);
-        }
-        if (nextSelectedSource?.kind) {
-          setCaptureSourceType(nextSelectedSource.kind);
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setCaptureSourcesStatus("error");
-        toast.error(formatAppError(t, error, { fallbackKey: "errors.nativeCaptureSourcesLoadFailed" }));
-      }
-    };
-
-    void loadCaptureSources();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isDesktop, screenShareDialogOpen, t]);
+    setScreenShareQuality(
+      useNativeScreenShare ? DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID : DEFAULT_SCREEN_SHARE_PRESET_ID,
+    );
+  }, [screenSharePresetOptions, screenShareQuality, useNativeScreenShare]);
 
   useEffect(() => {
     if (!screenShareCapabilities.supportsSystemAudio && screenShareAudio) {
@@ -802,17 +769,22 @@ export default function ChannelSidebar({
     }
   };
 
+  const updateScreenShareAudioVolume = useCallback((value) => {
+    setScreenShareAudioVolume(value);
+    voiceEngineRef?.current?.setScreenShareAudioVolume?.(value);
+  }, [voiceEngineRef]);
+
   const startScreenShare = async () => {
     if (!voiceChannel || !voiceEngineRef?.current) return;
     try {
-      if (isDesktop && !selectedCaptureSourceId) {
+      if (useNativeScreenShare && !selectedCaptureSourceId) {
         toast.error(t("channel.captureSourceMissing"));
         return;
       }
 
       const selectedSource = captureSources.find((source) => source.id === selectedCaptureSourceId) || null;
       const selectedPreset = resolveScreenSharePreset(screenShareQuality, {
-        isDesktop,
+        isDesktop: useNativeScreenShare,
         source: selectedSource,
       });
 
@@ -821,7 +793,7 @@ export default function ChannelSidebar({
       voiceEngineRef.current.setScreenShareAudioVolume(screenShareAudioVolume);
 
       const enabled = await voiceEngineRef.current.startScreenShare(
-        isDesktop
+        useNativeScreenShare
           ? {
             audio: screenShareAudio,
             nativeCapture: true,
@@ -1594,7 +1566,7 @@ export default function ChannelSidebar({
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "Manrope" }}>{t("channel.shareScreen")}</DialogTitle>
           </DialogHeader>
-          {isDesktop ? (
+          {isDesktop && useNativeScreenShare ? (
             <div className="grid gap-5 lg:grid-cols-[1.35fr_minmax(0,0.9fr)]">
               <div className="space-y-4">
                 <Tabs value={captureSourceType} onValueChange={setCaptureSourceType}>
@@ -1695,10 +1667,7 @@ export default function ChannelSidebar({
                           min={0}
                           max={200}
                           step={5}
-                          onValueChange={([value]) => {
-                            setScreenShareAudioVolume(value);
-                            voiceEngineRef?.current?.setScreenShareAudioVolume?.(value);
-                          }}
+                          onValueChange={([value]) => updateScreenShareAudioVolume(value)}
                           data-testid="screen-share-audio-volume-slider"
                         />
                       </div>
@@ -1784,6 +1753,7 @@ export default function ChannelSidebar({
               </Select>
             </div>
 
+            {screenShareCapabilities.supportsSystemAudio && (
             <div className="workspace-card space-y-3 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
@@ -1805,15 +1775,15 @@ export default function ChannelSidebar({
                     max={200}
                     step={5}
                     onValueChange={([value]) => {
-                      setScreenShareAudioVolume(value);
+                      updateScreenShareAudioVolume(value);
                       // Lautstärke sofort an den VoiceEngine weiterleiten
-                      voiceEngineRef?.current?.setScreenShareAudioVolume?.(value);
                     }}
                     data-testid="screen-share-audio-volume-web"
                   />
                 </div>
               )}
             </div>
+            )}
 
             <div className="workspace-card px-4 py-3 text-xs text-[#71717A]">
               {t("channel.shareScreenPickerHint")}

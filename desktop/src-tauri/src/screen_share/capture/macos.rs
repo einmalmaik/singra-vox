@@ -12,7 +12,7 @@ use crate::native_capture::DesktopCaptureStore;
 use crate::screen_share::session::DesktopCaptureSourceSummary;
 
 pub async fn list_capture_sources(
-    _store: State<'_, DesktopCaptureStore>,
+    store: State<'_, DesktopCaptureStore>,
 ) -> Result<Vec<DesktopCaptureSourceSummary>, String> {
-    Err("Native desktop capture publishing is not implemented for macOS yet.".into())
+    crate::native_capture::list_capture_sources(store).await
 }

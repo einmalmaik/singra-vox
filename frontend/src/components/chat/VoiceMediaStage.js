@@ -29,7 +29,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { MonitorPlay, VideoCamera } from "@phosphor-icons/react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { observeVideoReadiness } from "@/lib/videoReadiness";
 
@@ -265,6 +271,11 @@ export default function VoiceMediaStage({
             {isScreenShare ? <MonitorPlay size={18} /> : <VideoCamera size={18} />}
             {title}
           </DialogTitle>
+          <DialogDescription className="text-zinc-400">
+            {isScreenShare
+              ? t("mediaStage.screenShareTitle", { name: participantName || t("common.unknown") })
+              : t("mediaStage.cameraTitle", { name: participantName || t("common.unknown") })}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div ref={stageSurfaceRef} className="overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 relative">

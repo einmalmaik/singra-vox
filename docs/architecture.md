@@ -9,6 +9,36 @@ enthalten **niemals Klartext**.
 
 ---
 
+## Voice-/Stream-Modulgrenzen
+
+Der Voice- und Streaming-Stack folgt zwei einfachen Regeln:
+
+- `frontend/src/lib/voiceEngine.js` bleibt die stabile Fassade fuer die UI.
+- LiveKit bleibt die einzige Quelle der Wahrheit fuer Subscription-, Publication- und Track-State.
+
+Die interne Aufteilung ist bewusst nach Verantwortlichkeiten getrennt:
+
+- `frontend/src/lib/voice/VoiceSessionController.js`
+  Join, Disconnect, Reconnect, Room-Erstellung und E2EE-Bootstrap.
+- `frontend/src/lib/voice/LocalAudioController.js`
+  Mikrofon, Mute, Deafen, Input-Gain, PTT und Mic-Test.
+- `frontend/src/lib/voice/LocalVideoController.js`
+  Kamera-Lifecycle.
+- `frontend/src/lib/voice/ScreenShareController.js`
+  Browser- und Desktop-Screenshare, Qualitaetsprofile und Session-Rehydrate.
+- `frontend/src/lib/voice/RemoteAudioController.js`
+  Remote-Audio-Elemente und Output-Device-Anwendung.
+- `frontend/src/lib/voice/RemoteVideoController.js`
+  Video-TrackRefs, Proxy-Mapping und Stage-Attach.
+- `frontend/src/lib/voice/RemoteMediaController.js`
+  LiveKit-Room-Events, Participant-Sync und Speaking-State.
+
+Fuer Desktop-Screensharing gilt zusaetzlich:
+
+- `get_desktop_runtime_info` ist die einzige Truth-Source fuer Desktop-Capabilities im Frontend.
+- Desktop-UI darf native Capture- oder Audio-Faehigkeiten nicht implizit annehmen.
+- `desktop/src-tauri/src/screen_share/` ist die einzige oeffentliche Rust-Schnittstelle fuer Screen Share.
+
 ## Verzeichnis-Struktur
 
 ```

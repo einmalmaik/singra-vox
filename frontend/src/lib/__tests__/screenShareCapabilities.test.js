@@ -10,11 +10,11 @@
 import { getScreenShareCapabilities } from "../screenShareCapabilities";
 
 describe("screenShareCapabilities", () => {
-  it("exposes native desktop capture defaults", () => {
+  it("keeps desktop defaults conservative until the runtime bridge reports capabilities", () => {
     expect(getScreenShareCapabilities({ isDesktop: true })).toEqual({
-      supportsNativeCapture: true,
-      supportsSystemAudio: true,
-      supportsAudioVolumeControl: true,
+      supportsNativeCapture: false,
+      supportsSystemAudio: false,
+      supportsAudioVolumeControl: false,
       supportsWindowAudio: false,
     });
   });
@@ -33,15 +33,55 @@ describe("screenShareCapabilities", () => {
       isDesktop: true,
       runtimeInfo: {
         screenShareCapabilities: {
+          supportsNativeCapture: true,
           supportsSystemAudio: false,
+          supportsAudioVolumeControl: false,
           supportsWindowAudio: true,
         },
       },
     })).toEqual({
       supportsNativeCapture: true,
       supportsSystemAudio: false,
-      supportsAudioVolumeControl: true,
+      supportsAudioVolumeControl: false,
       supportsWindowAudio: true,
+    });
+  });
+
+  it("uses the runtime bridge as the only desktop truth source for Windows", () => {
+    expect(getScreenShareCapabilities({
+      isDesktop: true,
+      runtimeInfo: {
+        screenShareCapabilities: {
+          supportsNativeCapture: true,
+          supportsSystemAudio: true,
+          supportsAudioVolumeControl: true,
+          supportsWindowAudio: false,
+        },
+      },
+    })).toEqual({
+      supportsNativeCapture: true,
+      supportsSystemAudio: true,
+      supportsAudioVolumeControl: true,
+      supportsWindowAudio: false,
+    });
+  });
+
+  it("keeps unsupported Linux options disabled when the runtime bridge says so", () => {
+    expect(getScreenShareCapabilities({
+      isDesktop: true,
+      runtimeInfo: {
+        screenShareCapabilities: {
+          supportsNativeCapture: false,
+          supportsSystemAudio: false,
+          supportsAudioVolumeControl: false,
+          supportsWindowAudio: false,
+        },
+      },
+    })).toEqual({
+      supportsNativeCapture: false,
+      supportsSystemAudio: false,
+      supportsAudioVolumeControl: false,
+      supportsWindowAudio: false,
     });
   });
 });

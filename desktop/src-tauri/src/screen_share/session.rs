@@ -35,7 +35,7 @@ impl ScreenShareCapabilities {
         #[cfg(target_os = "macos")]
         {
             return Self {
-                supports_native_capture: false,
+                supports_native_capture: true,
                 supports_system_audio: false,
                 supports_audio_volume_control: false,
                 supports_window_audio: false,
@@ -58,6 +58,40 @@ impl ScreenShareCapabilities {
             supports_system_audio: false,
             supports_audio_volume_control: false,
             supports_window_audio: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScreenShareCapabilities;
+
+    #[test]
+    fn current_capabilities_match_platform_contract() {
+        let capabilities = ScreenShareCapabilities::current();
+
+        #[cfg(target_os = "windows")]
+        {
+            assert!(capabilities.supports_native_capture);
+            assert!(capabilities.supports_system_audio);
+            assert!(capabilities.supports_audio_volume_control);
+            assert!(!capabilities.supports_window_audio);
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            assert!(capabilities.supports_native_capture);
+            assert!(!capabilities.supports_system_audio);
+            assert!(!capabilities.supports_audio_volume_control);
+            assert!(!capabilities.supports_window_audio);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            assert!(!capabilities.supports_native_capture);
+            assert!(!capabilities.supports_system_audio);
+            assert!(!capabilities.supports_audio_volume_control);
+            assert!(!capabilities.supports_window_audio);
         }
     }
 }

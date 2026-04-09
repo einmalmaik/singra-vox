@@ -14,5 +14,5 @@ pub fn update_native_screen_share_audio_volume(
     _volume: u32,
     _screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<bool, String> {
-    Err("Native desktop screen-share audio is not implemented for macOS yet.".into())
+    Err("Native desktop screen-share audio volume control is not available on macOS yet.".into())
 }

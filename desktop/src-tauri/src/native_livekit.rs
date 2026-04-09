@@ -12,9 +12,9 @@ use std::sync::{
 };
 use tauri::State;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use crabgrab::{
     feature::bitmap::FrameBitmap,
     prelude::{CaptureStream, StreamEvent, VideoFrameBitmap},
@@ -24,13 +24,13 @@ use libwebrtc::{
     audio_frame::AudioFrame,
     audio_source::{native::NativeAudioSource, AudioSourceOptions, RtcAudioSource},
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use libwebrtc::{
     native::yuv_helper,
     prelude::{I420Buffer, RtcVideoSource, VideoFrame, VideoResolution, VideoRotation},
     video_source::native::NativeVideoSource,
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use livekit::{
     e2ee::{
         key_provider::{KeyProvider, KeyProviderOptions},
@@ -46,7 +46,7 @@ use crate::native_audio_capture::{
     NativeSystemAudioCaptureConfig, NativeSystemAudioCaptureStream,
     DEFAULT_SYSTEM_AUDIO_CHANNELS, DEFAULT_SYSTEM_AUDIO_QUEUE_MS,
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use crate::native_capture::{
     build_capture_config, ensure_capture_source_handle, fit_output_dimensions,
     normalize_capture_dimensions, DesktopCaptureStore,
@@ -96,36 +96,37 @@ pub struct NativeScreenShareSessionInfo {
 
 #[derive(Default)]
 pub struct NativeScreenShareStore {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     inner: Arc<Mutex<NativeScreenShareState>>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Default)]
 struct NativeScreenShareState {
     active_session: Option<ActiveNativeScreenShareSession>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 struct ActiveNativeScreenShareSession {
     info: NativeScreenShareSessionInfo,
     control: Arc<NativeScreenShareControl>,
     event_task: tokio::task::JoinHandle<()>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 struct NativeScreenShareControl {
     room: Arc<Room>,
     video_publication: LocalTrackPublication,
     audio_publication: Option<LocalTrackPublication>,
     capture_stream: Mutex<Option<CaptureStream>>,
+    #[cfg(target_os = "windows")]
     audio_capture_stream: Mutex<Option<NativeSystemAudioCaptureStream>>,
     audio_volume: Arc<AtomicU32>,
     key_provider: Option<KeyProvider>,
     shutdown_started: AtomicBool,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl NativeScreenShareControl {
     fn new(
         room: Arc<Room>,
@@ -139,6 +140,7 @@ impl NativeScreenShareControl {
             video_publication,
             audio_publication,
             capture_stream: Mutex::new(None),
+            #[cfg(target_os = "windows")]
             audio_capture_stream: Mutex::new(None),
             audio_volume,
             key_provider,
@@ -155,6 +157,7 @@ impl NativeScreenShareControl {
         Ok(())
     }
 
+    #[cfg(target_os = "windows")]
     fn set_audio_capture_stream(
         &self,
         audio_capture_stream: NativeSystemAudioCaptureStream,
@@ -195,6 +198,7 @@ impl NativeScreenShareControl {
                 let _ = capture_stream.stop();
             }
         }
+        #[cfg(target_os = "windows")]
         if let Ok(mut guard) = self.audio_capture_stream.lock() {
             if let Some(mut audio_capture_stream) = guard.take() {
                 audio_capture_stream.stop();
@@ -217,14 +221,14 @@ impl NativeScreenShareControl {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 struct LiveKitFrameBridge {
     video_source: NativeVideoSource,
     max_width: u32,
     max_height: u32,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl LiveKitFrameBridge {
     fn new(video_source: NativeVideoSource, max_width: u32, max_height: u32) -> Self {
         Self {
@@ -295,12 +299,12 @@ impl LiveKitFrameBridge {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn clamp_audio_volume(volume: u32) -> u32 {
     volume.clamp(0, 200)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn apply_audio_volume(samples: &[i16], volume: u32) -> Vec<i16> {
     let volume_factor = clamp_audio_volume(volume) as f32 / 100.0;
     if (volume_factor - 1.0).abs() < f32::EPSILON {
@@ -317,14 +321,14 @@ fn apply_audio_volume(samples: &[i16], volume: u32) -> Vec<i16> {
         .collect()
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn decode_shared_media_key(shared_media_key_b64: &str) -> Result<Vec<u8>, String> {
     BASE64_STANDARD
         .decode(shared_media_key_b64)
         .map_err(|error| format!("The encrypted voice room key could not be decoded: {error}"))
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 fn build_e2ee_options(
     e2ee_required: bool,
     shared_media_key_b64: Option<&str>,
@@ -349,7 +353,7 @@ fn build_e2ee_options(
     )))
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 async fn stop_active_session(store: &NativeScreenShareStore) -> Result<bool, String> {
     let active_session = {
         let mut guard = store
@@ -368,7 +372,7 @@ async fn stop_active_session(store: &NativeScreenShareStore) -> Result<bool, Str
     Ok(true)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 async fn start_native_screen_share_inner(
     input: NativeScreenShareStartInput,
     capture_store: &DesktopCaptureStore,
@@ -387,6 +391,12 @@ async fn start_native_screen_share_inner(
     let requested_height = input.requested_height.unwrap_or(720).max(1);
     let requested_frame_rate = input.requested_frame_rate.unwrap_or(30).max(1);
     let requested_audio = input.audio_enabled.unwrap_or(false);
+    #[cfg(target_os = "macos")]
+    if requested_audio {
+        return Err(
+            "Native system audio capture is not implemented for macOS builds yet.".into(),
+        );
+    }
     let requested_audio_volume = clamp_audio_volume(input.audio_volume.unwrap_or(100));
     let source_handle = ensure_capture_source_handle(capture_store, &input.source_id).await?;
     let (source_kind, source_label, capture_config, capture_geometry) =
@@ -450,6 +460,7 @@ async fn start_native_screen_share_inner(
         })?;
 
     let audio_volume = Arc::new(AtomicU32::new(requested_audio_volume));
+    #[cfg(target_os = "windows")]
     let audio_publication = if requested_audio {
         let audio_capture_config = NativeSystemAudioCaptureConfig::default();
         let audio_source = NativeAudioSource::new(
@@ -521,6 +532,8 @@ async fn start_native_screen_share_inner(
     } else {
         None
     };
+    #[cfg(target_os = "macos")]
+    let audio_publication: Option<(LocalTrackPublication, ())> = None;
 
     let control = Arc::new(NativeScreenShareControl::new(
         room.clone(),
@@ -529,6 +542,7 @@ async fn start_native_screen_share_inner(
         audio_volume,
         key_provider,
     ));
+    #[cfg(target_os = "windows")]
     if let Some((_, audio_capture_stream)) = audio_publication {
         if let Err(error) = control.set_audio_capture_stream(audio_capture_stream) {
             control.shutdown().await;
@@ -666,38 +680,32 @@ pub async fn start_native_screen_share(
     capture_store: State<'_, DesktopCaptureStore>,
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<NativeScreenShareSessionInfo, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return start_native_screen_share_inner(input, &capture_store, &screen_share_store).await;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = input;
         let _ = capture_store;
         let _ = screen_share_store;
-        Err(
-            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
-                .into(),
-        )
+        Err("Native LiveKit desktop screen share is currently only implemented for Windows and macOS builds.".into())
     }
 }
 
 pub async fn stop_native_screen_share(
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<bool, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return stop_active_session(&screen_share_store).await;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = screen_share_store;
-        Err(
-            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
-                .into(),
-        )
+        Err("Native LiveKit desktop screen share is currently only implemented for Windows and macOS builds.".into())
     }
 }
 
@@ -706,7 +714,7 @@ pub fn update_native_screen_share_key(
     key_index: Option<i32>,
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<bool, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         let shared_key = decode_shared_media_key(&shared_media_key_b64)?;
         let guard = screen_share_store
@@ -724,15 +732,12 @@ pub fn update_native_screen_share_key(
             .set_shared_key(shared_key, key_index.unwrap_or(0)));
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = shared_media_key_b64;
         let _ = key_index;
         let _ = screen_share_store;
-        Err(
-            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
-                .into(),
-        )
+        Err("Native LiveKit desktop screen share is currently only implemented for Windows and macOS builds.".into())
     }
 }
 
@@ -760,17 +765,14 @@ pub fn update_native_screen_share_audio_volume(
     {
         let _ = volume;
         let _ = screen_share_store;
-        Err(
-            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
-                .into(),
-        )
+        Err("Native desktop screen-share audio volume control is only available on Windows builds.".into())
     }
 }
 
 pub fn get_native_screen_share_session(
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<Option<NativeScreenShareSessionInfo>, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         let mut guard = screen_share_store
             .inner
@@ -792,17 +794,14 @@ pub fn get_native_screen_share_session(
             .map(|session| session.info.clone()));
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = screen_share_store;
-        Err(
-            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
-                .into(),
-        )
+        Err("Native LiveKit desktop screen share is currently only implemented for Windows and macOS builds.".into())
     }
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
 mod tests {
     use super::{apply_audio_volume, clamp_audio_volume};
 

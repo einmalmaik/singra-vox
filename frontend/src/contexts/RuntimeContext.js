@@ -9,6 +9,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import api, { configureApi } from "@/lib/api";
+import { getDesktopRuntimeInfo } from "@/lib/desktop";
 import { clearDesktopInstanceUrl, loadRuntimeConfig, saveDesktopInstanceUrl } from "@/lib/runtimeConfig";
 
 const RuntimeContext = createContext(null);
@@ -45,6 +46,7 @@ function clearSetupCache() {
 
 export function RuntimeProvider({ children }) {
   const [config, setConfig] = useState(null);
+  const [runtimeInfo, setRuntimeInfo] = useState(null);
   const [setupStatus, setSetupStatus] = useState(EMPTY_SETUP_STATUS);
   const [ready, setReady] = useState(false);
 
@@ -82,9 +84,13 @@ export function RuntimeProvider({ children }) {
 
     (async () => {
       const loadedConfig = await loadRuntimeConfig();
+      const loadedRuntimeInfo = loadedConfig.isDesktop
+        ? await getDesktopRuntimeInfo().catch(() => null)
+        : null;
       if (cancelled) return;
 
       setConfig(loadedConfig);
+      setRuntimeInfo(loadedRuntimeInfo);
       if (!loadedConfig.needsConnection) {
         try {
           await fetchSetupStatus(loadedConfig);
@@ -107,10 +113,13 @@ export function RuntimeProvider({ children }) {
 
   const connectToInstance = useCallback(async (instanceUrl) => {
     const nextConfig = await saveDesktopInstanceUrl(instanceUrl);
+    if (nextConfig.isDesktop && !runtimeInfo) {
+      setRuntimeInfo(await getDesktopRuntimeInfo().catch(() => null));
+    }
     setConfig(nextConfig);
     const status = await fetchSetupStatus(nextConfig);
     return { config: nextConfig, status };
-  }, [fetchSetupStatus]);
+  }, [fetchSetupStatus, runtimeInfo]);
 
   const disconnectFromInstance = useCallback(async () => {
     await clearDesktopInstanceUrl();
@@ -123,12 +132,13 @@ export function RuntimeProvider({ children }) {
   const value = useMemo(() => ({
     ready,
     config,
+    runtimeInfo,
     setupStatus,
     connectToInstance,
     disconnectFromInstance,
     refreshSetupStatus: () => fetchSetupStatus(config),
     setSetupStatus,
-  }), [config, connectToInstance, disconnectFromInstance, fetchSetupStatus, ready, setupStatus]);
+  }), [config, connectToInstance, disconnectFromInstance, fetchSetupStatus, ready, runtimeInfo, setupStatus]);
 
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

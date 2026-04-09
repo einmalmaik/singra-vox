@@ -524,6 +524,47 @@ describe("VoiceEngine native cleanup", () => {
     expect(publication.setEnabled).not.toHaveBeenCalled();
   });
 
+  it("replaces a stale remote audio element when the same publication key resubscribes", async () => {
+    const engine = new VoiceEngine();
+    const firstElement = document.createElement("audio");
+    const secondElement = document.createElement("audio");
+    const firstTrack = {
+      kind: "audio",
+      source: "screen_share_audio",
+      attach: jest.fn(() => firstElement),
+      detach: jest.fn(),
+    };
+    const secondTrack = {
+      kind: "audio",
+      source: "screen_share_audio",
+      attach: jest.fn(() => secondElement),
+      detach: jest.fn(),
+    };
+    const participantEntry = {
+      userId: "user-2",
+      participantIdentity: "screen-share:channel:user-2",
+    };
+
+    await engine._attachRemoteAudioTrack(
+      firstTrack,
+      { kind: "audio", source: "screen_share_audio" },
+      participantEntry,
+      participantEntry.participantIdentity,
+      "screen_share_audio",
+    );
+    await engine._attachRemoteAudioTrack(
+      secondTrack,
+      { kind: "audio", source: "screen_share_audio" },
+      participantEntry,
+      participantEntry.participantIdentity,
+      "screen_share_audio",
+    );
+
+    expect(firstTrack.detach).toHaveBeenCalledWith(firstElement);
+    expect(document.body.contains(firstElement)).toBe(false);
+    expect(document.body.contains(secondElement)).toBe(true);
+  });
+
   it("rehydrates an active native desktop screen share after a desktop reconnect", async () => {
     const engine = new VoiceEngine();
     const listener = jest.fn();

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use crabgrab::prelude::{
     CapturableContent, CapturableContentFilter, CapturableDisplay, CapturableWindow, CaptureConfig,
     CapturePixelFormat,
@@ -18,17 +18,17 @@ use crabgrab::prelude::{
 
 #[derive(Default)]
 pub struct DesktopCaptureStore {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     inner: Arc<Mutex<DesktopCaptureState>>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Default)]
 struct DesktopCaptureState {
     sources: HashMap<String, CaptureSourceHandle>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Debug, Clone)]
 pub(crate) enum CaptureSourceHandle {
     Display(CapturableDisplay),
@@ -47,14 +47,14 @@ pub struct DesktopCaptureSourceSummary {
     pub height: u32,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Debug)]
 struct EnumeratedSource {
     summary: DesktopCaptureSourceSummary,
     handle: CaptureSourceHandle,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) fn clamp_even_dimension(value: f64) -> u32 {
     let rounded = value.round().max(2.0) as u32;
     if rounded % 2 == 0 {
@@ -64,7 +64,7 @@ pub(crate) fn clamp_even_dimension(value: f64) -> u32 {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) fn normalize_capture_dimensions(source_width: u32, source_height: u32) -> (u32, u32) {
     (
         clamp_even_dimension(source_width as f64),
@@ -72,7 +72,7 @@ pub(crate) fn normalize_capture_dimensions(source_width: u32, source_height: u32
     )
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) fn fit_output_dimensions(
     source_width: u32,
     source_height: u32,
@@ -96,7 +96,7 @@ pub(crate) fn fit_output_dimensions(
     (scaled_width, scaled_height)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CaptureGeometry {
     pub source_width: u32,
@@ -107,7 +107,7 @@ pub(crate) struct CaptureGeometry {
     pub output_height: u32,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 impl CaptureGeometry {
     pub(crate) fn new(
         source_width: u32,
@@ -130,7 +130,7 @@ impl CaptureGeometry {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 async fn enumerate_sources() -> Result<Vec<EnumeratedSource>, String> {
     let content = CapturableContent::new(CapturableContentFilter::EVERYTHING_NORMAL)
         .await
@@ -182,7 +182,7 @@ async fn enumerate_sources() -> Result<Vec<EnumeratedSource>, String> {
     Ok(sources)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) async fn refresh_capture_sources(
     store: &DesktopCaptureStore,
 ) -> Result<Vec<DesktopCaptureSourceSummary>, String> {
@@ -204,7 +204,7 @@ pub(crate) async fn refresh_capture_sources(
     Ok(summaries)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) async fn ensure_capture_source_handle(
     store: &DesktopCaptureStore,
     source_id: &str,
@@ -232,7 +232,7 @@ pub(crate) async fn ensure_capture_source_handle(
         .ok_or_else(|| "The selected capture source is no longer available.".to_string())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub(crate) fn build_capture_config(
     source_handle: CaptureSourceHandle,
     requested_width: u32,
@@ -284,7 +284,7 @@ pub(crate) fn build_capture_config(
     Ok(built)
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
 mod tests {
     use super::{fit_output_dimensions, normalize_capture_dimensions};
 
@@ -318,14 +318,14 @@ mod tests {
 pub async fn list_capture_sources(
     store: State<'_, DesktopCaptureStore>,
 ) -> Result<Vec<DesktopCaptureSourceSummary>, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return refresh_capture_sources(&store).await;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = store;
-        Err("Native desktop capture is currently only implemented for Windows builds.".into())
+        Err("Native desktop capture is currently only implemented for Windows and macOS builds.".into())
     }
 }

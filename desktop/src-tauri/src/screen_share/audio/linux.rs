@@ -14,5 +14,5 @@ pub fn update_native_screen_share_audio_volume(
     _volume: u32,
     _screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<bool, String> {
-    Err("Native desktop screen-share audio is not implemented for Linux yet.".into())
+    Err("Native Linux system-audio capture requires a PipeWire backend and is not implemented in this build yet.".into())
 }

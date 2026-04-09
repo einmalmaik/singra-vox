@@ -17,13 +17,13 @@ pub async fn start_native_screen_share(
     capture_store: State<'_, DesktopCaptureStore>,
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<NativeScreenShareSessionInfo, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return crate::native_livekit::start_native_screen_share(input, capture_store, screen_share_store)
             .await;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = input;
         let _ = capture_store;
@@ -35,12 +35,12 @@ pub async fn start_native_screen_share(
 pub async fn stop_native_screen_share(
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<bool, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return crate::native_livekit::stop_native_screen_share(screen_share_store).await;
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = screen_share_store;
         Err("Native desktop screen-share publishing is not implemented on this platform yet.".into())
@@ -52,7 +52,7 @@ pub fn update_native_screen_share_key(
     key_index: Option<i32>,
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<bool, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return crate::native_livekit::update_native_screen_share_key(
             shared_media_key_b64,
@@ -61,7 +61,7 @@ pub fn update_native_screen_share_key(
         );
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = shared_media_key_b64;
         let _ = key_index;
@@ -73,12 +73,12 @@ pub fn update_native_screen_share_key(
 pub fn get_native_screen_share_session(
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<Option<NativeScreenShareSessionInfo>, String> {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return crate::native_livekit::get_native_screen_share_session(screen_share_store);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = screen_share_store;
         Ok(None)

@@ -15,9 +15,9 @@ const BROWSER_SCREEN_SHARE_CAPABILITIES = Object.freeze({
 });
 
 const DESKTOP_NATIVE_SCREEN_SHARE_CAPABILITIES = Object.freeze({
-  supportsNativeCapture: true,
-  supportsSystemAudio: true,
-  supportsAudioVolumeControl: true,
+  supportsNativeCapture: false,
+  supportsSystemAudio: false,
+  supportsAudioVolumeControl: false,
   supportsWindowAudio: false,
 });
 

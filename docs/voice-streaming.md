@@ -41,6 +41,24 @@ Der Voice- und Streaming-Stack bleibt nach auÃŸen bei `new VoiceEngine()`, ist
 - `desktop/src-tauri/src/screen_share/audio/*`
   OS-spezifische Audio-Adapter.
 
+## Desktop-Capabilities
+
+- `get_desktop_runtime_info` ist die Quelle der Wahrheit fÃ¼r Desktop-Screenshare-FÃ¤higkeiten.
+- Das Frontend darf Desktop-Capture und Systemaudio nicht implizit annehmen; die UI liest die Capability-Matrix aus der Runtime-Bridge.
+- Aktueller Stand:
+  - Windows: nativer Capture-Pfad mit Systemaudio und Audio-LautstÃ¤rke-Regelung
+  - macOS 13+: nativer Capture-Pfad ohne Systemaudio
+  - Linux: kein nativer Capture-Adapter in diesem Build; die Desktop-UI fÃ¤llt auf den nicht-nativen Picker zurÃ¼ck
+
+## Weitere Modul-Schnitte
+
+- `frontend/src/lib/voice/RemoteAudioController.js`
+  Haelt Audio-Elemente, Sink-Device-Anwendung und Audio-Cleanup getrennt vom Room-Event-Code.
+- `frontend/src/lib/voice/RemoteVideoController.js`
+  Haelt TrackRef-Projektion, Video-Revisionszaehlung und Stage-Attach getrennt vom Room-Event-Code.
+- `frontend/src/hooks/useDesktopCaptureSources.js`
+  Haelt Desktop-Source-Laden und Session-Rehydrate in einem kleinen, separat testbaren Hook.
+
 ## Logging
 
 - Backend-Voice-Routen loggen Join, Leave, State-Updates und Token-Ausgabe mit `server_id`, `channel_id`, `user_id`, `participant_identity`, `room_name`, `platform`, `event` und `result`.
