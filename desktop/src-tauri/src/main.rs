@@ -11,6 +11,8 @@
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod native_capture;
 #[cfg(target_os = "windows")]
+mod native_audio_capture;
+#[cfg(target_os = "windows")]
 mod native_livekit;
 
 mod rich_presence;
@@ -825,6 +827,8 @@ fn main() {
             native_livekit::stop_native_screen_share,
             #[cfg(target_os = "windows")]
             native_livekit::update_native_screen_share_key,
+            #[cfg(target_os = "windows")]
+            native_livekit::update_native_screen_share_audio_volume,
             #[cfg(target_os = "windows")]
             native_livekit::get_native_screen_share_session,
         ])

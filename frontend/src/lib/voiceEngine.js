@@ -39,6 +39,7 @@ import {
   getNativeScreenShareSession,
   startNativeScreenShare,
   stopNativeScreenShare,
+  updateNativeScreenShareAudioVolume,
   updateNativeScreenShareKey,
 } from "@/lib/desktop";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
@@ -834,6 +835,13 @@ export class VoiceEngine {
     if (this.screenShareAudioGain) {
       this.screenShareAudioGain.gain.value = this.screenShareAudioVolume / 100;
     }
+    if (this.nativeScreenShare?.audioRequested) {
+      void Promise.resolve(
+        updateNativeScreenShareAudioVolume?.(this.screenShareAudioVolume),
+      ).catch((error) => {
+        console.warn("[VoiceEngine] native screen-share audio volume update failed:", error?.message || error);
+      });
+    }
   }
 
   /**
@@ -939,7 +947,7 @@ export class VoiceEngine {
     this.nativeScreenShare = {
       ...activeSession,
       keySubscriptionCleanup: previousCleanup,
-      audioRequested: false,
+      audioRequested: Boolean(activeSession.hasAudio),
     };
 
     this._emitRemoteMediaUpdate();
@@ -949,14 +957,14 @@ export class VoiceEngine {
       sourceId: activeSession.sourceId || null,
       sourceKind: activeSession.sourceKind || null,
       sourceLabel: activeSession.sourceLabel || null,
-      hasAudio: false,
+      hasAudio: Boolean(activeSession.hasAudio),
       actualCaptureSettings: {
         width: activeSession.requestedWidth || null,
         height: activeSession.requestedHeight || null,
         frameRate: activeSession.requestedFrameRate || null,
       },
       captureMode: null,
-      audioRequested: false,
+      audioRequested: Boolean(activeSession.hasAudio),
     });
 
     return activeSession;
@@ -1019,6 +1027,8 @@ export class VoiceEngine {
         roomName: tokenResponse.data.room_name,
         participantIdentity: tokenResponse.data.participant_identity,
         sourceId,
+        audioEnabled: Boolean(audio),
+        audioVolume: this.screenShareAudioVolume,
         requestedWidth: resolution.width,
         requestedHeight: resolution.height,
         requestedFrameRate: resolution.frameRate,
@@ -1034,7 +1044,8 @@ export class VoiceEngine {
         sourceKind: sourceKind || session?.sourceKind || "display",
         sourceLabel: sourceLabel || session?.sourceLabel || "Desktop capture",
         qualityPreset,
-        audioRequested: Boolean(audio),
+        hasAudio: Boolean(session?.hasAudio),
+        audioRequested: Boolean(session?.hasAudio || audio),
         keySubscriptionCleanup: nativeKeySubscription,
       };
     } catch (error) {
@@ -1049,14 +1060,14 @@ export class VoiceEngine {
       sourceId,
       sourceKind: this.nativeScreenShare.sourceKind,
       sourceLabel: this.nativeScreenShare.sourceLabel,
-      hasAudio: false,
+      hasAudio: Boolean(session?.hasAudio),
       actualCaptureSettings: {
         width: session?.requestedWidth || resolution.width,
         height: session?.requestedHeight || resolution.height,
         frameRate: session?.requestedFrameRate || resolution.frameRate,
       },
       captureMode: null,
-      audioRequested: Boolean(audio),
+      audioRequested: Boolean(session?.hasAudio || audio),
     });
     return true;
   }
@@ -1820,7 +1831,8 @@ export class VoiceEngine {
         source: Track.Source.ScreenShare,
         state: localScreenShareTrack ? VIDEO_TRACK_STATE_READY : VIDEO_TRACK_STATE_PENDING,
         revision: localScreenShareTrackRevision,
-        hasAudio: this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
+        hasAudio: Boolean(this.nativeScreenShare?.hasAudio)
+          || this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
         isLocal: true,
         provider: this.nativeScreenShare?.provider || "livekit-local",
         sourceKind: this.nativeScreenShare?.sourceKind || null,

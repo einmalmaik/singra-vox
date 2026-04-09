@@ -53,6 +53,7 @@ jest.mock("@/lib/desktop", () => ({
   getNativeScreenShareSession: jest.fn(() => Promise.resolve(null)),
   startNativeScreenShare: jest.fn(),
   stopNativeScreenShare: jest.fn(() => Promise.resolve(true)),
+  updateNativeScreenShareAudioVolume: jest.fn(() => Promise.resolve(true)),
   updateNativeScreenShareKey: jest.fn(() => Promise.resolve(true)),
 }), { virtual: true });
 
@@ -70,6 +71,7 @@ import {
   getNativeScreenShareSession,
   startNativeScreenShare,
   stopNativeScreenShare,
+  updateNativeScreenShareAudioVolume,
 } from "@/lib/desktop";
 import { VoiceEngine } from "../voiceEngine";
 
@@ -313,6 +315,7 @@ describe("VoiceEngine native cleanup", () => {
       requestedWidth: 1280,
       requestedHeight: 718,
       requestedFrameRate: 30,
+      hasAudio: true,
       sourceKind: "display",
       sourceLabel: "Display 2560x1440",
     });
@@ -333,7 +336,21 @@ describe("VoiceEngine native cleanup", () => {
         height: 718,
         frameRate: 30,
       },
+      hasAudio: true,
+      audioRequested: true,
     }));
+  });
+
+  it("forwards native desktop audio volume updates to the desktop bridge", () => {
+    const engine = new VoiceEngine();
+
+    engine.nativeScreenShare = {
+      audioRequested: true,
+    };
+
+    engine.setScreenShareAudioVolume(135);
+
+    expect(updateNativeScreenShareAudioVolume).toHaveBeenCalledWith(135);
   });
 
   it("rehydrates an active native desktop screen share after a desktop reconnect", async () => {

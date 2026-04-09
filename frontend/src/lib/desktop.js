@@ -215,6 +215,12 @@ export async function updateNativeScreenShareKey(sharedMediaKeyB64, keyIndex = 0
   });
 }
 
+export async function updateNativeScreenShareAudioVolume(volume) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("update_native_screen_share_audio_volume", { volume });
+}
+
 export async function openExternalUrl(url) {
   if (!url) return;
   if (isDesktopApp()) {

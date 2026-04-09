@@ -7,7 +7,7 @@
 // (at your option) any later version.
 use serde::{Deserialize, Serialize};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc, Mutex,
 };
 use tauri::State;
@@ -18,6 +18,11 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use crabgrab::{
     feature::bitmap::FrameBitmap,
     prelude::{CaptureStream, StreamEvent, VideoFrameBitmap},
+};
+#[cfg(target_os = "windows")]
+use libwebrtc::{
+    audio_frame::AudioFrame,
+    audio_source::{native::NativeAudioSource, AudioSourceOptions, RtcAudioSource},
 };
 #[cfg(target_os = "windows")]
 use libwebrtc::{
@@ -33,9 +38,14 @@ use livekit::{
     },
     options::{TrackPublishOptions, VideoEncoding},
     prelude::{LocalTrack, LocalTrackPublication, Room, RoomEvent, RoomOptions, TrackSource},
-    track::LocalVideoTrack,
+    track::{LocalAudioTrack, LocalVideoTrack},
 };
 
+#[cfg(target_os = "windows")]
+use crate::native_audio_capture::{
+    NativeSystemAudioCaptureConfig, NativeSystemAudioCaptureStream,
+    DEFAULT_SYSTEM_AUDIO_CHANNELS, DEFAULT_SYSTEM_AUDIO_QUEUE_MS,
+};
 #[cfg(target_os = "windows")]
 use crate::native_capture::{
     build_capture_config, ensure_capture_source_handle, fit_output_dimensions,
@@ -50,6 +60,8 @@ pub struct NativeScreenShareStartInput {
     pub room_name: String,
     pub participant_identity: String,
     pub source_id: String,
+    pub audio_enabled: Option<bool>,
+    pub audio_volume: Option<u32>,
     pub requested_width: Option<u32>,
     pub requested_height: Option<u32>,
     pub requested_frame_rate: Option<u32>,
@@ -75,6 +87,7 @@ pub struct NativeScreenShareSessionInfo {
     pub requested_width: u32,
     pub requested_height: u32,
     pub requested_frame_rate: u32,
+    pub has_audio: bool,
     pub max_bitrate: Option<u64>,
     pub max_frame_rate: Option<f64>,
     pub simulcast: bool,
@@ -103,8 +116,11 @@ struct ActiveNativeScreenShareSession {
 #[cfg(target_os = "windows")]
 struct NativeScreenShareControl {
     room: Arc<Room>,
-    publication: LocalTrackPublication,
+    video_publication: LocalTrackPublication,
+    audio_publication: Option<LocalTrackPublication>,
     capture_stream: Mutex<Option<CaptureStream>>,
+    audio_capture_stream: Mutex<Option<NativeSystemAudioCaptureStream>>,
+    audio_volume: Arc<AtomicU32>,
     key_provider: Option<KeyProvider>,
     shutdown_started: AtomicBool,
 }
@@ -113,13 +129,18 @@ struct NativeScreenShareControl {
 impl NativeScreenShareControl {
     fn new(
         room: Arc<Room>,
-        publication: LocalTrackPublication,
+        video_publication: LocalTrackPublication,
+        audio_publication: Option<LocalTrackPublication>,
+        audio_volume: Arc<AtomicU32>,
         key_provider: Option<KeyProvider>,
     ) -> Self {
         Self {
             room,
-            publication,
+            video_publication,
+            audio_publication,
             capture_stream: Mutex::new(None),
+            audio_capture_stream: Mutex::new(None),
+            audio_volume,
             key_provider,
             shutdown_started: AtomicBool::new(false),
         }
@@ -134,8 +155,25 @@ impl NativeScreenShareControl {
         Ok(())
     }
 
+    fn set_audio_capture_stream(
+        &self,
+        audio_capture_stream: NativeSystemAudioCaptureStream,
+    ) -> Result<(), String> {
+        let mut guard = self
+            .audio_capture_stream
+            .lock()
+            .map_err(|_| "The native screen-share audio state is unavailable.".to_string())?;
+        *guard = Some(audio_capture_stream);
+        Ok(())
+    }
+
     fn is_shutdown(&self) -> bool {
         self.shutdown_started.load(Ordering::Relaxed)
+    }
+
+    fn set_audio_volume(&self, volume: u32) {
+        self.audio_volume
+            .store(clamp_audio_volume(volume), Ordering::Relaxed);
     }
 
     fn set_shared_key(&self, shared_key: Vec<u8>, key_index: i32) -> bool {
@@ -157,12 +195,24 @@ impl NativeScreenShareControl {
                 let _ = capture_stream.stop();
             }
         }
+        if let Ok(mut guard) = self.audio_capture_stream.lock() {
+            if let Some(mut audio_capture_stream) = guard.take() {
+                audio_capture_stream.stop();
+            }
+        }
 
         let _ = self
             .room
             .local_participant()
-            .unpublish_track(&self.publication.sid())
+            .unpublish_track(&self.video_publication.sid())
             .await;
+        if let Some(audio_publication) = self.audio_publication.as_ref() {
+            let _ = self
+                .room
+                .local_participant()
+                .unpublish_track(&audio_publication.sid())
+                .await;
+        }
         let _ = self.room.close().await;
     }
 }
@@ -246,6 +296,28 @@ impl LiveKitFrameBridge {
 }
 
 #[cfg(target_os = "windows")]
+fn clamp_audio_volume(volume: u32) -> u32 {
+    volume.clamp(0, 200)
+}
+
+#[cfg(target_os = "windows")]
+fn apply_audio_volume(samples: &[i16], volume: u32) -> Vec<i16> {
+    let volume_factor = clamp_audio_volume(volume) as f32 / 100.0;
+    if (volume_factor - 1.0).abs() < f32::EPSILON {
+        return samples.to_vec();
+    }
+
+    samples
+        .iter()
+        .map(|sample| {
+            let scaled = (*sample as f32 * volume_factor)
+                .clamp(i16::MIN as f32, i16::MAX as f32);
+            scaled as i16
+        })
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
 fn decode_shared_media_key(shared_media_key_b64: &str) -> Result<Vec<u8>, String> {
     BASE64_STANDARD
         .decode(shared_media_key_b64)
@@ -314,6 +386,8 @@ async fn start_native_screen_share_inner(
     let requested_width = input.requested_width.unwrap_or(1280).max(1);
     let requested_height = input.requested_height.unwrap_or(720).max(1);
     let requested_frame_rate = input.requested_frame_rate.unwrap_or(30).max(1);
+    let requested_audio = input.audio_enabled.unwrap_or(false);
+    let requested_audio_volume = clamp_audio_volume(input.audio_volume.unwrap_or(100));
     let source_handle = ensure_capture_source_handle(capture_store, &input.source_id).await?;
     let (source_kind, source_label, capture_config, capture_geometry) =
         build_capture_config(source_handle, requested_width, requested_height)?;
@@ -350,11 +424,12 @@ async fn start_native_screen_share_inner(
         },
         true,
     );
+    let native_stream_name = format!("native-screen-share:{}", input.participant_identity);
     let local_track = LocalVideoTrack::create_video_track(
         "native-screen-share",
         RtcVideoSource::Native(rtc_source.clone()),
     );
-    let publication = room
+    let video_publication = room
         .local_participant()
         .publish_track(
             LocalTrack::Video(local_track),
@@ -365,7 +440,7 @@ async fn start_native_screen_share_inner(
                 }),
                 simulcast: input.simulcast.unwrap_or(false),
                 source: TrackSource::Screenshare,
-                stream: format!("native-screen-share:{}", input.participant_identity),
+                stream: native_stream_name.clone(),
                 ..Default::default()
             },
         )
@@ -374,11 +449,92 @@ async fn start_native_screen_share_inner(
             format!("The native LiveKit video track could not be published: {error}")
         })?;
 
+    let audio_volume = Arc::new(AtomicU32::new(requested_audio_volume));
+    let audio_publication = if requested_audio {
+        let audio_capture_config = NativeSystemAudioCaptureConfig::default();
+        let audio_source = NativeAudioSource::new(
+            AudioSourceOptions::default(),
+            audio_capture_config.sample_rate,
+            u32::from(DEFAULT_SYSTEM_AUDIO_CHANNELS),
+            DEFAULT_SYSTEM_AUDIO_QUEUE_MS,
+        );
+        let audio_track = LocalAudioTrack::create_audio_track(
+            "native-screen-share-audio",
+            RtcAudioSource::Native(audio_source.clone()),
+        );
+        let publication = room
+            .local_participant()
+            .publish_track(
+                LocalTrack::Audio(audio_track),
+                TrackPublishOptions {
+                    source: TrackSource::ScreenshareAudio,
+                    stream: native_stream_name.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|error| {
+                format!("The native LiveKit audio track could not be published: {error}")
+            })?;
+
+        let runtime_handle = tokio::runtime::Handle::current();
+        let audio_volume_state = audio_volume.clone();
+        let audio_capture_stream = match NativeSystemAudioCaptureStream::new(
+            audio_capture_config,
+            Box::new(move |result| match result {
+                Ok(packet) => {
+                    let packet_samples =
+                        apply_audio_volume(packet.data, audio_volume_state.load(Ordering::Relaxed));
+                    let frame = AudioFrame {
+                        sample_rate: packet.sample_rate,
+                        num_channels: packet.num_channels,
+                        samples_per_channel: packet.samples_per_channel,
+                        data: packet_samples.into(),
+                    };
+                    if let Err(error) = runtime_handle.block_on(audio_source.capture_frame(&frame)) {
+                        eprintln!(
+                            "[native_livekit] Failed to forward native system audio frame: {error}"
+                        );
+                    }
+                }
+                Err(error) => {
+                    eprintln!("[native_livekit] Native system audio capture failed: {error}");
+                }
+            }),
+        ) {
+            Ok(audio_capture_stream) => audio_capture_stream,
+            Err(error) => {
+                let _ = room
+                    .local_participant()
+                    .unpublish_track(&publication.sid())
+                    .await;
+                let _ = room
+                    .local_participant()
+                    .unpublish_track(&video_publication.sid())
+                    .await;
+                let _ = room.close().await;
+                return Err(error);
+            }
+        };
+
+        Some((publication, audio_capture_stream))
+    } else {
+        None
+    };
+
     let control = Arc::new(NativeScreenShareControl::new(
         room.clone(),
-        publication,
+        video_publication,
+        audio_publication.as_ref().map(|(publication, _)| publication.clone()),
+        audio_volume,
         key_provider,
     ));
+    if let Some((_, audio_capture_stream)) = audio_publication {
+        if let Err(error) = control.set_audio_capture_stream(audio_capture_stream) {
+            control.shutdown().await;
+            return Err(error);
+        }
+    }
     let frame_bridge = Arc::new(Mutex::new(LiveKitFrameBridge::new(
         rtc_source,
         capture_geometry.max_width,
@@ -388,7 +544,7 @@ async fn start_native_screen_share_inner(
     let frame_interval =
         std::time::Duration::from_millis((1000u64 / requested_frame_rate as u64).max(16));
 
-    let capture_stream = CaptureStream::new(token, capture_config, {
+    let capture_stream = match CaptureStream::new(token, capture_config, {
         let frame_bridge = frame_bridge.clone();
         let last_forwarded_at = last_forwarded_at.clone();
         move |result| {
@@ -447,9 +603,18 @@ async fn start_native_screen_share_inner(
             }
         }
     })
-    .map_err(|error| format!("The native desktop capture stream could not start: {error}"))?;
+    .map_err(|error| format!("The native desktop capture stream could not start: {error}")) {
+        Ok(capture_stream) => capture_stream,
+        Err(error) => {
+            control.shutdown().await;
+            return Err(error);
+        }
+    };
 
-    control.set_capture_stream(capture_stream)?;
+    if let Err(error) = control.set_capture_stream(capture_stream) {
+        control.shutdown().await;
+        return Err(error);
+    }
 
     let info = NativeScreenShareSessionInfo {
         active: true,
@@ -466,6 +631,7 @@ async fn start_native_screen_share_inner(
         requested_width: capture_geometry.output_width,
         requested_height: capture_geometry.output_height,
         requested_frame_rate,
+        has_audio: requested_audio,
         max_bitrate: input.max_bitrate,
         max_frame_rate: input.max_frame_rate,
         simulcast: input.simulcast.unwrap_or(false),
@@ -574,6 +740,38 @@ pub fn update_native_screen_share_key(
 }
 
 #[tauri::command]
+pub fn update_native_screen_share_audio_volume(
+    volume: u32,
+    screen_share_store: State<'_, NativeScreenShareStore>,
+) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let guard = screen_share_store
+            .inner
+            .lock()
+            .map_err(|_| "The native screen-share state is unavailable.".to_string())?;
+        let Some(active_session) = guard.active_session.as_ref() else {
+            return Ok(false);
+        };
+        if active_session.control.is_shutdown() {
+            return Ok(false);
+        }
+        active_session.control.set_audio_volume(volume);
+        return Ok(true);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = volume;
+        let _ = screen_share_store;
+        Err(
+            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
+                .into(),
+        )
+    }
+}
+
+#[tauri::command]
 pub fn get_native_screen_share_session(
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<Option<NativeScreenShareSessionInfo>, String> {
@@ -606,5 +804,27 @@ pub fn get_native_screen_share_session(
             "Native LiveKit desktop screen share is currently only implemented for Windows builds."
                 .into(),
         )
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::{apply_audio_volume, clamp_audio_volume};
+
+    #[test]
+    fn clamp_audio_volume_limits_desktop_screen_share_audio() {
+        assert_eq!(clamp_audio_volume(0), 0);
+        assert_eq!(clamp_audio_volume(100), 100);
+        assert_eq!(clamp_audio_volume(250), 200);
+    }
+
+    #[test]
+    fn apply_audio_volume_scales_and_clamps_samples() {
+        assert_eq!(apply_audio_volume(&[1000, -1000], 100), vec![1000, -1000]);
+        assert_eq!(apply_audio_volume(&[1000, -1000], 50), vec![500, -500]);
+        assert_eq!(
+            apply_audio_volume(&[30_000, -30_000], 200),
+            vec![i16::MAX, i16::MIN],
+        );
     }
 }

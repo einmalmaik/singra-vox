@@ -27,6 +27,10 @@ libwebrtc = "0.3.29"
 # The desktop client therefore needs an explicit TLS backend at build time.
 livekit = { version = "0.7.36", features = ["rustls-tls-native-roots"] }
 rdev = "0.5.3"
+windows = { version = "0.61", features = [
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

@@ -821,7 +821,7 @@ export default function ChannelSidebar({
       const enabled = await voiceEngineRef.current.startScreenShare(
         isDesktop
           ? {
-            audio: false,
+            audio: screenShareAudio,
             nativeCapture: true,
             sourceId: selectedCaptureSourceId,
             sourceKind: selectedSource?.kind || captureSourceType,

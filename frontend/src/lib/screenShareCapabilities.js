@@ -13,8 +13,8 @@ const BROWSER_SCREEN_SHARE_CAPABILITIES = Object.freeze({
 });
 
 const DESKTOP_NATIVE_SCREEN_SHARE_CAPABILITIES = Object.freeze({
-  supportsSystemAudio: false,
-  supportsAudioVolumeControl: false,
+  supportsSystemAudio: true,
+  supportsAudioVolumeControl: true,
 });
 
 export function getScreenShareCapabilities({ isDesktop = false } = {}) {
