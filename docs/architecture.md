@@ -39,6 +39,23 @@ Fuer Desktop-Screensharing gilt zusaetzlich:
 - Desktop-UI darf native Capture- oder Audio-Faehigkeiten nicht implizit annehmen.
 - `desktop/src-tauri/src/screen_share/` ist die einzige oeffentliche Rust-Schnittstelle fuer Screen Share.
 
+## ChannelSidebar-Schichtung
+
+Die linke Channel-/Voice-Sidebar folgt jetzt ebenfalls einer klaren Schichtung:
+
+- `frontend/src/components/chat/ChannelSidebar.js`
+  Stabile Fassade fuer `MainLayout`; sie verdrahtet nur Controller und UI-Module.
+- `frontend/src/components/chat/sidebar/useChannelSidebarController.js`
+  Einziger Container fuer Sidebar-State, API-Calls, Voice-Engine-Binding, DnD-Handler und Dialog-Orchestrierung.
+- `frontend/src/components/chat/sidebar/*`
+  Presentational Components fuer Header, Channel-Tree, Voice-Dock, User-Bar und Dialoge.
+
+Wichtig:
+
+- Sidebar-UI-Komponenten duerfen keine direkten API- oder VoiceEngine-Aufrufe enthalten.
+- Voice-/Stream-Steuerung bleibt in den bestehenden Voice-Modulen; die Sidebar orchestriert nur UI-Zustand.
+- Test-IDs und sichtbares Verhalten bleiben stabil, damit bestehende UI-Regressionen erkennbar bleiben.
+
 ## Verzeichnis-Struktur
 
 ```

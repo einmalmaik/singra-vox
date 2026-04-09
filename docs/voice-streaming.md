@@ -59,6 +59,14 @@ Der Voice- und Streaming-Stack bleibt nach auÃŸen bei `new VoiceEngine()`, ist
 - `frontend/src/hooks/useDesktopCaptureSources.js`
   Haelt Desktop-Source-Laden und Session-Rehydrate in einem kleinen, separat testbaren Hook.
 
+## Sidebar-Integration
+
+- `frontend/src/components/chat/ChannelSidebar.js` bleibt der oeffentliche Einstiegspunkt fuer `MainLayout`.
+- `frontend/src/components/chat/sidebar/useChannelSidebarController.js` kapselt Sidebar-State, Dialoge, Voice-Join/Leave, Screen-Share-Start/Stop und Stage-Auswahl.
+- `frontend/src/components/chat/sidebar/*` rendert nur noch Props und loest keine direkten API- oder LiveKit-Aktionen aus.
+
+Damit bleibt die Sidebar eine UI-Orchestrierung ueber dem Voice-/Streaming-Stack und baut keine zweite Medien-Engine im Frontend auf.
+
 ## Logging
 
 - Backend-Voice-Routen loggen Join, Leave, State-Updates und Token-Ausgabe mit `server_id`, `channel_id`, `user_id`, `participant_identity`, `room_name`, `platform`, `event` und `result`.
