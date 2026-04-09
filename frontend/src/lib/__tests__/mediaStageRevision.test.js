@@ -29,6 +29,22 @@ describe("mediaStageRevision", () => {
     })).not.toThrow();
   });
 
+  it("handles null entries in the track-ref list without crashing", () => {
+    expect(() => buildMediaStageRevision({
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [
+        null,
+        {
+          id: "remote:user-2:screen_share",
+          participantId: "user-2",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_PENDING,
+          revision: 0,
+        },
+      ],
+    })).not.toThrow();
+  });
+
   it("changes when the selected local screen-share track becomes attachable", () => {
     const beforeTrackReady = buildMediaStageRevision({
       selectedTrackRefId: "local:user-1:screen_share",

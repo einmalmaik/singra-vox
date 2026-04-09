@@ -32,6 +32,7 @@ function buildTrackRefStageState(trackRef = null) {
 
 function buildTrackRefSignature(trackRefs = []) {
   return [...trackRefs]
+    .filter(Boolean)
     .map((trackRef) => buildTrackRefStageState(trackRef))
     .sort()
     .join("|");
@@ -41,13 +42,14 @@ export function buildMediaStageRevision({
   selectedTrackRefId = null,
   trackRefs = [],
 } = {}) {
+  const safeTrackRefs = Array.isArray(trackRefs) ? trackRefs.filter(Boolean) : [];
   const selectedTrackRef = selectedTrackRefId
-    ? trackRefs.find((trackRef) => trackRef.id === selectedTrackRefId) || null
+    ? safeTrackRefs.find((trackRef) => trackRef.id === selectedTrackRefId) || null
     : null;
 
   return [
     selectedTrackRefId || "none",
     buildTrackRefStageState(selectedTrackRef),
-    buildTrackRefSignature(trackRefs),
+    buildTrackRefSignature(safeTrackRefs),
   ].join(":");
 }
