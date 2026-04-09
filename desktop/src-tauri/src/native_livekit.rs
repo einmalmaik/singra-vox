@@ -108,7 +108,11 @@ struct NativeScreenShareControl {
 
 #[cfg(target_os = "windows")]
 impl NativeScreenShareControl {
-    fn new(room: Arc<Room>, publication: LocalTrackPublication, key_provider: Option<KeyProvider>) -> Self {
+    fn new(
+        room: Arc<Room>,
+        publication: LocalTrackPublication,
+        key_provider: Option<KeyProvider>,
+    ) -> Self {
         Self {
             room,
             publication,
@@ -163,20 +167,12 @@ impl NativeScreenShareControl {
 #[cfg(target_os = "windows")]
 struct LiveKitFrameBridge {
     video_source: NativeVideoSource,
-    argb_bytes: Vec<u8>,
-    width: u32,
-    height: u32,
 }
 
 #[cfg(target_os = "windows")]
 impl LiveKitFrameBridge {
     fn new(video_source: NativeVideoSource) -> Self {
-        Self {
-            video_source,
-            argb_bytes: Vec::new(),
-            width: 0,
-            height: 0,
-        }
+        Self { video_source }
     }
 
     fn capture_bgra_frame(
@@ -196,27 +192,19 @@ impl LiveKitFrameBridge {
             return Err("The native frame payload is truncated.".into());
         }
 
-        if self.width != width || self.height != height || self.argb_bytes.len() != pixel_bytes {
-            self.width = width;
-            self.height = height;
-            self.argb_bytes.resize(pixel_bytes, 0);
-        }
-
-        for (bgra, argb) in bgra_pixels
-            .iter()
-            .zip(self.argb_bytes.chunks_exact_mut(4))
-        {
-            argb[0] = bgra[3];
-            argb[1] = bgra[2];
-            argb[2] = bgra[1];
-            argb[3] = bgra[0];
-        }
+        // libyuv names ARGB by channel significance, not by byte order. On
+        // little-endian Windows the BGRA bytes we get from native capture match
+        // libyuv's expected ARGB memory layout, so we can convert directly
+        // without a full-frame channel swizzle. That removes the blue/purple
+        // tint and cuts one large per-frame copy from the hot path.
+        let bgra_bytes =
+            unsafe { std::slice::from_raw_parts(bgra_pixels.as_ptr() as *const u8, pixel_bytes) };
 
         let mut i420_buffer = I420Buffer::new(width, height);
         let (stride_y, stride_u, stride_v) = i420_buffer.strides();
         let (data_y, data_u, data_v) = i420_buffer.data_mut();
         yuv_helper::argb_to_i420(
-            &self.argb_bytes,
+            bgra_bytes,
             width.saturating_mul(4),
             data_y,
             stride_y,
@@ -255,9 +243,12 @@ fn build_e2ee_options(
     }
 
     let shared_media_key = shared_media_key_b64
-        .ok_or_else(|| "Encrypted voice channels require a shared media key before publishing.".to_string())
+        .ok_or_else(|| {
+            "Encrypted voice channels require a shared media key before publishing.".to_string()
+        })
         .and_then(decode_shared_media_key)?;
-    let key_provider = KeyProvider::with_shared_key(KeyProviderOptions::default(), shared_media_key);
+    let key_provider =
+        KeyProvider::with_shared_key(KeyProviderOptions::default(), shared_media_key);
     Ok(Some((
         E2eeOptions {
             encryption_type: EncryptionType::Gcm,
@@ -305,7 +296,7 @@ async fn start_native_screen_share_inner(
     let requested_height = input.requested_height.unwrap_or(720).max(1);
     let requested_frame_rate = input.requested_frame_rate.unwrap_or(30).max(1);
     let source_handle = ensure_capture_source_handle(capture_store, &input.source_id).await?;
-    let (source_kind, source_label, capture_config) =
+    let (source_kind, source_label, capture_config, capture_width, capture_height) =
         build_capture_config(source_handle, requested_width, requested_height)?;
 
     let e2ee = build_e2ee_options(
@@ -322,13 +313,12 @@ async fn start_native_screen_share_inner(
         key_provider = Some(next_key_provider);
     }
 
-    let (room, mut event_rx) = Room::connect(
-        &input.server_url,
-        &input.participant_token,
-        room_options,
-    )
-    .await
-    .map_err(|error| format!("The native LiveKit screen-share room could not connect: {error}"))?;
+    let (room, mut event_rx) =
+        Room::connect(&input.server_url, &input.participant_token, room_options)
+            .await
+            .map_err(|error| {
+                format!("The native LiveKit screen-share room could not connect: {error}")
+            })?;
     let room = Arc::new(room);
     if key_provider.is_some() {
         room.e2ee_manager().set_enabled(true);
@@ -336,8 +326,8 @@ async fn start_native_screen_share_inner(
 
     let rtc_source = NativeVideoSource::new(
         VideoResolution {
-            width: requested_width,
-            height: requested_height,
+            width: capture_width,
+            height: capture_height,
         },
         true,
     );
@@ -361,7 +351,9 @@ async fn start_native_screen_share_inner(
             },
         )
         .await
-        .map_err(|error| format!("The native LiveKit video track could not be published: {error}"))?;
+        .map_err(|error| {
+            format!("The native LiveKit video track could not be published: {error}")
+        })?;
 
     let control = Arc::new(NativeScreenShareControl::new(
         room.clone(),
@@ -370,9 +362,8 @@ async fn start_native_screen_share_inner(
     ));
     let frame_bridge = Arc::new(Mutex::new(LiveKitFrameBridge::new(rtc_source)));
     let last_forwarded_at = Arc::new(Mutex::new(None::<std::time::Instant>));
-    let frame_interval = std::time::Duration::from_millis(
-        (1000u64 / requested_frame_rate as u64).max(16),
-    );
+    let frame_interval =
+        std::time::Duration::from_millis((1000u64 / requested_frame_rate as u64).max(16));
 
     let capture_stream = CaptureStream::new(token, capture_config, {
         let frame_bridge = frame_bridge.clone();
@@ -387,11 +378,13 @@ async fn start_native_screen_share_inner(
 
             let now = std::time::Instant::now();
             let should_forward = {
-                let Ok(mut guard) = last_forwarded_at.lock() else {
+                let Ok(mut guard) = last_forwarded_at.try_lock() else {
                     return;
                 };
                 match *guard {
-                    Some(last_forwarded) if now.duration_since(last_forwarded) < frame_interval => false,
+                    Some(last_forwarded) if now.duration_since(last_forwarded) < frame_interval => {
+                        false
+                    }
                     _ => {
                         *guard = Some(now);
                         true
@@ -406,7 +399,9 @@ async fn start_native_screen_share_inner(
             let bitmap = match frame.get_bitmap() {
                 Ok(FrameBitmap::BgraUnorm8x4(bitmap)) => bitmap,
                 Ok(_) => {
-                    eprintln!("[native_livekit] Unsupported pixel format returned by native capture");
+                    eprintln!(
+                        "[native_livekit] Unsupported pixel format returned by native capture"
+                    );
                     return;
                 }
                 Err(error) => {
@@ -415,7 +410,10 @@ async fn start_native_screen_share_inner(
                 }
             };
 
-            if let Ok(mut bridge) = frame_bridge.lock() {
+            // Real-time preview is more important than perfect frame delivery.
+            // If the conversion bridge is still busy, we drop this frame instead
+            // of queueing up seconds of stale video.
+            if let Ok(mut bridge) = frame_bridge.try_lock() {
                 if let Err(error) = bridge.capture_bgra_frame(
                     bitmap.width as u32,
                     bitmap.height as u32,
@@ -438,8 +436,10 @@ async fn start_native_screen_share_inner(
         source_id: input.source_id,
         source_kind,
         source_label,
-        requested_width,
-        requested_height,
+        // Expose the effective capture size after aspect-preserving scaling so
+        // the frontend can display and layout against the real stream bounds.
+        requested_width: capture_width,
+        requested_height: capture_height,
         requested_frame_rate,
         max_bitrate: input.max_bitrate,
         max_frame_rate: input.max_frame_rate,
@@ -486,7 +486,10 @@ pub async fn start_native_screen_share(
         let _ = input;
         let _ = capture_store;
         let _ = screen_share_store;
-        Err("Native LiveKit desktop screen share is currently only implemented for Windows builds.".into())
+        Err(
+            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
+                .into(),
+        )
     }
 }
 
@@ -502,7 +505,10 @@ pub async fn stop_native_screen_share(
     #[cfg(not(target_os = "windows"))]
     {
         let _ = screen_share_store;
-        Err("Native LiveKit desktop screen share is currently only implemented for Windows builds.".into())
+        Err(
+            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
+                .into(),
+        )
     }
 }
 
@@ -535,7 +541,10 @@ pub fn update_native_screen_share_key(
         let _ = shared_media_key_b64;
         let _ = key_index;
         let _ = screen_share_store;
-        Err("Native LiveKit desktop screen share is currently only implemented for Windows builds.".into())
+        Err(
+            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
+                .into(),
+        )
     }
 }
 
@@ -559,12 +568,18 @@ pub fn get_native_screen_share_session(
             guard.active_session = None;
         }
 
-        return Ok(guard.active_session.as_ref().map(|session| session.info.clone()));
+        return Ok(guard
+            .active_session
+            .as_ref()
+            .map(|session| session.info.clone()));
     }
 
     #[cfg(not(target_os = "windows"))]
     {
         let _ = screen_share_store;
-        Err("Native LiveKit desktop screen share is currently only implemented for Windows builds.".into())
+        Err(
+            "Native LiveKit desktop screen share is currently only implemented for Windows builds."
+                .into(),
+        )
     }
 }

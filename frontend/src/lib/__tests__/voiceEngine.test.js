@@ -63,7 +63,8 @@ jest.mock("@/lib/AudioAnalyzer", () => ({
   AudioAnalyzer: jest.fn(),
 }), { virtual: true });
 
-import { stopNativeScreenShare } from "@/lib/desktop";
+import api from "@/lib/api";
+import { startNativeScreenShare, stopNativeScreenShare } from "@/lib/desktop";
 import { VoiceEngine } from "../voiceEngine";
 
 function createNativeShare() {
@@ -227,6 +228,54 @@ describe("VoiceEngine native cleanup", () => {
         hasScreenShare: true,
         hasScreenShareTrack: true,
       }),
+    }));
+  });
+
+  it("emits the effective native capture settings returned by the desktop publisher", async () => {
+    const engine = new VoiceEngine();
+    const listener = jest.fn();
+
+    engine.userId = "user-1";
+    engine.serverId = "server-1";
+    engine.channelId = "channel-1";
+    engine.runtimeConfig = { isDesktop: true };
+    engine.room = { localParticipant: { unpublishTrack: jest.fn() } };
+    engine.addStateListener(listener);
+
+    api.post.mockResolvedValue({
+      data: {
+        server_url: "wss://livekit.example.test",
+        participant_token: "token",
+        room_name: "room-1",
+        participant_identity: "screen-share:channel-1:user-1",
+        e2ee_required: false,
+      },
+    });
+    startNativeScreenShare.mockResolvedValue({
+      participantIdentity: "screen-share:channel-1:user-1",
+      requestedWidth: 1280,
+      requestedHeight: 718,
+      requestedFrameRate: 30,
+      sourceKind: "display",
+      sourceLabel: "Display 2560x1440",
+    });
+
+    await engine.startScreenShare({
+      nativeCapture: true,
+      sourceId: "display:0",
+      sourceKind: "display",
+      sourceLabel: "Display 1",
+      resolution: { width: 1280, height: 720, frameRate: 30 },
+      qualityPreset: "balanced",
+    });
+
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: "screen_share_change",
+      actualCaptureSettings: {
+        width: 1280,
+        height: 718,
+        frameRate: 30,
+      },
     }));
   });
 });

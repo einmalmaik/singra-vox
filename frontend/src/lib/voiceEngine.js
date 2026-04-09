@@ -909,6 +909,7 @@ export class VoiceEngine {
   }) {
     let nativeKeySubscription = null;
     let sharedMediaKeyB64 = null;
+    let session = null;
 
     if (this.mediaE2EEController) {
       await this.syncEncryptedMediaParticipants(
@@ -938,7 +939,7 @@ export class VoiceEngine {
 
     const screenSharePublishOptions = buildScreenSharePublishOptions(qualityPreset);
     try {
-      const session = await startNativeScreenShare({
+      session = await startNativeScreenShare({
         serverUrl: tokenResponse.data.server_url,
         participantToken: tokenResponse.data.participant_token,
         roomName: tokenResponse.data.room_name,
@@ -976,9 +977,9 @@ export class VoiceEngine {
       sourceLabel: this.nativeScreenShare.sourceLabel,
       hasAudio: false,
       actualCaptureSettings: {
-        width: resolution.width,
-        height: resolution.height,
-        frameRate: resolution.frameRate,
+        width: session?.requestedWidth || resolution.width,
+        height: session?.requestedHeight || resolution.height,
+        frameRate: session?.requestedFrameRate || resolution.frameRate,
       },
       captureMode: null,
       audioRequested: Boolean(audio),

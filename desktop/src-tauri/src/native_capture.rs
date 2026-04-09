@@ -11,8 +11,9 @@ use std::sync::{Arc, Mutex};
 use tauri::State;
 
 #[cfg(target_os = "windows")]
-use crabgrab::{
-    prelude::{CapturableContent, CapturableContentFilter, CapturableDisplay, CapturableWindow, CaptureConfig, CapturePixelFormat},
+use crabgrab::prelude::{
+    CapturableContent, CapturableContentFilter, CapturableDisplay, CapturableWindow, CaptureConfig,
+    CapturePixelFormat,
 };
 
 #[derive(Default)]
@@ -54,23 +55,44 @@ struct EnumeratedSource {
 }
 
 #[cfg(target_os = "windows")]
-fn fit_output_size(source_width: u32, source_height: u32, max_width: u32, max_height: u32) -> crabgrab::prelude::Size {
-    let safe_source_width = source_width.max(1);
-    let safe_source_height = source_height.max(1);
-    let safe_max_width = max_width.max(1);
-    let safe_max_height = max_height.max(1);
+fn clamp_even_dimension(value: f64) -> u32 {
+    let rounded = value.round().max(2.0) as u32;
+    if rounded % 2 == 0 {
+        rounded
+    } else {
+        rounded.saturating_sub(1).max(2)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn fit_output_size(
+    source_width: u32,
+    source_height: u32,
+    max_width: u32,
+    max_height: u32,
+) -> (crabgrab::prelude::Size, u32, u32) {
+    let safe_source_width = source_width.max(2);
+    let safe_source_height = source_height.max(2);
+    let safe_max_width = max_width.max(2);
+    let safe_max_height = max_height.max(2);
 
     let width_scale = safe_max_width as f64 / safe_source_width as f64;
     let height_scale = safe_max_height as f64 / safe_source_height as f64;
     let scale = width_scale.min(height_scale).min(1.0);
 
-    let scaled_width = (safe_source_width as f64 * scale).round().max(1.0);
-    let scaled_height = (safe_source_height as f64 * scale).round().max(1.0);
+    // The native publish path ends up in an I420 video buffer. Even dimensions
+    // keep chroma sampling stable and avoid subtle color shimmer on edges.
+    let scaled_width = clamp_even_dimension(safe_source_width as f64 * scale);
+    let scaled_height = clamp_even_dimension(safe_source_height as f64 * scale);
 
-    crabgrab::prelude::Size {
-        width: scaled_width,
-        height: scaled_height,
-    }
+    (
+        crabgrab::prelude::Size {
+            width: scaled_width as f64,
+            height: scaled_height as f64,
+        },
+        scaled_width,
+        scaled_height,
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -139,7 +161,9 @@ pub(crate) async fn refresh_capture_sources(
     let mut summaries = Vec::with_capacity(sources.len());
     for source in sources {
         summaries.push(source.summary.clone());
-        guard.sources.insert(source.summary.id.clone(), source.handle);
+        guard
+            .sources
+            .insert(source.summary.id.clone(), source.handle);
     }
 
     Ok(summaries)
@@ -178,11 +202,11 @@ pub(crate) fn build_capture_config(
     source_handle: CaptureSourceHandle,
     requested_width: u32,
     requested_height: u32,
-) -> Result<(String, String, CaptureConfig), String> {
+) -> Result<(String, String, CaptureConfig, u32, u32), String> {
     let built = match source_handle {
         CaptureSourceHandle::Display(display) => {
             let rect = display.rect();
-            let output_size = fit_output_size(
+            let (output_size, output_width, output_height) = fit_output_size(
                 rect.size.width as u32,
                 rect.size.height as u32,
                 requested_width,
@@ -196,11 +220,13 @@ pub(crate) fn build_capture_config(
                     .with_show_cursor(true)
                     .with_buffer_count(2)
                     .with_output_size(output_size),
+                output_width,
+                output_height,
             )
         }
         CaptureSourceHandle::Window(window) => {
             let rect = window.rect();
-            let output_size = fit_output_size(
+            let (output_size, output_width, output_height) = fit_output_size(
                 rect.size.width as u32,
                 rect.size.height as u32,
                 requested_width,
@@ -211,15 +237,43 @@ pub(crate) fn build_capture_config(
                 "window".to_string(),
                 label,
                 CaptureConfig::with_window(window, CapturePixelFormat::Bgra8888)
-                    .map_err(|_| "The selected window cannot be captured with the native backend.".to_string())?
+                    .map_err(|_| {
+                        "The selected window cannot be captured with the native backend."
+                            .to_string()
+                    })?
                     .with_show_cursor(true)
                     .with_buffer_count(2)
                     .with_output_size(output_size),
+                output_width,
+                output_height,
             )
         }
     };
 
     Ok(built)
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::fit_output_size;
+
+    #[test]
+    fn fit_output_size_keeps_even_dimensions() {
+        let (_output_size, output_width, output_height) = fit_output_size(2559, 1439, 1280, 720);
+
+        assert_eq!(output_width % 2, 0);
+        assert_eq!(output_height % 2, 0);
+        assert!(output_width <= 1280);
+        assert!(output_height <= 720);
+    }
+
+    #[test]
+    fn fit_output_size_preserves_aspect_with_effective_resolution() {
+        let (_output_size, output_width, output_height) = fit_output_size(3440, 1440, 1920, 1080);
+
+        assert_eq!(output_width, 1920);
+        assert_eq!(output_height, 804);
+    }
 }
 
 #[tauri::command]
