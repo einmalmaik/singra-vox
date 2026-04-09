@@ -17,30 +17,27 @@ export const EMPTY_LOCAL_MEDIA_STATE = Object.freeze({
   hasScreenShareAudio: false,
 });
 
-function buildRemoteMediaSignature(mediaParticipants = []) {
-  return [...mediaParticipants]
-    .map((participant) => (
-      `${participant.userId}:${Number(participant.hasCamera)}:${Number(participant.hasScreenShare)}:${Number(participant.hasScreenShareAudio)}:${participant.cameraTrackRevision || 0}:${participant.screenShareTrackRevision || 0}`
+function buildTrackRefSignature(trackRefs = []) {
+  return [...trackRefs]
+    .map((trackRef) => (
+      `${trackRef.id}:${trackRef.state || "missing"}:${trackRef.revision || 0}:${Number(Boolean(trackRef.hasAudio))}`
     ))
     .sort()
     .join("|");
 }
 
 export function buildMediaStageRevision({
-  cameraEnabled = false,
-  screenShareEnabled = false,
-  localMediaState = EMPTY_LOCAL_MEDIA_STATE,
-  mediaParticipants = [],
+  selectedTrackRefId = null,
+  trackRefs = [],
 } = {}) {
-  const remoteSignature = buildRemoteMediaSignature(mediaParticipants);
+  const selectedTrackRef = selectedTrackRefId
+    ? trackRefs.find((trackRef) => trackRef.id === selectedTrackRefId) || null
+    : null;
 
   return [
-    Number(cameraEnabled),
-    Number(screenShareEnabled),
-    Number(Boolean(localMediaState?.hasCameraTrack)),
-    Number(localMediaState?.cameraTrackRevision || 0),
-    Number(Boolean(localMediaState?.hasScreenShareTrack)),
-    Number(localMediaState?.screenShareTrackRevision || 0),
-    remoteSignature,
+    selectedTrackRefId || "none",
+    selectedTrackRef?.state || "missing",
+    Number(selectedTrackRef?.revision || 0),
+    buildTrackRefSignature(trackRefs),
   ].join(":");
 }

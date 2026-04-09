@@ -51,6 +51,7 @@ export default function VoiceMediaStage({
   open,
   onClose,
   voiceEngineRef,
+  trackRefId,
   participantId,
   participantName,
   source,
@@ -68,6 +69,7 @@ export default function VoiceMediaStage({
 
   // Zeigt eine Fehlermeldung wenn der Track nicht geladen werden konnte
   const [videoError, setVideoError] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   // ── Sichtbarkeits-Tracking ────────────────────────────────────────────────
 
@@ -83,8 +85,9 @@ export default function VoiceMediaStage({
     if (open) {
       setVideoLoading(true);
       setVideoError(false);
+      setRetryNonce(0);
     }
-  }, [open, participantId, source]);
+  }, [open, source, trackRefId]);
 
   // ── Callback: Video hat Daten und spielt → Loading beenden ────────────────
 
@@ -105,7 +108,7 @@ export default function VoiceMediaStage({
 
   useEffect(() => {
     // Nicht attachen wenn Dialog zu, Tab unsichtbar oder Daten fehlen
-    if (documentHidden || !open || !voiceEngineRef?.current || !participantId || !source || !videoRef.current) {
+    if (documentHidden || !open || !voiceEngineRef?.current || !trackRefId || !source || !videoRef.current) {
       return undefined;
     }
 
@@ -124,32 +127,30 @@ export default function VoiceMediaStage({
     const tryAttach = () => {
       if (cancelled) return;
 
-      detachFn = voiceEngineRef.current?.attachParticipantMediaElement(
-        participantId,
-        source,
-        videoElement,
-      );
+      detachFn = voiceEngineRef.current?.attachTrackRefElement(trackRefId, videoElement);
 
       if (!detachFn && retryCount < MAX_RETRIES) {
         retryCount += 1;
         retryTimer = setTimeout(tryAttach, RETRY_INTERVAL_MS);
-      } else if (detachFn) {
-        // Track erfolgreich angehängt – play() erzwingen für den Fall
-        // dass autoplay vom Browser blockiert wurde
-        stopReadinessObserver?.();
-        stopReadinessObserver = observeVideoReadiness(videoElement, () => {
-          if (cancelled) {
-            return;
-          }
-          setVideoError(false);
-          setVideoLoading(false);
-        });
-        void videoElement.play?.().catch(() => {});
-      } else {
+        return;
+      }
+      if (!detachFn) {
         // Alle Retries aufgebraucht, kein Track verfügbar
         setVideoLoading(false);
         setVideoError(true);
+        return;
       }
+
+      // Track erfolgreich angehängt – play() erzwingen für den Fall
+      // dass autoplay vom Browser blockiert wurde
+      stopReadinessObserver = observeVideoReadiness(videoElement, () => {
+        if (cancelled) {
+          return;
+        }
+        setVideoError(false);
+        setVideoLoading(false);
+      });
+      void videoElement.play?.().catch(() => {});
     };
 
     tryAttach();
@@ -177,7 +178,7 @@ export default function VoiceMediaStage({
       videoElement?.pause?.();
       detachFn?.();
     };
-  }, [documentHidden, mediaRevision, open, participantId, source, voiceEngineRef]);
+  }, [documentHidden, mediaRevision, open, retryNonce, source, trackRefId, voiceEngineRef]);
 
   // ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -228,7 +229,11 @@ export default function VoiceMediaStage({
                       </p>
                       <button
                         type="button"
-                        onClick={() => { setVideoError(false); setVideoLoading(true); }}
+                        onClick={() => {
+                          setVideoError(false);
+                          setVideoLoading(true);
+                          setRetryNonce((currentValue) => currentValue + 1);
+                        }}
                         className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-white hover:bg-white/15 transition-colors"
                         data-testid="media-stage-retry"
                       >

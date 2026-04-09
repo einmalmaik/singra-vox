@@ -97,6 +97,7 @@ import { useVoiceCleanup } from "@/hooks/useVoiceCleanup";
 import { getNativeScreenShareSession, listDesktopCaptureSources } from "@/lib/desktop";
 import { getScreenShareCapabilities } from "@/lib/screenShareCapabilities";
 import { buildMediaStageRevision, EMPTY_LOCAL_MEDIA_STATE } from "@/lib/mediaStageRevision";
+import { findVideoTrackRef } from "@/lib/videoTrackRefs";
 import {
   DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID,
   DEFAULT_SCREEN_SHARE_PRESET_ID,
@@ -174,9 +175,11 @@ export default function ChannelSidebar({
     audioLevel: 0,
   });
   const [mediaParticipants, setMediaParticipants] = useState([]);
+  const [videoTrackRefs, setVideoTrackRefs] = useState([]);
   const [localMediaState, setLocalMediaState] = useState(EMPTY_LOCAL_MEDIA_STATE);
   const [stageState, setStageState] = useState({
     open: false,
+    trackRefId: null,
     participantId: null,
     participantName: "",
     source: null,
@@ -217,12 +220,14 @@ export default function ChannelSidebar({
     () => new Map(mediaParticipants.map((participant) => [participant.userId, participant])),
     [mediaParticipants],
   );
+  const videoTrackRefsById = useMemo(
+    () => new Map(videoTrackRefs.map((trackRef) => [trackRef.id, trackRef])),
+    [videoTrackRefs],
+  );
   const mediaStageRevision = useMemo(() => buildMediaStageRevision({
-    cameraEnabled,
-    screenShareEnabled,
-    localMediaState,
-    mediaParticipants,
-  }), [cameraEnabled, localMediaState, mediaParticipants, screenShareEnabled]);
+    selectedTrackRefId: stageState.trackRefId,
+    trackRefs: videoTrackRefs,
+  }), [stageState.trackRefId, videoTrackRefs]);
   const memberDisplayNames = useMemo(
     () => new Map(
       members.map((member) => [
@@ -233,60 +238,25 @@ export default function ChannelSidebar({
     [members, t],
   );
   const liveMediaEntries = useMemo(() => {
-    const entries = [];
-
-    if (user?.id && cameraEnabled) {
-      entries.push({
-        userId: user.id,
-        participantName: resolveParticipantDisplayName(user, t),
-        source: "camera",
-        badge: t("channel.liveCameraBadge"),
-        hasAudio: false,
-      });
-    }
-
-    if (user?.id && screenShareEnabled) {
-      entries.push({
-        userId: user.id,
-        participantName: resolveParticipantDisplayName(user, t),
-        source: "screen_share",
-        badge: t("channel.liveStreamBadge"),
-        hasAudio: Boolean(screenShareMeta.hasAudio),
-      });
-    }
-
-    mediaParticipants.forEach((participant) => {
-      const participantName = memberDisplayNames.get(participant.userId) || t("common.unknown");
-
-      if (participant.hasScreenShare) {
-        entries.push({
-          userId: participant.userId,
-          participantName,
-          source: "screen_share",
-          badge: t("channel.liveStreamBadge"),
-          hasAudio: Boolean(participant.hasScreenShareAudio),
-        });
-      }
-      if (participant.hasCamera) {
-        entries.push({
-          userId: participant.userId,
-          participantName,
-          source: "camera",
-          badge: t("channel.liveCameraBadge"),
-          hasAudio: false,
-        });
-      }
-    });
-
-    return entries;
+    return videoTrackRefs
+      .filter((trackRef) => trackRef.state === "ready" || trackRef.isLocal)
+      .map((trackRef) => ({
+        trackRefId: trackRef.id,
+        userId: trackRef.participantId,
+        participantName: trackRef.participantId === user?.id
+          ? resolveParticipantDisplayName(user, t)
+          : (memberDisplayNames.get(trackRef.participantId) || t("common.unknown")),
+        source: trackRef.source,
+        badge: trackRef.source === "screen_share"
+          ? t("channel.liveStreamBadge")
+          : t("channel.liveCameraBadge"),
+        hasAudio: Boolean(trackRef.hasAudio),
+      }));
   }, [
-    cameraEnabled,
-    mediaParticipants,
     memberDisplayNames,
-    screenShareEnabled,
-    screenShareMeta.hasAudio,
     t,
     user,
+    videoTrackRefs,
   ]);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -338,6 +308,7 @@ export default function ChannelSidebar({
         });
       }
       if (event.type === "media_tracks_update") {
+        setVideoTrackRefs(event.trackRefs || []);
         setMediaParticipants(event.participants || []);
         setLocalMediaState({
           ...EMPTY_LOCAL_MEDIA_STATE,
@@ -363,6 +334,7 @@ export default function ChannelSidebar({
           sourceLabel: null,
           provider: null,
         });
+        setVideoTrackRefs([]);
         setMediaParticipants([]);
         setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
 
@@ -551,30 +523,20 @@ export default function ChannelSidebar({
   }, [currentVoiceParticipantIds, t, voiceChannel?.id, voiceChannel?.is_private, voiceEngineRef]);
 
   useEffect(() => {
-    if (!stageState.open || !stageState.participantId || !stageState.source) {
+    if (!stageState.open || !stageState.trackRefId) {
       return;
     }
 
-    const participantMedia = stageState.participantId === user?.id
-      ? {
-          hasCamera: cameraEnabled,
-          hasScreenShare: screenShareEnabled,
-        }
-      : mediaByUserId.get(stageState.participantId);
-
-    const stillAvailable = stageState.source === "screen_share"
-      ? Boolean(participantMedia?.hasScreenShare)
-      : Boolean(participantMedia?.hasCamera);
-
-    if (!stillAvailable) {
+    if (!videoTrackRefsById.has(stageState.trackRefId)) {
       setStageState({
         open: false,
+        trackRefId: null,
         participantId: null,
         participantName: "",
         source: null,
       });
     }
-  }, [cameraEnabled, mediaByUserId, screenShareEnabled, stageState, user?.id]);
+  }, [stageState, videoTrackRefsById]);
 
   const updateLocalPreferences = useCallback(async (partialUpdate) => {
     const nextPreferences = saveVoicePreferences(user?.id, partialUpdate, { isDesktop });
@@ -719,6 +681,7 @@ export default function ChannelSidebar({
         sourceLabel: null,
         provider: null,
       });
+      setVideoTrackRefs([]);
       setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
       onRefreshChannels?.();
       toast.success(t("channel.voiceConnected"));
@@ -749,9 +712,10 @@ export default function ChannelSidebar({
         sourceLabel: null,
         provider: null,
       });
+      setVideoTrackRefs([]);
       setMediaParticipants([]);
       setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
-      setStageState({ open: false, participantId: null, participantName: "", source: null });
+      setStageState({ open: false, trackRefId: null, participantId: null, participantName: "", source: null });
       onRefreshChannels?.();
     } catch (error) {
       toast.error(formatAppError(t, error, { fallbackKey: "channel.leaveVoiceFailed" }));
@@ -951,14 +915,27 @@ export default function ChannelSidebar({
     }
   }, [channels, syncChannelOrder, t]);
 
-  const openMediaStage = useCallback((participantId, participantName, source) => {
+  const resolveStageTrackRefId = useCallback((participantId, source) => {
+    return findVideoTrackRef(videoTrackRefs, {
+      participantId,
+      source,
+      preferLocal: participantId === user?.id,
+    })?.id || null;
+  }, [user?.id, videoTrackRefs]);
+
+  const openMediaStage = useCallback((participantId, participantName, source, explicitTrackRefId = null) => {
+    const trackRefId = explicitTrackRefId || resolveStageTrackRefId(participantId, source);
+    if (!trackRefId) {
+      return;
+    }
     setStageState({
       open: true,
+      trackRefId,
       participantId,
       participantName,
       source,
     });
-  }, []);
+  }, [resolveStageTrackRefId]);
 
   const renderChannelRow = (channel, { nested = false } = {}) => {
     const unread = unreadMap?.[channel.id];
@@ -1500,7 +1477,12 @@ export default function ChannelSidebar({
                       <button
                         key={`${entry.userId}:${entry.source}`}
                         type="button"
-                        onClick={() => openMediaStage(entry.userId, entry.participantName, entry.source)}
+                        onClick={() => openMediaStage(
+                          entry.userId,
+                          entry.participantName,
+                          entry.source,
+                          entry.trackRefId,
+                        )}
                         className="workspace-card w-full px-3 py-2 text-left transition-colors hover:border-cyan-400/30 hover:bg-white/5"
                       >
                         <div className="flex items-center gap-2">
@@ -1865,8 +1847,15 @@ export default function ChannelSidebar({
       </Dialog>
       <VoiceMediaStage
         open={stageState.open}
-        onClose={() => setStageState({ open: false, participantId: null, participantName: "", source: null })}
+        onClose={() => setStageState({
+          open: false,
+          trackRefId: null,
+          participantId: null,
+          participantName: "",
+          source: null,
+        })}
         voiceEngineRef={voiceEngineRef}
+        trackRefId={stageState.trackRefId}
         participantId={stageState.participantId}
         participantName={stageState.participantName}
         source={stageState.source}

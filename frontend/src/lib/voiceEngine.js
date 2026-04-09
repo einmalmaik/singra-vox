@@ -43,6 +43,16 @@ import {
 } from "@/lib/desktop";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
 import { createParticipantMediaRegistry } from "@/lib/participantMediaRegistry";
+import {
+  VIDEO_TRACK_STATE_PENDING,
+  VIDEO_TRACK_STATE_READY,
+  buildLocalMediaStateFromTrackRefs,
+  buildRemoteMediaParticipantsFromTrackRefs,
+  buildVideoTrackRefId,
+  findVideoTrackRef,
+  indexVideoTrackRefs,
+  sortVideoTrackRefs,
+} from "@/lib/videoTrackRefs";
 
 // ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
 
@@ -95,6 +105,7 @@ export class VoiceEngine {
     // into UI state keys.
     this.audioElements = new Map();
     this.participantMediaRegistry = createParticipantMediaRegistry();
+    this.videoTrackRefsById = new Map();
     this.onStateChange = null;
     this.listeners = new Set();
 
@@ -1062,13 +1073,17 @@ export class VoiceEngine {
    * @param {HTMLVideoElement} element
    * @returns {Function|null} Detach-Callback oder null bei fehlendem Track
    */
-  attachParticipantMediaElement(participantId, source, element) {
+  attachTrackRefElement(trackRefId, element) {
     if (!element) {
       return null;
     }
 
-    const normalizedSource = source || Track.Source.Camera;
-    const track = this._resolveStageTrack(participantId, normalizedSource);
+    if (!this.videoTrackRefsById.has(trackRefId)) {
+      this._syncVideoTrackRefs();
+    }
+
+    const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
+    const track = trackRef?.track || null;
 
     // Kein Track verfügbar → null zurückgeben damit der Aufrufer retrien kann
     if (!track) {
@@ -1077,8 +1092,10 @@ export class VoiceEngine {
 
     element.autoplay = true;
     element.playsInline = true;
-    // Eigenen Stream stumm schalten um Echo-Feedback zu vermeiden
-    element.muted = participantId === this.userId;
+    // Video preview audio is handled separately through dedicated remote audio
+    // elements. Keeping the stage video muted avoids autoplay friction and
+    // prevents duplicate audio or echo when the user opens a stream preview.
+    element.muted = true;
     track.attach(element);
 
     // play() kann durch Browser-Autoplay-Policy blockiert werden.
@@ -1102,6 +1119,17 @@ export class VoiceEngine {
         // Detach-Fehler bei schnellen Overlay-Wechseln ignorieren
       }
     };
+  }
+
+  attachParticipantMediaElement(participantId, source, element) {
+    const normalizedSource = source || Track.Source.Camera;
+    const trackRefId = this.getVideoTrackRefId(participantId, normalizedSource, {
+      preferLocal: participantId === this.userId,
+    });
+    if (!trackRefId) {
+      return null;
+    }
+    return this.attachTrackRefElement(trackRefId, element);
   }
 
   async _probeInput() {
@@ -1741,35 +1769,13 @@ export class VoiceEngine {
     )?.track || null;
   }
 
-  _resolveStageTrack(participantId, source) {
-    if (participantId === this.userId) {
-      const localTrack = this._getLocalVideoTrack(source);
-      if (localTrack) {
-        return localTrack;
-      }
-
-      if (source === Track.Source.ScreenShare) {
-        return this._getNativeScreenShareProxyTrack();
-      }
-
-      return null;
-    }
-
-    return this.participantMediaRegistry.findVideoTrackByUserId(participantId, source)?.track || null;
-  }
-
-  _trackKey(participantIdentity, source) {
-    return `${participantIdentity}:${source || "unknown"}`;
-  }
-
-  _buildRemoteMediaParticipants() {
-    return this.participantMediaRegistry.listRemoteMediaParticipants({
-      localUserId: this.userId,
-      audioStates: Array.from(this.audioElements.values()),
-    });
-  }
-
-  _emitRemoteMediaUpdate() {
+  _buildVideoTrackRefs() {
+    const remoteScreenShareAudioParticipantIds = new Set(
+      Array.from(this.audioElements.values())
+        .filter((audioState) => audioState?.source === Track.Source.ScreenShareAudio)
+        .map((audioState) => audioState.participantId)
+        .filter(Boolean),
+    );
     const localCameraTrack = this._getLocalVideoTrack(Track.Source.Camera);
     const localScreenShareTrack = this._getLocalVideoTrack(Track.Source.ScreenShare)
       || this._getNativeScreenShareProxyTrack();
@@ -1781,19 +1787,159 @@ export class VoiceEngine {
       Track.Source.ScreenShare,
       localScreenShareTrack,
     );
+    const localTrackRefs = [];
+
+    if (localCameraTrack) {
+      localTrackRefs.push({
+        id: buildVideoTrackRefId({
+          participantId: this.userId,
+          source: Track.Source.Camera,
+          isLocal: true,
+        }),
+        participantId: this.userId,
+        participantIdentity: this.userId,
+        source: Track.Source.Camera,
+        state: VIDEO_TRACK_STATE_READY,
+        revision: localCameraTrackRevision,
+        hasAudio: false,
+        isLocal: true,
+        provider: "livekit-local",
+        track: localCameraTrack,
+      });
+    }
+
+    if (this.nativeScreenShare || this.screenShareTracks.some((track) => track.kind === Track.Kind.Video)) {
+      localTrackRefs.push({
+        id: buildVideoTrackRefId({
+          participantId: this.userId,
+          source: Track.Source.ScreenShare,
+          isLocal: true,
+        }),
+        participantId: this.userId,
+        participantIdentity: this.nativeScreenShare?.participantIdentity || this.userId,
+        source: Track.Source.ScreenShare,
+        state: localScreenShareTrack ? VIDEO_TRACK_STATE_READY : VIDEO_TRACK_STATE_PENDING,
+        revision: localScreenShareTrackRevision,
+        hasAudio: this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
+        isLocal: true,
+        provider: this.nativeScreenShare?.provider || "livekit-local",
+        sourceKind: this.nativeScreenShare?.sourceKind || null,
+        sourceLabel: this.nativeScreenShare?.sourceLabel || null,
+        track: localScreenShareTrack,
+      });
+    }
+
+    const remoteTrackRefs = this.participantMediaRegistry
+      .listVideoTrackStates({ localUserId: this.userId })
+      .map((trackState) => ({
+        id: buildVideoTrackRefId({
+          participantId: trackState.participantId,
+          source: trackState.source,
+          isLocal: false,
+        }),
+        participantId: trackState.participantId,
+        participantIdentity: trackState.participantIdentity,
+        source: trackState.source,
+        state: VIDEO_TRACK_STATE_READY,
+        revision: trackState.revision || 0,
+        hasAudio: trackState.source === Track.Source.ScreenShare
+          ? remoteScreenShareAudioParticipantIds.has(trackState.participantId)
+          : false,
+        isLocal: false,
+        provider: trackState.participantIdentity?.startsWith("screen-share:")
+          ? "tauri-native-livekit"
+          : "livekit-remote",
+        track: trackState.track,
+      }));
+
+    return sortVideoTrackRefs([
+      ...localTrackRefs,
+      ...remoteTrackRefs,
+    ]);
+  }
+
+  _stripTrackRef(trackRef) {
+    if (!trackRef) {
+      return null;
+    }
+
+    const { track, ...publicTrackRef } = trackRef;
+    return publicTrackRef;
+  }
+
+  _syncVideoTrackRefs() {
+    const trackRefs = this._buildVideoTrackRefs();
+    this.videoTrackRefsById = indexVideoTrackRefs(trackRefs);
+    return trackRefs;
+  }
+
+  listVideoTrackRefs() {
+    if (this.videoTrackRefsById.size === 0) {
+      this._syncVideoTrackRefs();
+    }
+
+    return sortVideoTrackRefs(
+      Array.from(this.videoTrackRefsById.values())
+        .map((trackRef) => this._stripTrackRef(trackRef))
+        .filter(Boolean),
+    );
+  }
+
+  getVideoTrackRef(trackRefId) {
+    if (!this.videoTrackRefsById.has(trackRefId)) {
+      this._syncVideoTrackRefs();
+    }
+    return this._stripTrackRef(this.videoTrackRefsById.get(trackRefId) || null);
+  }
+
+  getVideoTrackRefId(participantId, source, { preferLocal = false } = {}) {
+    const trackRef = findVideoTrackRef(
+      this._syncVideoTrackRefs().map((nextTrackRef) => this._stripTrackRef(nextTrackRef)),
+      {
+        participantId,
+        source,
+        preferLocal,
+      },
+    );
+    return trackRef?.id || null;
+  }
+
+  _resolveStageTrack(participantId, source) {
+    const trackRefId = this.getVideoTrackRefId(participantId, source, {
+      preferLocal: participantId === this.userId,
+    });
+    return trackRefId
+      ? this.videoTrackRefsById.get(trackRefId)?.track || null
+      : null;
+  }
+
+  _trackKey(participantIdentity, source) {
+    return `${participantIdentity}:${source || "unknown"}`;
+  }
+
+  _buildRemoteMediaParticipants() {
+    return buildRemoteMediaParticipantsFromTrackRefs(
+      this._buildVideoTrackRefs().map((trackRef) => this._stripTrackRef(trackRef)),
+      {
+        localUserId: this.userId,
+      },
+    );
+  }
+
+  _emitRemoteMediaUpdate() {
+    const trackRefs = this._syncVideoTrackRefs();
+    const publicTrackRefs = trackRefs.map((trackRef) => this._stripTrackRef(trackRef));
 
     this._emit("media_tracks_update", {
-      participants: this._buildRemoteMediaParticipants(),
+      trackRefs: publicTrackRefs,
+      participants: buildRemoteMediaParticipantsFromTrackRefs(publicTrackRefs, {
+        localUserId: this.userId,
+      }),
       local: {
         userId: this.userId,
-        hasCamera: Boolean(this.cameraTrack),
-        hasCameraTrack: Boolean(localCameraTrack),
-        cameraTrackRevision: localCameraTrackRevision,
-        hasScreenShare: Boolean(this.nativeScreenShare)
-          || this.screenShareTracks.some((track) => track.kind === Track.Kind.Video),
-        hasScreenShareTrack: Boolean(localScreenShareTrack),
-        screenShareTrackRevision: localScreenShareTrackRevision,
-        hasScreenShareAudio: this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
+        ...buildLocalMediaStateFromTrackRefs(publicTrackRefs, {
+          localUserId: this.userId,
+        }),
       },
     });
   }

@@ -81,8 +81,7 @@ export function observeVideoReadiness(video, onReady, { pollIntervalMs = 250 } =
         return;
       }
       frameCallbackId = video.requestVideoFrameCallback(() => {
-        checkReady();
-        watchFrame();
+        finish();
       });
     };
     watchFrame();

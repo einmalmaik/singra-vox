@@ -70,4 +70,20 @@ describe("observeVideoReadiness", () => {
 
     expect(onReady).toHaveBeenCalledTimes(1);
   });
+
+  it("treats requestVideoFrameCallback as a definitive rendered-frame signal", () => {
+    const onReady = jest.fn();
+    let frameCallback = null;
+    const video = createMockVideo({
+      requestVideoFrameCallback: jest.fn((callback) => {
+        frameCallback = callback;
+        return 1;
+      }),
+    });
+
+    observeVideoReadiness(video, onReady, { pollIntervalMs: 100 });
+    frameCallback?.();
+
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
 });

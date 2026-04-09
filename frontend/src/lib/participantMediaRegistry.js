@@ -155,6 +155,15 @@ export class ParticipantMediaRegistry {
     return preferredTrack;
   }
 
+  listVideoTrackStates({ localUserId = null } = {}) {
+    return [...this.videoTracksByKey.values()]
+      .filter((trackState) => trackState.participantId && trackState.participantId !== localUserId)
+      .sort((a, b) => a.trackKey.localeCompare(b.trackKey))
+      .map((trackState) => ({
+        ...trackState,
+      }));
+  }
+
   listRemoteMediaParticipants({ localUserId, audioStates = [] } = {}) {
     const participants = new Map();
 

@@ -7,69 +7,90 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-import { buildMediaStageRevision, EMPTY_LOCAL_MEDIA_STATE } from "../mediaStageRevision";
+jest.mock("livekit-client", () => ({
+  Track: {
+    Source: {
+      Unknown: "unknown",
+      Camera: "camera",
+      ScreenShare: "screen_share",
+      ScreenShareAudio: "screen_share_audio",
+    },
+  },
+}));
+
+import { buildMediaStageRevision } from "../mediaStageRevision";
+import { VIDEO_TRACK_STATE_PENDING, VIDEO_TRACK_STATE_READY } from "../videoTrackRefs";
 
 describe("mediaStageRevision", () => {
-  it("changes when the local native screen-share proxy track becomes attachable", () => {
-    const baseInput = {
-      cameraEnabled: false,
-      screenShareEnabled: true,
-      mediaParticipants: [],
-    };
-
+  it("changes when the selected local screen-share track becomes attachable", () => {
     const beforeTrackReady = buildMediaStageRevision({
-      ...baseInput,
-      localMediaState: EMPTY_LOCAL_MEDIA_STATE,
+      selectedTrackRefId: "local:user-1:screen_share",
+      trackRefs: [
+        {
+          id: "local:user-1:screen_share",
+          participantId: "user-1",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_PENDING,
+          revision: 0,
+        },
+      ],
     });
     const afterTrackReady = buildMediaStageRevision({
-      ...baseInput,
-      localMediaState: {
-        ...EMPTY_LOCAL_MEDIA_STATE,
-        hasScreenShareTrack: true,
-      },
+      selectedTrackRefId: "local:user-1:screen_share",
+      trackRefs: [
+        {
+          id: "local:user-1:screen_share",
+          participantId: "user-1",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_READY,
+          revision: 1,
+        },
+      ],
     });
 
     expect(afterTrackReady).not.toBe(beforeTrackReady);
   });
 
-  it("stays stable for identical remote participant sets regardless of order", () => {
+  it("stays stable for identical track-ref sets regardless of order", () => {
     const revisionA = buildMediaStageRevision({
-      mediaParticipants: [
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [
         {
-          userId: "user-2",
-          hasCamera: false,
-          hasScreenShare: true,
-          hasScreenShareAudio: false,
-          cameraTrackRevision: 0,
-          screenShareTrackRevision: 1,
+          id: "remote:user-2:screen_share",
+          participantId: "user-2",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_READY,
+          revision: 1,
+          hasAudio: false,
         },
         {
-          userId: "user-3",
-          hasCamera: true,
-          hasScreenShare: false,
-          hasScreenShareAudio: false,
-          cameraTrackRevision: 1,
-          screenShareTrackRevision: 0,
+          id: "remote:user-3:camera",
+          participantId: "user-3",
+          source: "camera",
+          state: VIDEO_TRACK_STATE_READY,
+          revision: 1,
+          hasAudio: false,
         },
       ],
     });
     const revisionB = buildMediaStageRevision({
-      mediaParticipants: [
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [
         {
-          userId: "user-3",
-          hasCamera: true,
-          hasScreenShare: false,
-          hasScreenShareAudio: false,
-          cameraTrackRevision: 1,
-          screenShareTrackRevision: 0,
+          id: "remote:user-3:camera",
+          participantId: "user-3",
+          source: "camera",
+          state: VIDEO_TRACK_STATE_READY,
+          revision: 1,
+          hasAudio: false,
         },
         {
-          userId: "user-2",
-          hasCamera: false,
-          hasScreenShare: true,
-          hasScreenShareAudio: false,
-          cameraTrackRevision: 0,
-          screenShareTrackRevision: 1,
+          id: "remote:user-2:screen_share",
+          participantId: "user-2",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_READY,
+          revision: 1,
+          hasAudio: false,
         },
       ],
     });
@@ -77,28 +98,30 @@ describe("mediaStageRevision", () => {
     expect(revisionA).toBe(revisionB);
   });
 
-  it("changes when a remote participant replaces the screen-share track without changing availability", () => {
+  it("changes when a selected remote track is replaced without changing availability", () => {
     const beforeReplacement = buildMediaStageRevision({
-      mediaParticipants: [
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [
         {
-          userId: "user-2",
-          hasCamera: false,
-          hasScreenShare: true,
-          hasScreenShareAudio: false,
-          cameraTrackRevision: 0,
-          screenShareTrackRevision: 1,
+          id: "remote:user-2:screen_share",
+          participantId: "user-2",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_READY,
+          revision: 1,
+          hasAudio: false,
         },
       ],
     });
     const afterReplacement = buildMediaStageRevision({
-      mediaParticipants: [
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [
         {
-          userId: "user-2",
-          hasCamera: false,
-          hasScreenShare: true,
-          hasScreenShareAudio: false,
-          cameraTrackRevision: 0,
-          screenShareTrackRevision: 2,
+          id: "remote:user-2:screen_share",
+          participantId: "user-2",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_READY,
+          revision: 2,
+          hasAudio: false,
         },
       ],
     });

@@ -47,6 +47,7 @@ jest.mock("@/lib/voicePreferences", () => ({
 
 jest.mock("@/lib/asyncControl", () => jest.requireActual("../asyncControl"), { virtual: true });
 jest.mock("@/lib/participantMediaRegistry", () => jest.requireActual("../participantMediaRegistry"), { virtual: true });
+jest.mock("@/lib/videoTrackRefs", () => jest.requireActual("../videoTrackRefs"), { virtual: true });
 
 jest.mock("@/lib/desktop", () => ({
   getNativeScreenShareSession: jest.fn(() => Promise.resolve(null)),
