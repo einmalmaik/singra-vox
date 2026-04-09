@@ -2069,8 +2069,6 @@ export class VoiceEngine {
       return false;
     }
 
-    const nextWidth = Math.max(0, Math.round(width || 0));
-    const nextHeight = Math.max(0, Math.round(height || 0));
     const isProxyBackedLocalTrack = Boolean(
       trackRef.isLocal
       && trackRef.source === Track.Source.ScreenShare
@@ -2095,21 +2093,12 @@ export class VoiceEngine {
       return Boolean(trackRef.track);
     }
 
+    // With adaptiveStream enabled, LiveKit derives visibility and dimensions
+    // from the attached HTMLVideoElement. We only ensure the subscription
+    // exists here and avoid layering a second manual enable/disable state on
+    // top of LiveKit's own track lifecycle.
     if (typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
       publication.setSubscribed(true);
-    }
-    if (typeof publication.setEnabled === "function" && publication.isEnabled !== true) {
-      publication.setEnabled(true);
-    }
-    if (
-      nextWidth > 0
-      && nextHeight > 0
-      && typeof publication.setVideoDimensions === "function"
-    ) {
-      publication.setVideoDimensions({
-        width: nextWidth,
-        height: nextHeight,
-      });
     }
 
     const nextTrack = publication.track || trackRef.track || null;
@@ -2143,30 +2132,7 @@ export class VoiceEngine {
     }
 
     const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
-    const isProxyBackedLocalTrack = Boolean(
-      trackRef?.isLocal
-      && trackRef?.source === Track.Source.ScreenShare
-      && trackRef?.provider === "tauri-native-livekit",
-    );
-    if (!trackRef || (trackRef.isLocal && !isProxyBackedLocalTrack)) {
-      return false;
-    }
-
-    const publicationLookupIdentity = isProxyBackedLocalTrack
-      ? (this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity)
-      : trackRef.participantIdentity;
-    const publication = this._findRemoteVideoPublication(
-      publicationLookupIdentity,
-      trackRef.source,
-    ).publication || trackRef.publication || null;
-    if (!publication) {
-      return false;
-    }
-
-    if (typeof publication.setEnabled === "function" && publication.isEnabled !== false) {
-      publication.setEnabled(false);
-    }
-    return true;
+    return Boolean(trackRef);
   }
 
   _syncVideoTrackRefs() {
