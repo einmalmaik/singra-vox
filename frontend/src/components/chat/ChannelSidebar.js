@@ -96,8 +96,7 @@ import { useDesktopPtt } from "@/hooks/useDesktopPtt";
 import { useVoiceCleanup } from "@/hooks/useVoiceCleanup";
 import { getNativeScreenShareSession, listDesktopCaptureSources } from "@/lib/desktop";
 import { getScreenShareCapabilities } from "@/lib/screenShareCapabilities";
-import { buildMediaStageRevision, EMPTY_LOCAL_MEDIA_STATE } from "@/lib/mediaStageRevision";
-import { findVideoTrackRef } from "@/lib/videoTrackRefs";
+import { EMPTY_LOCAL_MEDIA_STATE, findVideoTrackRef } from "@/lib/videoTrackRefs";
 import {
   DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID,
   DEFAULT_SCREEN_SHARE_PRESET_ID,
@@ -228,10 +227,10 @@ export default function ChannelSidebar({
     () => new Map(videoTrackRefs.map((trackRef) => [trackRef.id, trackRef])),
     [videoTrackRefs],
   );
-  const mediaStageRevision = useMemo(() => buildMediaStageRevision({
-    selectedTrackRefId: stageState.trackRefId,
-    trackRefs: videoTrackRefs,
-  }), [stageState.trackRefId, videoTrackRefs]);
+  const selectedStageTrackRef = useMemo(
+    () => (stageState.trackRefId ? (videoTrackRefsById.get(stageState.trackRefId) || null) : null),
+    [stageState.trackRefId, videoTrackRefsById],
+  );
   const memberDisplayNames = useMemo(
     () => new Map(
       members.map((member) => [
@@ -1866,7 +1865,7 @@ export default function ChannelSidebar({
         participantId={stageState.participantId}
         participantName={stageState.participantName}
         source={stageState.source}
-        mediaRevision={mediaStageRevision}
+        selectedTrackRef={selectedStageTrackRef}
       />
     </>
   );

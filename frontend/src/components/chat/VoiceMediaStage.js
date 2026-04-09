@@ -55,10 +55,10 @@ export default function VoiceMediaStage({
   onClose,
   voiceEngineRef,
   trackRefId,
+  selectedTrackRef,
   participantId,
   participantName,
   source,
-  mediaRevision,
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
@@ -126,17 +126,6 @@ export default function VoiceMediaStage({
     setVideoLoading(false);
   }, []);
 
-  const refreshTrackPlayback = useCallback(() => {
-    if (documentHidden || !open || !trackRefId || !voiceEngineRef?.current || !videoRef.current) {
-      return;
-    }
-
-    voiceEngineRef.current.prepareTrackRefPlayback(trackRefId, {
-      width: videoRef.current.clientWidth || videoRef.current.offsetWidth || 0,
-      height: videoRef.current.clientHeight || videoRef.current.offsetHeight || 0,
-    });
-  }, [documentHidden, open, trackRefId, voiceEngineRef]);
-
   const toggleFullscreen = useCallback(async () => {
     const stageSurface = stageSurfaceRef.current;
     if (!stageSurface) {
@@ -154,22 +143,13 @@ export default function VoiceMediaStage({
     }
   }, []);
 
-  useEffect(() => {
-    if (documentHidden || !open || !trackRefId || !videoRef.current) {
-      return undefined;
-    }
-
-    refreshTrackPlayback();
-    if (typeof ResizeObserver !== "function") {
-      return undefined;
-    }
-
-    const observer = new ResizeObserver(() => {
-      refreshTrackPlayback();
-    });
-    observer.observe(videoRef.current);
-    return () => observer.disconnect();
-  }, [documentHidden, open, refreshTrackPlayback, trackRefId]);
+  const trackStateKey = [
+    trackRefId || "none",
+    selectedTrackRef?.state || "missing",
+    Number(selectedTrackRef?.revision || 0),
+    selectedTrackRef?.subscriptionStatus || "none",
+    selectedTrackRef?.streamState || "none",
+  ].join(":");
 
   // ── Track-Attach mit Retry-Logik ─────────────────────────────────────────
 
@@ -222,7 +202,6 @@ export default function VoiceMediaStage({
 
       frameReady = false;
       clearTimeout(frameReadyTimer);
-      refreshTrackPlayback();
       cleanupAttachment();
 
       // LiveKit can hand us an attachable track before the decoder has produced
@@ -270,7 +249,7 @@ export default function VoiceMediaStage({
       videoElement?.pause?.();
       cleanupAttachment();
     };
-  }, [documentHidden, mediaRevision, open, refreshTrackPlayback, retryNonce, source, trackRefId, voiceEngineRef]);
+  }, [documentHidden, open, retryNonce, source, trackRefId, trackStateKey, voiceEngineRef]);
 
   // ── Rendering ─────────────────────────────────────────────────────────────
 

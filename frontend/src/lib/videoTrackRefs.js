@@ -11,6 +11,15 @@ import { Track } from "livekit-client";
 
 export const VIDEO_TRACK_STATE_PENDING = "pending";
 export const VIDEO_TRACK_STATE_READY = "ready";
+export const EMPTY_LOCAL_MEDIA_STATE = Object.freeze({
+  hasCamera: false,
+  hasCameraTrack: false,
+  cameraTrackRevision: 0,
+  hasScreenShare: false,
+  hasScreenShareTrack: false,
+  screenShareTrackRevision: 0,
+  hasScreenShareAudio: false,
+});
 
 function normalizeSource(source) {
   return source || Track.Source.Unknown;

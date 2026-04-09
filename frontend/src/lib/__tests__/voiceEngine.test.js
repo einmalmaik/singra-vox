@@ -384,18 +384,23 @@ describe("VoiceEngine native cleanup", () => {
     ]));
   });
 
-  it("ensures remote video publications stay subscribed for playback", () => {
+  it("ensures remote video publications stay subscribed before attach", () => {
     const engine = new VoiceEngine();
+    const track = {
+      kind: "video",
+      source: "screen_share",
+      attach: jest.fn(),
+      detach: jest.fn(),
+    };
     const publication = {
       kind: "video",
       source: "screen_share",
-      track: null,
+      track,
       subscriptionStatus: "desired",
       isDesired: false,
       isEnabled: false,
       setSubscribed: jest.fn(),
       setEnabled: jest.fn(),
-      setVideoDimensions: jest.fn(),
     };
     const participant = {
       identity: "screen-share:channel:user-2",
@@ -409,12 +414,17 @@ describe("VoiceEngine native cleanup", () => {
     };
     engine._syncRemoteVideoPublication(participant, publication);
     const trackRefId = engine.getVideoTrackRefId("user-2", "screen_share");
+    const element = {
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+    };
 
-    engine.prepareTrackRefPlayback(trackRefId, { width: 1280, height: 720 });
+    const detach = engine.attachTrackRefElement(trackRefId, element);
 
     expect(publication.setSubscribed).toHaveBeenCalledWith(true);
+    expect(typeof detach).toBe("function");
+    expect(track.attach).toHaveBeenCalledWith(element);
     expect(publication.setEnabled).not.toHaveBeenCalled();
-    expect(publication.setVideoDimensions).not.toHaveBeenCalled();
   });
 
   it("prefers the current room publication over a cached stale video publication", () => {
@@ -433,13 +443,17 @@ describe("VoiceEngine native cleanup", () => {
     const livePublication = {
       kind: "video",
       source: "screen_share",
-      track: null,
+      track: {
+        kind: "video",
+        source: "screen_share",
+        attach: jest.fn(),
+        detach: jest.fn(),
+      },
       subscriptionStatus: "desired",
       isDesired: false,
       isEnabled: false,
       setSubscribed: jest.fn(),
       setEnabled: jest.fn(),
-      setVideoDimensions: jest.fn(),
     };
     const participant = {
       identity: "screen-share:channel:user-2",
@@ -453,22 +467,31 @@ describe("VoiceEngine native cleanup", () => {
     };
     engine._syncRemoteVideoPublication(participant, stalePublication);
     const trackRefId = engine.getVideoTrackRefId("user-2", "screen_share");
+    const element = {
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+    };
 
-    engine.prepareTrackRefPlayback(trackRefId, { width: 1920, height: 1080 });
+    engine.attachTrackRefElement(trackRefId, element);
 
     expect(livePublication.setSubscribed).toHaveBeenCalledWith(true);
     expect(livePublication.setEnabled).not.toHaveBeenCalled();
-    expect(livePublication.setVideoDimensions).not.toHaveBeenCalled();
     expect(stalePublication.setSubscribed).not.toHaveBeenCalled();
     expect(stalePublication.setEnabled).not.toHaveBeenCalled();
   });
 
   it("does not manually disable remote publications when the stage closes", () => {
     const engine = new VoiceEngine();
+    const track = {
+      kind: "video",
+      source: "screen_share",
+      attach: jest.fn(),
+      detach: jest.fn(),
+    };
     const publication = {
       kind: "video",
       source: "screen_share",
-      track: null,
+      track,
       subscriptionStatus: "desired",
       isDesired: true,
       isEnabled: true,
@@ -487,10 +510,16 @@ describe("VoiceEngine native cleanup", () => {
     };
     engine._syncRemoteVideoPublication(participant, publication);
     const trackRefId = engine.getVideoTrackRefId("user-2", "screen_share");
+    const element = {
+      play: jest.fn(() => Promise.resolve()),
+      pause: jest.fn(),
+    };
 
-    expect(engine.releaseTrackRefPlayback(trackRefId)).toBe(true);
+    const detach = engine.attachTrackRefElement(trackRefId, element);
+    detach?.();
+
+    expect(track.detach).toHaveBeenCalledWith(element);
     expect(publication.setEnabled).not.toHaveBeenCalled();
-    expect(publication.setSubscribed).not.toHaveBeenCalled();
   });
 
   it("rehydrates an active native desktop screen share after a desktop reconnect", async () => {

@@ -1092,10 +1092,11 @@ export class VoiceEngine {
       return null;
     }
 
-    this.prepareTrackRefPlayback(trackRefId, {
-      width: element.clientWidth || element.offsetWidth || 0,
-      height: element.clientHeight || element.offsetHeight || 0,
-    });
+    if (!this.videoTrackRefsById.has(trackRefId)) {
+      this._syncVideoTrackRefs();
+    }
+
+    this._ensureTrackRefSubscribed(trackRefId);
 
     if (!this.videoTrackRefsById.has(trackRefId)) {
       this._syncVideoTrackRefs();
@@ -1137,7 +1138,6 @@ export class VoiceEngine {
       } catch {
         // Detach-Fehler bei schnellen Overlay-Wechseln ignorieren
       }
-      this.releaseTrackRefPlayback(trackRefId);
     };
   }
 
@@ -2055,7 +2055,7 @@ export class VoiceEngine {
     return didUpdate;
   }
 
-  prepareTrackRefPlayback(trackRefId, { width = 0, height = 0 } = {}) {
+  _ensureTrackRefSubscribed(trackRefId) {
     if (!trackRefId) {
       return false;
     }
@@ -2120,19 +2120,6 @@ export class VoiceEngine {
     }
 
     return Boolean(nextTrack);
-  }
-
-  releaseTrackRefPlayback(trackRefId) {
-    if (!trackRefId) {
-      return false;
-    }
-
-    if (!this.videoTrackRefsById.has(trackRefId)) {
-      this._syncVideoTrackRefs();
-    }
-
-    const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
-    return Boolean(trackRef);
   }
 
   _syncVideoTrackRefs() {
