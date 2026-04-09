@@ -1,2 +1,16 @@
+[build]
+# The desktop LiveKit/WebRTC dependency tree exceeds MAX_PATH under the default
+# `desktop/src-tauri/target` path on Windows. A short shared target directory
+# keeps plain `cargo` and Tauri invocations reproducible from the repo root.
+target-dir = "t"
+
+[target.x86_64-pc-windows-msvc]
+# LiveKit's Windows WebRTC artifacts are built against the static MSVC runtime.
+# Matching that runtime here avoids linker conflicts in the native Tauri binary.
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
 [target.'cfg(target_os = "macos")']
 rustflags = ["-C", "link-arg=-ObjC"]

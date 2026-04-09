@@ -20,10 +20,13 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 base64 = "0.22"
 crabgrab = { version = "0.4.0", features = ["bitmap"] }
-libwebrtc = "0.3.29"
 # LiveKit Cloud performs an HTTPS region preflight before the WSS connection.
 # The desktop client therefore needs an explicit TLS backend at build time.
-livekit = { version = "0.7.36", features = ["rustls-tls-native-roots"] }
+# Keep LiveKit as the single WebRTC entrypoint so the crate graph resolves the
+# coordinated libwebrtc/webrtc-sys workspace versions shipped by rust-sdks
+# itself. We pin an exact upstream revision instead of maintaining a local
+# webrtc-sys patch layer in this repository.
+livekit = { git = "https://github.com/livekit/rust-sdks.git", rev = "2720d9000dba28f2741f2702ee759b74b266f118", package = "livekit", features = ["rustls-tls-native-roots"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 rdev = "0.5.3"
@@ -43,3 +46,9 @@ tauri-build = { version = "2", features = [] }
 [[bin]]
 name = "singravox-desktop"
 path = "src/main.rs"
+
+[profile.test]
+# The native desktop test binary links the full static LiveKit/WebRTC stack on
+# Windows. Keeping test debuginfo compact avoids PDB/linker limits without
+# changing release artifacts.
+debug = 1

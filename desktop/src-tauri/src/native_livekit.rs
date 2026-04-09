@@ -19,17 +19,6 @@ use crabgrab::{
     feature::bitmap::FrameBitmap,
     prelude::{CaptureStream, StreamEvent, VideoFrameBitmap},
 };
-#[cfg(target_os = "windows")]
-use libwebrtc::{
-    audio_frame::AudioFrame,
-    audio_source::{native::NativeAudioSource, AudioSourceOptions, RtcAudioSource},
-};
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-use libwebrtc::{
-    native::yuv_helper,
-    prelude::{I420Buffer, RtcVideoSource, VideoFrame, VideoResolution, VideoRotation},
-    video_source::native::NativeVideoSource,
-};
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use livekit::{
     e2ee::{
@@ -39,6 +28,16 @@ use livekit::{
     options::{TrackPublishOptions, VideoEncoding},
     prelude::{LocalTrack, LocalTrackPublication, Room, RoomEvent, RoomOptions, TrackSource},
     track::{LocalAudioTrack, LocalVideoTrack},
+    webrtc::{
+        native::yuv_helper,
+        prelude::{I420Buffer, RtcVideoSource, VideoFrame, VideoResolution, VideoRotation},
+        video_source::native::NativeVideoSource,
+    },
+};
+#[cfg(target_os = "windows")]
+use livekit::webrtc::{
+    audio_frame::AudioFrame,
+    audio_source::{native::NativeAudioSource, AudioSourceOptions, RtcAudioSource},
 };
 
 #[cfg(target_os = "windows")]
