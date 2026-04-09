@@ -125,6 +125,6 @@ export function useDesktopCaptureSources({ enabled = false, onError = null } = {
     selectedCaptureSourceId: selectedSourceId,
     filteredCaptureSources: filteredSources,
     setCaptureSourceType: setSourceType,
-    setSelectedCaptureSourceId,
+    setSelectedCaptureSourceId: setSelectedSourceId,
   };
 }
