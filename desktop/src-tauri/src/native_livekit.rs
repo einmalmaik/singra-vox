@@ -38,7 +38,8 @@ use livekit::{
 
 #[cfg(target_os = "windows")]
 use crate::native_capture::{
-    build_capture_config, ensure_capture_source_handle, DesktopCaptureStore,
+    build_capture_config, ensure_capture_source_handle, fit_output_dimensions,
+    normalize_capture_dimensions, DesktopCaptureStore,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -69,6 +70,8 @@ pub struct NativeScreenShareSessionInfo {
     pub source_id: String,
     pub source_kind: String,
     pub source_label: String,
+    pub source_width: u32,
+    pub source_height: u32,
     pub requested_width: u32,
     pub requested_height: u32,
     pub requested_frame_rate: u32,
@@ -167,12 +170,18 @@ impl NativeScreenShareControl {
 #[cfg(target_os = "windows")]
 struct LiveKitFrameBridge {
     video_source: NativeVideoSource,
+    max_width: u32,
+    max_height: u32,
 }
 
 #[cfg(target_os = "windows")]
 impl LiveKitFrameBridge {
-    fn new(video_source: NativeVideoSource) -> Self {
-        Self { video_source }
+    fn new(video_source: NativeVideoSource, max_width: u32, max_height: u32) -> Self {
+        Self {
+            video_source,
+            max_width: max_width.max(2),
+            max_height: max_height.max(2),
+        }
     }
 
     fn capture_bgra_frame(
@@ -181,14 +190,15 @@ impl LiveKitFrameBridge {
         height: u32,
         bgra_pixels: &[[u8; 4]],
     ) -> Result<(), String> {
-        let pixel_count = (width as usize)
+        let raw_pixel_count = (width as usize)
             .checked_mul(height as usize)
             .ok_or_else(|| "The native frame dimensions are invalid.".to_string())?;
-        let pixel_bytes = pixel_count
+        let pixel_bytes = raw_pixel_count
             .checked_mul(4)
             .ok_or_else(|| "The native frame dimensions are invalid.".to_string())?;
+        let (source_width, source_height) = normalize_capture_dimensions(width, height);
 
-        if bgra_pixels.len() < pixel_count {
+        if bgra_pixels.len() < raw_pixel_count {
             return Err("The native frame payload is truncated.".into());
         }
 
@@ -200,7 +210,7 @@ impl LiveKitFrameBridge {
         let bgra_bytes =
             unsafe { std::slice::from_raw_parts(bgra_pixels.as_ptr() as *const u8, pixel_bytes) };
 
-        let mut i420_buffer = I420Buffer::new(width, height);
+        let mut i420_buffer = I420Buffer::new(source_width, source_height);
         let (stride_y, stride_u, stride_v) = i420_buffer.strides();
         let (data_y, data_u, data_v) = i420_buffer.data_mut();
         yuv_helper::argb_to_i420(
@@ -212,9 +222,18 @@ impl LiveKitFrameBridge {
             stride_u,
             data_v,
             stride_v,
-            width as i32,
-            height as i32,
+            source_width as i32,
+            source_height as i32,
         );
+        let (target_width, target_height) = fit_output_dimensions(
+            source_width,
+            source_height,
+            self.max_width,
+            self.max_height,
+        );
+        if target_width != source_width || target_height != source_height {
+            i420_buffer = i420_buffer.scale(target_width as i32, target_height as i32);
+        }
 
         let frame = VideoFrame {
             rotation: VideoRotation::VideoRotation0,
@@ -296,7 +315,7 @@ async fn start_native_screen_share_inner(
     let requested_height = input.requested_height.unwrap_or(720).max(1);
     let requested_frame_rate = input.requested_frame_rate.unwrap_or(30).max(1);
     let source_handle = ensure_capture_source_handle(capture_store, &input.source_id).await?;
-    let (source_kind, source_label, capture_config, capture_width, capture_height) =
+    let (source_kind, source_label, capture_config, capture_geometry) =
         build_capture_config(source_handle, requested_width, requested_height)?;
 
     let e2ee = build_e2ee_options(
@@ -326,8 +345,8 @@ async fn start_native_screen_share_inner(
 
     let rtc_source = NativeVideoSource::new(
         VideoResolution {
-            width: capture_width,
-            height: capture_height,
+            width: capture_geometry.output_width,
+            height: capture_geometry.output_height,
         },
         true,
     );
@@ -360,7 +379,11 @@ async fn start_native_screen_share_inner(
         publication,
         key_provider,
     ));
-    let frame_bridge = Arc::new(Mutex::new(LiveKitFrameBridge::new(rtc_source)));
+    let frame_bridge = Arc::new(Mutex::new(LiveKitFrameBridge::new(
+        rtc_source,
+        capture_geometry.max_width,
+        capture_geometry.max_height,
+    )));
     let last_forwarded_at = Arc::new(Mutex::new(None::<std::time::Instant>));
     let frame_interval =
         std::time::Duration::from_millis((1000u64 / requested_frame_rate as u64).max(16));
@@ -436,10 +459,12 @@ async fn start_native_screen_share_inner(
         source_id: input.source_id,
         source_kind,
         source_label,
+        source_width: capture_geometry.source_width,
+        source_height: capture_geometry.source_height,
         // Expose the effective capture size after aspect-preserving scaling so
         // the frontend can display and layout against the real stream bounds.
-        requested_width: capture_width,
-        requested_height: capture_height,
+        requested_width: capture_geometry.output_width,
+        requested_height: capture_geometry.output_height,
         requested_frame_rate,
         max_bitrate: input.max_bitrate,
         max_frame_rate: input.max_frame_rate,

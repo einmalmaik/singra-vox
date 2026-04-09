@@ -55,7 +55,7 @@ struct EnumeratedSource {
 }
 
 #[cfg(target_os = "windows")]
-fn clamp_even_dimension(value: f64) -> u32 {
+pub(crate) fn clamp_even_dimension(value: f64) -> u32 {
     let rounded = value.round().max(2.0) as u32;
     if rounded % 2 == 0 {
         rounded
@@ -65,14 +65,22 @@ fn clamp_even_dimension(value: f64) -> u32 {
 }
 
 #[cfg(target_os = "windows")]
-fn fit_output_size(
+pub(crate) fn normalize_capture_dimensions(source_width: u32, source_height: u32) -> (u32, u32) {
+    (
+        clamp_even_dimension(source_width as f64),
+        clamp_even_dimension(source_height as f64),
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn fit_output_dimensions(
     source_width: u32,
     source_height: u32,
     max_width: u32,
     max_height: u32,
-) -> (crabgrab::prelude::Size, u32, u32) {
-    let safe_source_width = source_width.max(2);
-    let safe_source_height = source_height.max(2);
+) -> (u32, u32) {
+    let (safe_source_width, safe_source_height) =
+        normalize_capture_dimensions(source_width, source_height);
     let safe_max_width = max_width.max(2);
     let safe_max_height = max_height.max(2);
 
@@ -85,14 +93,41 @@ fn fit_output_size(
     let scaled_width = clamp_even_dimension(safe_source_width as f64 * scale);
     let scaled_height = clamp_even_dimension(safe_source_height as f64 * scale);
 
-    (
-        crabgrab::prelude::Size {
-            width: scaled_width as f64,
-            height: scaled_height as f64,
-        },
-        scaled_width,
-        scaled_height,
-    )
+    (scaled_width, scaled_height)
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CaptureGeometry {
+    pub source_width: u32,
+    pub source_height: u32,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub output_width: u32,
+    pub output_height: u32,
+}
+
+#[cfg(target_os = "windows")]
+impl CaptureGeometry {
+    pub(crate) fn new(
+        source_width: u32,
+        source_height: u32,
+        max_width: u32,
+        max_height: u32,
+    ) -> Self {
+        let (source_width, source_height) = normalize_capture_dimensions(source_width, source_height);
+        let (output_width, output_height) =
+            fit_output_dimensions(source_width, source_height, max_width, max_height);
+
+        Self {
+            source_width,
+            source_height,
+            max_width: max_width.max(2),
+            max_height: max_height.max(2),
+            output_width,
+            output_height,
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -202,11 +237,11 @@ pub(crate) fn build_capture_config(
     source_handle: CaptureSourceHandle,
     requested_width: u32,
     requested_height: u32,
-) -> Result<(String, String, CaptureConfig, u32, u32), String> {
+) -> Result<(String, String, CaptureConfig, CaptureGeometry), String> {
     let built = match source_handle {
         CaptureSourceHandle::Display(display) => {
             let rect = display.rect();
-            let (output_size, output_width, output_height) = fit_output_size(
+            let geometry = CaptureGeometry::new(
                 rect.size.width as u32,
                 rect.size.height as u32,
                 requested_width,
@@ -218,15 +253,13 @@ pub(crate) fn build_capture_config(
                 label,
                 CaptureConfig::with_display(display, CapturePixelFormat::Bgra8888)
                     .with_show_cursor(true)
-                    .with_buffer_count(2)
-                    .with_output_size(output_size),
-                output_width,
-                output_height,
+                    .with_buffer_count(2),
+                geometry,
             )
         }
         CaptureSourceHandle::Window(window) => {
             let rect = window.rect();
-            let (output_size, output_width, output_height) = fit_output_size(
+            let geometry = CaptureGeometry::new(
                 rect.size.width as u32,
                 rect.size.height as u32,
                 requested_width,
@@ -242,10 +275,8 @@ pub(crate) fn build_capture_config(
                             .to_string()
                     })?
                     .with_show_cursor(true)
-                    .with_buffer_count(2)
-                    .with_output_size(output_size),
-                output_width,
-                output_height,
+                    .with_buffer_count(2),
+                geometry,
             )
         }
     };
@@ -255,11 +286,19 @@ pub(crate) fn build_capture_config(
 
 #[cfg(all(test, target_os = "windows"))]
 mod tests {
-    use super::fit_output_size;
+    use super::{fit_output_dimensions, normalize_capture_dimensions};
 
     #[test]
-    fn fit_output_size_keeps_even_dimensions() {
-        let (_output_size, output_width, output_height) = fit_output_size(2559, 1439, 1280, 720);
+    fn normalize_capture_dimensions_crops_to_even_edges() {
+        let (source_width, source_height) = normalize_capture_dimensions(2559, 1439);
+
+        assert_eq!(source_width, 2558);
+        assert_eq!(source_height, 1438);
+    }
+
+    #[test]
+    fn fit_output_dimensions_keeps_even_dimensions() {
+        let (output_width, output_height) = fit_output_dimensions(2559, 1439, 1280, 720);
 
         assert_eq!(output_width % 2, 0);
         assert_eq!(output_height % 2, 0);
@@ -268,8 +307,8 @@ mod tests {
     }
 
     #[test]
-    fn fit_output_size_preserves_aspect_with_effective_resolution() {
-        let (_output_size, output_width, output_height) = fit_output_size(3440, 1440, 1920, 1080);
+    fn fit_output_dimensions_preserves_aspect_with_effective_resolution() {
+        let (output_width, output_height) = fit_output_dimensions(3440, 1440, 1920, 1080);
 
         assert_eq!(output_width, 1920);
         assert_eq!(output_height, 804);
