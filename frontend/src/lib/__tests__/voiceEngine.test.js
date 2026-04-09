@@ -49,6 +49,7 @@ jest.mock("@/lib/asyncControl", () => jest.requireActual("../asyncControl"), { v
 jest.mock("@/lib/participantMediaRegistry", () => jest.requireActual("../participantMediaRegistry"), { virtual: true });
 
 jest.mock("@/lib/desktop", () => ({
+  getNativeScreenShareSession: jest.fn(() => Promise.resolve(null)),
   startNativeScreenShare: jest.fn(),
   stopNativeScreenShare: jest.fn(() => Promise.resolve(true)),
   updateNativeScreenShareKey: jest.fn(() => Promise.resolve(true)),
@@ -64,7 +65,11 @@ jest.mock("@/lib/AudioAnalyzer", () => ({
 }), { virtual: true });
 
 import api from "@/lib/api";
-import { startNativeScreenShare, stopNativeScreenShare } from "@/lib/desktop";
+import {
+  getNativeScreenShareSession,
+  startNativeScreenShare,
+  stopNativeScreenShare,
+} from "@/lib/desktop";
 import { VoiceEngine } from "../voiceEngine";
 
 function createNativeShare() {
@@ -274,6 +279,46 @@ describe("VoiceEngine native cleanup", () => {
       actualCaptureSettings: {
         width: 1280,
         height: 718,
+        frameRate: 30,
+      },
+    }));
+  });
+
+  it("rehydrates an active native desktop screen share after a desktop reconnect", async () => {
+    const engine = new VoiceEngine();
+    const listener = jest.fn();
+
+    engine.userId = "user-1";
+    engine.serverId = "server-1";
+    engine.channelId = "channel-1";
+    engine.runtimeConfig = { isDesktop: true };
+    engine.room = { name: "server-server-1-channel-channel-1" };
+    engine.addStateListener(listener);
+
+    getNativeScreenShareSession.mockResolvedValue({
+      provider: "tauri-native-livekit",
+      roomName: "server-server-1-channel-channel-1",
+      participantIdentity: "screen-share:channel-1:user-1",
+      sourceId: "display:0",
+      sourceKind: "display",
+      sourceLabel: "Display 2560x1440",
+      requestedWidth: 1280,
+      requestedHeight: 720,
+      requestedFrameRate: 30,
+    });
+
+    await engine._rehydrateNativeScreenShareSession();
+
+    expect(engine.nativeScreenShare).toEqual(expect.objectContaining({
+      participantIdentity: "screen-share:channel-1:user-1",
+      sourceId: "display:0",
+    }));
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: "screen_share_change",
+      enabled: true,
+      actualCaptureSettings: {
+        width: 1280,
+        height: 720,
         frameRate: 30,
       },
     }));

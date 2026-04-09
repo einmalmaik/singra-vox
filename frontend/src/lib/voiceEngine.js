@@ -35,7 +35,12 @@ import api from "@/lib/api";
 import { Room, RoomEvent, Track, DisconnectReason, createLocalScreenTracks, createLocalVideoTrack } from "livekit-client";
 import { createSingleFlightController } from "@/lib/asyncControl";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
-import { startNativeScreenShare, stopNativeScreenShare, updateNativeScreenShareKey } from "@/lib/desktop";
+import {
+  getNativeScreenShareSession,
+  startNativeScreenShare,
+  stopNativeScreenShare,
+  updateNativeScreenShareKey,
+} from "@/lib/desktop";
 import { DEFAULT_SCREEN_SHARE_PRESET_ID, buildScreenSharePublishOptions } from "@/lib/screenSharePresets";
 import { createParticipantMediaRegistry } from "@/lib/participantMediaRegistry";
 
@@ -63,6 +68,13 @@ function computeRms(dataArray) {
     sum += sample * sample;
   }
   return Math.sqrt(sum / dataArray.length);
+}
+
+function buildVoiceRoomName(serverId, channelId) {
+  if (!serverId || !channelId) {
+    return null;
+  }
+  return `server-${serverId}-channel-${channelId}`;
 }
 
 export class VoiceEngine {
@@ -323,6 +335,7 @@ export class VoiceEngine {
     await safeRun("outputDevice", () => this._applyOutputDevice());
     await safeRun("remoteAudio", () => this._applyRemoteAudioState());
     await safeRun("muteState", () => this._applyMuteState());
+    await safeRun("nativeScreenShareState", () => this._rehydrateNativeScreenShareSession());
 
     this._emit("connected");
   }
@@ -886,6 +899,52 @@ export class VoiceEngine {
 
   _resolveParticipantUserId(participant) {
     return this._syncParticipantStateFromLiveKit(participant)?.userId || null;
+  }
+
+  async _rehydrateNativeScreenShareSession() {
+    if (!this.runtimeConfig?.isDesktop || !this.room || !this.userId) {
+      return null;
+    }
+
+    const activeSession = await getNativeScreenShareSession?.().catch(() => null);
+    const expectedRoomName = buildVoiceRoomName(this.serverId, this.channelId);
+    const expectedParticipantIdentity = this.channelId
+      ? `screen-share:${this.channelId}:${this.userId}`
+      : null;
+
+    if (
+      !activeSession
+      || (expectedRoomName && activeSession.roomName !== expectedRoomName)
+      || (expectedParticipantIdentity && activeSession.participantIdentity !== expectedParticipantIdentity)
+    ) {
+      return null;
+    }
+
+    const previousCleanup = this.nativeScreenShare?.keySubscriptionCleanup || null;
+    this.nativeScreenShare = {
+      ...activeSession,
+      keySubscriptionCleanup: previousCleanup,
+      audioRequested: false,
+    };
+
+    this._emitRemoteMediaUpdate();
+    this._emit("screen_share_change", {
+      enabled: true,
+      provider: activeSession.provider || "tauri-native-livekit",
+      sourceId: activeSession.sourceId || null,
+      sourceKind: activeSession.sourceKind || null,
+      sourceLabel: activeSession.sourceLabel || null,
+      hasAudio: false,
+      actualCaptureSettings: {
+        width: activeSession.requestedWidth || null,
+        height: activeSession.requestedHeight || null,
+        frameRate: activeSession.requestedFrameRate || null,
+      },
+      captureMode: null,
+      audioRequested: false,
+    });
+
+    return activeSession;
   }
 
   _collectCurrentVoiceParticipantUserIds() {
