@@ -96,6 +96,7 @@ import { useDesktopPtt } from "@/hooks/useDesktopPtt";
 import { useVoiceCleanup } from "@/hooks/useVoiceCleanup";
 import { getNativeScreenShareSession, listDesktopCaptureSources } from "@/lib/desktop";
 import { getScreenShareCapabilities } from "@/lib/screenShareCapabilities";
+import { buildMediaStageRevision, EMPTY_LOCAL_MEDIA_STATE } from "@/lib/mediaStageRevision";
 import {
   DEFAULT_NATIVE_SCREEN_SHARE_PRESET_ID,
   DEFAULT_SCREEN_SHARE_PRESET_ID,
@@ -173,6 +174,7 @@ export default function ChannelSidebar({
     audioLevel: 0,
   });
   const [mediaParticipants, setMediaParticipants] = useState([]);
+  const [localMediaState, setLocalMediaState] = useState(EMPTY_LOCAL_MEDIA_STATE);
   const [stageState, setStageState] = useState({
     open: false,
     participantId: null,
@@ -215,13 +217,12 @@ export default function ChannelSidebar({
     () => new Map(mediaParticipants.map((participant) => [participant.userId, participant])),
     [mediaParticipants],
   );
-  const mediaStageRevision = useMemo(() => {
-    const remoteSignature = [...mediaParticipants]
-      .map((participant) => `${participant.userId}:${Number(participant.hasCamera)}:${Number(participant.hasScreenShare)}:${Number(participant.hasScreenShareAudio)}`)
-      .sort()
-      .join("|");
-    return `${Number(cameraEnabled)}:${Number(screenShareEnabled)}:${remoteSignature}`;
-  }, [cameraEnabled, mediaParticipants, screenShareEnabled]);
+  const mediaStageRevision = useMemo(() => buildMediaStageRevision({
+    cameraEnabled,
+    screenShareEnabled,
+    localMediaState,
+    mediaParticipants,
+  }), [cameraEnabled, localMediaState, mediaParticipants, screenShareEnabled]);
   const memberDisplayNames = useMemo(
     () => new Map(
       members.map((member) => [
@@ -338,6 +339,10 @@ export default function ChannelSidebar({
       }
       if (event.type === "media_tracks_update") {
         setMediaParticipants(event.participants || []);
+        setLocalMediaState({
+          ...EMPTY_LOCAL_MEDIA_STATE,
+          ...(event.local || {}),
+        });
       }
       if (event.type === "speaking_update") {
         setVoiceActivity({
@@ -359,6 +364,7 @@ export default function ChannelSidebar({
           provider: null,
         });
         setMediaParticipants([]);
+        setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
 
         // Wenn die Trennung NICHT von uns initiiert wurde (z.B. weil ein
         // anderer Client mit gleicher Identity beigetreten ist), VoiceEngine
@@ -713,6 +719,7 @@ export default function ChannelSidebar({
         sourceLabel: null,
         provider: null,
       });
+      setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
       onRefreshChannels?.();
       toast.success(t("channel.voiceConnected"));
     } catch (error) {
@@ -743,6 +750,7 @@ export default function ChannelSidebar({
         provider: null,
       });
       setMediaParticipants([]);
+      setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
       setStageState({ open: false, participantId: null, participantName: "", source: null });
       onRefreshChannels?.();
     } catch (error) {

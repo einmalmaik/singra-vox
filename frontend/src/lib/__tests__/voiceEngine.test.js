@@ -185,4 +185,48 @@ describe("VoiceEngine native cleanup", () => {
       },
     ]);
   });
+
+  it("reports native screen-share readiness only after the proxy track is attached", () => {
+    const engine = new VoiceEngine();
+    const listener = jest.fn();
+
+    engine.userId = "user-1";
+    engine.nativeScreenShare = {
+      participantIdentity: "screen-share:channel:user-1",
+      keySubscriptionCleanup: jest.fn(),
+    };
+    engine.addStateListener(listener);
+
+    engine._emitRemoteMediaUpdate();
+
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "media_tracks_update",
+      local: expect.objectContaining({
+        hasScreenShare: true,
+        hasScreenShareTrack: false,
+      }),
+    }));
+
+    engine.participantMediaRegistry.upsertVideoTrack({
+      participant: {
+        identity: "screen-share:channel:user-1",
+        attributes: { owner_user_id: "user-1" },
+      },
+      track: {
+        kind: "video",
+        source: "screen_share",
+      },
+      source: "screen_share",
+    });
+
+    engine._emitRemoteMediaUpdate();
+
+    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "media_tracks_update",
+      local: expect.objectContaining({
+        hasScreenShare: true,
+        hasScreenShareTrack: true,
+      }),
+    }));
+  });
 });

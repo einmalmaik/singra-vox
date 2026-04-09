@@ -1684,13 +1684,19 @@ export class VoiceEngine {
   }
 
   _emitRemoteMediaUpdate() {
+    const localCameraTrack = this._getLocalVideoTrack(Track.Source.Camera);
+    const localScreenShareTrack = this._getLocalVideoTrack(Track.Source.ScreenShare)
+      || this._getNativeScreenShareProxyTrack();
+
     this._emit("media_tracks_update", {
       participants: this._buildRemoteMediaParticipants(),
       local: {
         userId: this.userId,
         hasCamera: Boolean(this.cameraTrack),
+        hasCameraTrack: Boolean(localCameraTrack),
         hasScreenShare: Boolean(this.nativeScreenShare)
           || this.screenShareTracks.some((track) => track.kind === Track.Kind.Video),
+        hasScreenShareTrack: Boolean(localScreenShareTrack),
         hasScreenShareAudio: this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
       },
     });
