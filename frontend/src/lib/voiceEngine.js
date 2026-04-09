@@ -2083,12 +2083,13 @@ export class VoiceEngine {
     const publicationLookupIdentity = isProxyBackedLocalTrack
       ? (this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity)
       : trackRef.participantIdentity;
-    const { participant, publication } = trackRef.publication
-      ? {
-        participant: this._getRemoteParticipantByIdentity(publicationLookupIdentity),
-        publication: trackRef.publication,
-      }
-      : this._findRemoteVideoPublication(publicationLookupIdentity, trackRef.source);
+    const livePublicationState = this._findRemoteVideoPublication(
+      publicationLookupIdentity,
+      trackRef.source,
+    );
+    const participant = livePublicationState.participant
+      || this._getRemoteParticipantByIdentity(publicationLookupIdentity);
+    const publication = livePublicationState.publication || trackRef.publication || null;
 
     if (!publication) {
       return Boolean(trackRef.track);
@@ -2151,13 +2152,13 @@ export class VoiceEngine {
       return false;
     }
 
-    const publication = trackRef.publication
-      || this._findRemoteVideoPublication(
-        isProxyBackedLocalTrack
-          ? (this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity)
-          : trackRef.participantIdentity,
-        trackRef.source,
-      ).publication;
+    const publicationLookupIdentity = isProxyBackedLocalTrack
+      ? (this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity)
+      : trackRef.participantIdentity;
+    const publication = this._findRemoteVideoPublication(
+      publicationLookupIdentity,
+      trackRef.source,
+    ).publication || trackRef.publication || null;
     if (!publication) {
       return false;
     }

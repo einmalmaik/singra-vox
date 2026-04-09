@@ -41,6 +41,9 @@ const MAX_RETRIES = 8;
 /** Millisekunden zwischen jedem Retry-Versuch */
 const RETRY_INTERVAL_MS = 500;
 
+/** Zeitfenster, in dem nach einem erfolgreichen attach der erste Frame kommen muss. */
+const FRAME_READY_GRACE_MS = 1_500;
+
 /** Maximale Wartezeit in ms bevor Loading aufgegeben wird. Danach wird
  *  ein Fehlerzustand angezeigt statt endlosem Spinner. */
 const LOADING_TIMEOUT_MS = 10_000;
@@ -171,7 +174,6 @@ export default function VoiceMediaStage({
   // ── Track-Attach mit Retry-Logik ─────────────────────────────────────────
 
   useEffect(() => {
-    // Nicht attachen wenn Dialog zu, Tab unsichtbar oder Daten fehlen
     if (documentHidden || !open || !voiceEngineRef?.current || !trackRefId || !source || !videoRef.current) {
       return undefined;
     }
@@ -181,68 +183,92 @@ export default function VoiceMediaStage({
     let stopReadinessObserver = null;
     let retryCount = 0;
     let retryTimer = null;
+    let frameReadyTimer = null;
     let cancelled = false;
+    let frameReady = false;
 
-    /**
-     * Versucht den Track an das Video-Element zu hängen.
-     * Wenn attachParticipantMediaElement() null zurückgibt (kein Track vorhanden),
-     * wird nach RETRY_INTERVAL_MS erneut versucht – bis zu MAX_RETRIES mal.
-     */
+    const cleanupAttachment = () => {
+      stopReadinessObserver?.();
+      stopReadinessObserver = null;
+      detachFn?.();
+      detachFn = null;
+      try {
+        videoElement.srcObject = null;
+      } catch {
+        // Ignore partial detach cleanup failures on fast retries.
+      }
+    };
+
+    const failAttachment = () => {
+      cleanupAttachment();
+      setVideoLoading(false);
+      setVideoError(true);
+    };
+
+    const scheduleRetry = () => {
+      cleanupAttachment();
+      if (retryCount >= MAX_RETRIES) {
+        failAttachment();
+        return;
+      }
+      retryCount += 1;
+      retryTimer = setTimeout(tryAttach, RETRY_INTERVAL_MS);
+    };
+
     const tryAttach = () => {
-      if (cancelled) return;
+      if (cancelled) {
+        return;
+      }
 
+      frameReady = false;
+      clearTimeout(frameReadyTimer);
       refreshTrackPlayback();
+      cleanupAttachment();
 
+      // LiveKit can hand us an attachable track before the decoder has produced
+      // a renderable frame. Treating attach() as success causes the stage to
+      // stall until some unrelated room event forces another bind.
       detachFn = voiceEngineRef.current?.attachTrackRefElement(trackRefId, videoElement);
-
-      if (!detachFn && retryCount < MAX_RETRIES) {
-        retryCount += 1;
-        retryTimer = setTimeout(tryAttach, RETRY_INTERVAL_MS);
-        return;
-      }
       if (!detachFn) {
-        // Alle Retries aufgebraucht, kein Track verfügbar
-        setVideoLoading(false);
-        setVideoError(true);
+        scheduleRetry();
         return;
       }
 
-      // Track erfolgreich angehängt – play() erzwingen für den Fall
-      // dass autoplay vom Browser blockiert wurde
       stopReadinessObserver = observeVideoReadiness(videoElement, () => {
         if (cancelled) {
           return;
         }
+        frameReady = true;
+        clearTimeout(frameReadyTimer);
         setVideoError(false);
         setVideoLoading(false);
       });
       void videoElement.play?.().catch(() => {});
+      frameReadyTimer = setTimeout(() => {
+        if (cancelled || frameReady) {
+          return;
+        }
+        scheduleRetry();
+      }, FRAME_READY_GRACE_MS);
     };
 
     tryAttach();
 
-    // Safety-Timeout: Falls der Track angehängt wurde aber loadeddata/
-    // playing nie feuern (z.B. captureStream ohne Frames), nach
-    // LOADING_TIMEOUT_MS den Loading-State auflösen und Error anzeigen.
     const safetyTimer = setTimeout(() => {
-      if (!cancelled) {
-        setVideoLoading((prev) => {
-          if (prev) setVideoError(true);
-          return false;
-        });
+      if (!cancelled && !frameReady) {
+        failAttachment();
       }
     }, LOADING_TIMEOUT_MS);
 
-    // Cleanup: Timer stoppen und Track sauber lösen
     return () => {
       cancelled = true;
       clearTimeout(safetyTimer);
+      clearTimeout(frameReadyTimer);
       if (retryTimer) {
         clearTimeout(retryTimer);
       }
-      stopReadinessObserver?.();
       videoElement?.pause?.();
-      detachFn?.();
+      cleanupAttachment();
     };
   }, [documentHidden, mediaRevision, open, refreshTrackPlayback, retryNonce, source, trackRefId, voiceEngineRef]);
 
