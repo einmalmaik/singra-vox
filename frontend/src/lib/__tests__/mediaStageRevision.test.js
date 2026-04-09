@@ -22,6 +22,13 @@ import { buildMediaStageRevision } from "../mediaStageRevision";
 import { VIDEO_TRACK_STATE_PENDING, VIDEO_TRACK_STATE_READY } from "../videoTrackRefs";
 
 describe("mediaStageRevision", () => {
+  it("handles a missing selected track ref without crashing", () => {
+    expect(() => buildMediaStageRevision({
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [],
+    })).not.toThrow();
+  });
+
   it("changes when the selected local screen-share track becomes attachable", () => {
     const beforeTrackReady = buildMediaStageRevision({
       selectedTrackRefId: "local:user-1:screen_share",

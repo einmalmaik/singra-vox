@@ -17,14 +17,16 @@ export const EMPTY_LOCAL_MEDIA_STATE = Object.freeze({
   hasScreenShareAudio: false,
 });
 
-function buildTrackRefStageState(trackRef = {}) {
+function buildTrackRefStageState(trackRef = null) {
+  const safeTrackRef = trackRef || {};
+
   return [
-    trackRef.id || "unknown",
-    trackRef.state || "missing",
-    Number(trackRef.revision || 0),
-    Number(Boolean(trackRef.hasAudio)),
-    trackRef.subscriptionStatus || "none",
-    trackRef.streamState || "none",
+    safeTrackRef.id || "unknown",
+    safeTrackRef.state || "missing",
+    Number(safeTrackRef.revision || 0),
+    Number(Boolean(safeTrackRef.hasAudio)),
+    safeTrackRef.subscriptionStatus || "none",
+    safeTrackRef.streamState || "none",
   ].join(":");
 }
 
