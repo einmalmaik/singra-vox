@@ -721,7 +721,7 @@ export default function ChannelSidebar({
       setVideoTrackRefs([]);
       setMediaParticipants([]);
       setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
-      setStageState({ open: false, trackRefId: null, participantId: null, participantName: "", source: null });
+      setStageState({ open: false, trackRefId: null });
       onRefreshChannels?.();
     } catch (error) {
       toast.error(formatAppError(t, error, { fallbackKey: "channel.leaveVoiceFailed" }));

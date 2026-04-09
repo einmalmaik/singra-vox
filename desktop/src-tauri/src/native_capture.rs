@@ -315,7 +315,6 @@ mod tests {
     }
 }
 
-#[tauri::command]
 pub async fn list_capture_sources(
     store: State<'_, DesktopCaptureStore>,
 ) -> Result<Vec<DesktopCaptureSourceSummary>, String> {

@@ -329,10 +329,22 @@ Frontend-Viewer-Pfad:
 
 - **Quelle der Wahrheit:** LiveKit `publication + track`
 - **UI-Auswahl:** `videoTrackRefs.js` hält nur auswählbare Stream- und Kamera-Referenzen
-- **Native Desktop-Preview:** der Desktop-Screenshare publiziert über einen separaten Proxy-Teilnehmer; `participantMediaRegistry.js` mappt ihn wieder auf den owning user
+- **Native Desktop-Preview:** der Desktop-Screenshare publiziert über einen separaten Proxy-Teilnehmer; `ScreenShareProxyMap.js` mappt die Proxy-Identity wieder auf den owning user
 - **Preview-Rendering:** `VoiceMediaStage` attached den LiveKit-Track direkt an ein `<video>`-Element; es gibt keine zweite manuelle Receive-State-Maschine über LiveKit
 
 ---
+
+### Voice-Controller-Schnitt
+
+- `voiceEngine.js` bleibt die stabile Fassade fÃ¼r `new VoiceEngine()` und die bestehenden Event-Namen.
+- Die Implementierung liegt intern in `frontend/src/lib/voice/`:
+  - `VoiceSessionController.js`
+  - `LocalAudioController.js`
+  - `LocalVideoController.js`
+  - `ScreenShareController.js`
+  - `RemoteMediaController.js`
+  - `ScreenShareProxyMap.js`
+- Remote-Video wird direkt aus LiveKit `trackPublications` projiziert; es gibt keinen zweiten allgemeinen Video-Cache mehr.
 
 ## Design-Prinzipien
 

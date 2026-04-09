@@ -10,17 +10,38 @@
 import { getScreenShareCapabilities } from "../screenShareCapabilities";
 
 describe("screenShareCapabilities", () => {
-  it("disables browser-only audio controls for native desktop capture", () => {
+  it("exposes native desktop capture defaults", () => {
     expect(getScreenShareCapabilities({ isDesktop: true })).toEqual({
-      supportsSystemAudio: false,
-      supportsAudioVolumeControl: false,
+      supportsNativeCapture: true,
+      supportsSystemAudio: true,
+      supportsAudioVolumeControl: true,
+      supportsWindowAudio: false,
     });
   });
 
   it("keeps browser audio controls enabled for web screen share", () => {
     expect(getScreenShareCapabilities({ isDesktop: false })).toEqual({
+      supportsNativeCapture: false,
       supportsSystemAudio: true,
       supportsAudioVolumeControl: true,
+      supportsWindowAudio: false,
+    });
+  });
+
+  it("merges runtime overrides from the desktop bridge", () => {
+    expect(getScreenShareCapabilities({
+      isDesktop: true,
+      runtimeInfo: {
+        screenShareCapabilities: {
+          supportsSystemAudio: false,
+          supportsWindowAudio: true,
+        },
+      },
+    })).toEqual({
+      supportsNativeCapture: true,
+      supportsSystemAudio: false,
+      supportsAudioVolumeControl: true,
+      supportsWindowAudio: true,
     });
   });
 });

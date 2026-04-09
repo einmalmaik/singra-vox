@@ -661,7 +661,6 @@ async fn start_native_screen_share_inner(
     Ok(info)
 }
 
-#[tauri::command]
 pub async fn start_native_screen_share(
     input: NativeScreenShareStartInput,
     capture_store: State<'_, DesktopCaptureStore>,
@@ -684,7 +683,6 @@ pub async fn start_native_screen_share(
     }
 }
 
-#[tauri::command]
 pub async fn stop_native_screen_share(
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<bool, String> {
@@ -703,7 +701,6 @@ pub async fn stop_native_screen_share(
     }
 }
 
-#[tauri::command]
 pub fn update_native_screen_share_key(
     shared_media_key_b64: String,
     key_index: Option<i32>,
@@ -739,7 +736,6 @@ pub fn update_native_screen_share_key(
     }
 }
 
-#[tauri::command]
 pub fn update_native_screen_share_audio_volume(
     volume: u32,
     screen_share_store: State<'_, NativeScreenShareStore>,
@@ -771,7 +767,6 @@ pub fn update_native_screen_share_audio_volume(
     }
 }
 
-#[tauri::command]
 pub fn get_native_screen_share_session(
     screen_share_store: State<'_, NativeScreenShareStore>,
 ) -> Result<Option<NativeScreenShareSessionInfo>, String> {

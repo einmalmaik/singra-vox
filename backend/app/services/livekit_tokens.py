@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from livekit import api as livekit_api
 
@@ -10,6 +11,7 @@ from app.voice_access import build_voice_capabilities
 
 SCREEN_SHARE_PROXY_ROLE = "screen_share_proxy"
 SCREEN_SHARE_PROXY_IDENTITY_PREFIX = "screen-share"
+logger = logging.getLogger(__name__)
 
 
 def build_voice_room_name(server_id: str, channel_id: str) -> str:
@@ -71,6 +73,14 @@ def create_voice_participant_token(
     api_key: str | None = None,
     api_secret: str | None = None,
 ) -> str:
+    logger.info(
+        "livekit token create room_name=%s participant_identity=%s can_join=%s can_speak=%s can_stream=%s event=livekit_token_create result=attempt",
+        room_name,
+        participant_identity,
+        can_join,
+        can_speak,
+        can_stream,
+    )
     access_token = (
         livekit_api.AccessToken(api_key or livekit_api_key, api_secret or livekit_api_secret)
         .with_identity(participant_identity)
@@ -93,4 +103,10 @@ def create_voice_participant_token(
     if participant_metadata:
         access_token = access_token.with_metadata(json.dumps(participant_metadata))
 
-    return access_token.to_jwt()
+    token = access_token.to_jwt()
+    logger.info(
+        "livekit token create room_name=%s participant_identity=%s event=livekit_token_create result=ok",
+        room_name,
+        participant_identity,
+    )
+    return token

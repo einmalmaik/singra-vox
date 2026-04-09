@@ -8,17 +8,26 @@
  * (at your option) any later version.
  */
 const BROWSER_SCREEN_SHARE_CAPABILITIES = Object.freeze({
+  supportsNativeCapture: false,
   supportsSystemAudio: true,
   supportsAudioVolumeControl: true,
+  supportsWindowAudio: false,
 });
 
 const DESKTOP_NATIVE_SCREEN_SHARE_CAPABILITIES = Object.freeze({
+  supportsNativeCapture: true,
   supportsSystemAudio: true,
   supportsAudioVolumeControl: true,
+  supportsWindowAudio: false,
 });
 
-export function getScreenShareCapabilities({ isDesktop = false } = {}) {
-  return isDesktop
-    ? DESKTOP_NATIVE_SCREEN_SHARE_CAPABILITIES
-    : BROWSER_SCREEN_SHARE_CAPABILITIES;
+export function getScreenShareCapabilities({ isDesktop = false, runtimeInfo = null } = {}) {
+  if (!isDesktop) {
+    return BROWSER_SCREEN_SHARE_CAPABILITIES;
+  }
+
+  return {
+    ...DESKTOP_NATIVE_SCREEN_SHARE_CAPABILITIES,
+    ...(runtimeInfo?.screenShareCapabilities || {}),
+  };
 }

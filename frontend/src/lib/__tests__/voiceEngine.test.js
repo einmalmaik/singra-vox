@@ -51,7 +51,6 @@ jest.mock("@/lib/voicePreferences", () => ({
 }), { virtual: true });
 
 jest.mock("@/lib/asyncControl", () => jest.requireActual("../asyncControl"), { virtual: true });
-jest.mock("@/lib/participantMediaRegistry", () => jest.requireActual("../participantMediaRegistry"), { virtual: true });
 jest.mock("@/lib/videoTrackRefs", () => jest.requireActual("../videoTrackRefs"), { virtual: true });
 
 jest.mock("@/lib/desktop", () => ({
@@ -83,6 +82,26 @@ import { VoiceEngine } from "../voiceEngine";
 function createNativeShare() {
   return {
     keySubscriptionCleanup: jest.fn(),
+  };
+}
+
+function createVideoPublication(track = null, extra = {}) {
+  return {
+    kind: "video",
+    source: "screen_share",
+    track,
+    subscriptionStatus: "desired",
+    isDesired: true,
+    setSubscribed: jest.fn(),
+    ...extra,
+  };
+}
+
+function createRemoteParticipant(identity, userId, publication) {
+  return {
+    identity,
+    attributes: { owner_user_id: userId },
+    trackPublications: new Map([["pub-1", publication]]),
   };
 }
 
@@ -141,18 +160,15 @@ describe("VoiceEngine native cleanup", () => {
     };
 
     engine.userId = "user-1";
+    const publication = createVideoPublication(track);
+    const participant = createRemoteParticipant("screen-share:channel:user-1", "user-1", publication);
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
     engine.nativeScreenShare = {
       participantIdentity: "screen-share:channel:user-1",
       keySubscriptionCleanup: jest.fn(),
     };
-    engine.participantMediaRegistry.upsertVideoTrack({
-      participant: {
-        identity: "screen-share:channel:user-1",
-        attributes: { owner_user_id: "user-1" },
-      },
-      track,
-      source: "screen_share",
-    });
 
     const detach = engine.attachParticipantMediaElement("user-1", "screen_share", element);
 
@@ -173,22 +189,22 @@ describe("VoiceEngine native cleanup", () => {
     };
 
     engine.userId = "user-1";
-    engine.participantMediaRegistry.upsertVideoTrack({
-      participant: {
-        identity: "screen-share:channel:user-1",
-        attributes: { owner_user_id: "user-1" },
-      },
-      track: localProxyVideoTrack,
-      source: "screen_share",
-    });
-    engine.participantMediaRegistry.upsertVideoTrack({
-      participant: {
-        identity: "screen-share:channel:user-2",
-        attributes: { owner_user_id: "user-2" },
-      },
-      track: remoteVideoTrack,
-      source: "screen_share",
-    });
+    const localParticipant = createRemoteParticipant(
+      "screen-share:channel:user-1",
+      "user-1",
+      createVideoPublication(localProxyVideoTrack),
+    );
+    const remoteParticipant = createRemoteParticipant(
+      "screen-share:channel:user-2",
+      "user-2",
+      createVideoPublication(remoteVideoTrack),
+    );
+    engine.room = {
+      remoteParticipants: new Map([
+        [localParticipant.identity, localParticipant],
+        [remoteParticipant.identity, remoteParticipant],
+      ]),
+    };
 
     expect(engine._buildRemoteMediaParticipants()).toEqual([
       {
@@ -205,8 +221,16 @@ describe("VoiceEngine native cleanup", () => {
   it("reports native screen-share readiness only after the proxy track is attached", () => {
     const engine = new VoiceEngine();
     const listener = jest.fn();
+    const participant = createRemoteParticipant(
+      "screen-share:channel:user-1",
+      "user-1",
+      createVideoPublication(null),
+    );
 
     engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
     engine.nativeScreenShare = {
       participantIdentity: "screen-share:channel:user-1",
       keySubscriptionCleanup: jest.fn(),
@@ -223,17 +247,10 @@ describe("VoiceEngine native cleanup", () => {
       }),
     }));
 
-    engine.participantMediaRegistry.upsertVideoTrack({
-      participant: {
-        identity: "screen-share:channel:user-1",
-        attributes: { owner_user_id: "user-1" },
-      },
-      track: {
-        kind: "video",
-        source: "screen_share",
-      },
+    participant.trackPublications.get("pub-1").track = {
+      kind: "video",
       source: "screen_share",
-    });
+    };
 
     engine._emitRemoteMediaUpdate();
 
@@ -250,40 +267,30 @@ describe("VoiceEngine native cleanup", () => {
   it("increments the local native screen-share revision when the proxy track is replaced", () => {
     const engine = new VoiceEngine();
     const listener = jest.fn();
+    const publication = createVideoPublication({
+      kind: "video",
+      source: "screen_share",
+      id: "track-a",
+    });
+    const participant = createRemoteParticipant("screen-share:channel:user-1", "user-1", publication);
 
     engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
     engine.nativeScreenShare = {
       participantIdentity: "screen-share:channel:user-1",
       keySubscriptionCleanup: jest.fn(),
     };
     engine.addStateListener(listener);
 
-    engine.participantMediaRegistry.upsertVideoTrack({
-      participant: {
-        identity: "screen-share:channel:user-1",
-        attributes: { owner_user_id: "user-1" },
-      },
-      track: {
-        kind: "video",
-        source: "screen_share",
-        id: "track-a",
-      },
-      source: "screen_share",
-    });
     engine._emitRemoteMediaUpdate();
 
-    engine.participantMediaRegistry.upsertVideoTrack({
-      participant: {
-        identity: "screen-share:channel:user-1",
-        attributes: { owner_user_id: "user-1" },
-      },
-      track: {
-        kind: "video",
-        source: "screen_share",
-        id: "track-b",
-      },
+    publication.track = {
+      kind: "video",
       source: "screen_share",
-    });
+      id: "track-b",
+    };
     engine._emitRemoteMediaUpdate();
 
     expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -360,19 +367,14 @@ describe("VoiceEngine native cleanup", () => {
 
   it("marks remote screen-share publications as pending before the track arrives", () => {
     const engine = new VoiceEngine();
-    const publication = {
-      kind: "video",
-      source: "screen_share",
-      track: null,
-      subscriptionStatus: "desired",
-      isDesired: true,
-    };
+    const publication = createVideoPublication(null);
+    const participant = createRemoteParticipant("screen-share:channel:user-2", "user-2", publication);
 
     engine.userId = "user-1";
-    engine._syncRemoteVideoPublication({
-      identity: "screen-share:channel:user-2",
-      attributes: { owner_user_id: "user-2" },
-    }, publication);
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
+    engine._syncRemoteVideoPublication(participant, publication);
 
     expect(engine.listVideoTrackRefs()).toEqual(expect.arrayContaining([
       expect.objectContaining({

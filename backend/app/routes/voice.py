@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 
 from app.core.config import livekit_api_key, livekit_api_secret, livekit_url
@@ -19,10 +21,12 @@ from app.services.server_ops import check_permission
 
 
 router = APIRouter(prefix="/api/voice", tags=["Voice"])
+logger = logging.getLogger(__name__)
 
 
 async def _resolve_voice_channel_context(request: Request, server_id: str, channel_id: str):
     user = await current_user(request)
+    platform = request.headers.get("X-Singra-Client-Platform", "unknown")
     channel = await db.channels.find_one(
         {"id": channel_id, "server_id": server_id, "type": "voice"},
         {"_id": 0},
@@ -48,6 +52,7 @@ async def _resolve_voice_channel_context(request: Request, server_id: str, chann
         "can_speak": can_speak,
         "can_stream": can_stream,
         "room_name": build_voice_room_name(server_id, channel_id),
+        "platform": platform,
     }
 
 
@@ -65,12 +70,22 @@ async def create_voice_token(request: Request, inp: VoiceTokenInput):
         can_stream=context["can_stream"],
     )
 
-    return build_livekit_join_response(
+    response = build_livekit_join_response(
         room_name=context["room_name"],
         participant_token=participant_token,
         channel=context["channel"],
         participant_identity=participant_identity,
     )
+    logger.info(
+        "voice token issued server_id=%s channel_id=%s user_id=%s participant_identity=%s room_name=%s platform=%s event=voice_token result=ok",
+        inp.server_id,
+        inp.channel_id,
+        context["user"]["id"],
+        participant_identity,
+        context["room_name"],
+        context["platform"],
+    )
+    return response
 
 
 @router.post("/native-screen-share-token")
@@ -98,10 +113,20 @@ async def create_native_screen_share_token(request: Request, inp: NativeScreenSh
         },
     )
 
-    return build_livekit_join_response(
+    response = build_livekit_join_response(
         room_name=context["room_name"],
         participant_token=participant_token,
         channel=context["channel"],
         participant_identity=participant_identity,
         participant_attributes=participant_attributes,
     )
+    logger.info(
+        "native screen share token issued server_id=%s channel_id=%s user_id=%s participant_identity=%s room_name=%s platform=%s event=native_screen_share_token result=ok",
+        inp.server_id,
+        inp.channel_id,
+        context["user"]["id"],
+        participant_identity,
+        context["room_name"],
+        context["platform"],
+    )
+    return response

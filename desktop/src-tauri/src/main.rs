@@ -8,12 +8,11 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 mod native_capture;
 #[cfg(target_os = "windows")]
 mod native_audio_capture;
-#[cfg(target_os = "windows")]
 mod native_livekit;
+mod screen_share;
 
 mod rich_presence;
 mod voice_overlay;
@@ -83,6 +82,7 @@ struct DesktopRuntimeInfo {
     platform: String,
     ptt_mode: String,
     is_elevated: bool,
+    screen_share_capabilities: screen_share::session::ScreenShareCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,6 +135,7 @@ fn get_desktop_runtime_info() -> DesktopRuntimeInfo {
         // frontend still shows the broader warning because an elevated game can
         // block lower-privileged apps from observing its keys.
         is_elevated: false,
+        screen_share_capabilities: screen_share::session::ScreenShareCapabilities::current(),
     }
 }
 
@@ -775,10 +776,7 @@ fn main() {
     let builder = tauri::Builder::default()
         .manage(desktop_state);
 
-    // DesktopCaptureStore wird nur auf Windows/macOS kompiliert (crabgrab)
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
     let builder = builder.manage(native_capture::DesktopCaptureStore::default());
-    #[cfg(target_os = "windows")]
     let builder = builder.manage(native_livekit::NativeScreenShareStore::default());
 
     builder
@@ -819,18 +817,12 @@ fn main() {
             voice_overlay::update_overlay_speakers,
             voice_overlay::update_overlay_settings,
             voice_overlay::is_fullscreen_game_active,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::list_capture_sources,
-            #[cfg(target_os = "windows")]
-            native_livekit::start_native_screen_share,
-            #[cfg(target_os = "windows")]
-            native_livekit::stop_native_screen_share,
-            #[cfg(target_os = "windows")]
-            native_livekit::update_native_screen_share_key,
-            #[cfg(target_os = "windows")]
-            native_livekit::update_native_screen_share_audio_volume,
-            #[cfg(target_os = "windows")]
-            native_livekit::get_native_screen_share_session,
+            screen_share::commands::list_capture_sources,
+            screen_share::commands::start_native_screen_share,
+            screen_share::commands::stop_native_screen_share,
+            screen_share::commands::update_native_screen_share_key,
+            screen_share::commands::update_native_screen_share_audio_volume,
+            screen_share::commands::get_native_screen_share_session,
         ])
         .run(tauri::generate_context!())
         .expect("error running Singra Vox desktop");
