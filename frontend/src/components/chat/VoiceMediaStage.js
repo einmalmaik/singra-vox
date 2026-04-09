@@ -60,6 +60,7 @@ export default function VoiceMediaStage({
   const { t } = useTranslation();
   const { config } = useRuntime();
   const videoRef = useRef(null);
+  const stageSurfaceRef = useRef(null);
 
   // Verfolgt ob der Browser-Tab aktuell sichtbar ist
   const [documentHidden, setDocumentHidden] = useState(() => document.hidden);
@@ -70,6 +71,7 @@ export default function VoiceMediaStage({
   // Zeigt eine Fehlermeldung wenn der Track nicht geladen werden konnte
   const [videoError, setVideoError] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [fullscreenActive, setFullscreenActive] = useState(false);
 
   // ── Sichtbarkeits-Tracking ────────────────────────────────────────────────
 
@@ -77,6 +79,23 @@ export default function VoiceMediaStage({
     const handleVisibilityChange = () => setDocumentHidden(document.hidden);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const fullscreenElement = document.fullscreenElement;
+      setFullscreenActive(Boolean(
+        fullscreenElement
+        && stageSurfaceRef.current
+        && (
+          fullscreenElement === stageSurfaceRef.current
+          || stageSurfaceRef.current.contains(fullscreenElement)
+        )
+      ));
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
   // ── Loading-State zurücksetzen wenn sich der Track/Teilnehmer ändert ───────
@@ -104,6 +123,51 @@ export default function VoiceMediaStage({
     setVideoLoading(false);
   }, []);
 
+  const refreshTrackPlayback = useCallback(() => {
+    if (documentHidden || !open || !trackRefId || !voiceEngineRef?.current || !videoRef.current) {
+      return;
+    }
+
+    voiceEngineRef.current.prepareTrackRefPlayback(trackRefId, {
+      width: videoRef.current.clientWidth || videoRef.current.offsetWidth || 0,
+      height: videoRef.current.clientHeight || videoRef.current.offsetHeight || 0,
+    });
+  }, [documentHidden, open, trackRefId, voiceEngineRef]);
+
+  const toggleFullscreen = useCallback(async () => {
+    const stageSurface = stageSurfaceRef.current;
+    if (!stageSurface) {
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement === stageSurface) {
+        await document.exitFullscreen?.();
+        return;
+      }
+      await stageSurface.requestFullscreen?.();
+    } catch {
+      // Ignore fullscreen API failures on unsupported shells.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (documentHidden || !open || !trackRefId || !videoRef.current) {
+      return undefined;
+    }
+
+    refreshTrackPlayback();
+    if (typeof ResizeObserver !== "function") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(() => {
+      refreshTrackPlayback();
+    });
+    observer.observe(videoRef.current);
+    return () => observer.disconnect();
+  }, [documentHidden, open, refreshTrackPlayback, trackRefId]);
+
   // ── Track-Attach mit Retry-Logik ─────────────────────────────────────────
 
   useEffect(() => {
@@ -126,6 +190,8 @@ export default function VoiceMediaStage({
      */
     const tryAttach = () => {
       if (cancelled) return;
+
+      refreshTrackPlayback();
 
       detachFn = voiceEngineRef.current?.attachTrackRefElement(trackRefId, videoElement);
 
@@ -178,7 +244,7 @@ export default function VoiceMediaStage({
       videoElement?.pause?.();
       detachFn?.();
     };
-  }, [documentHidden, mediaRevision, open, retryNonce, source, trackRefId, voiceEngineRef]);
+  }, [documentHidden, mediaRevision, open, refreshTrackPlayback, retryNonce, source, trackRefId, voiceEngineRef]);
 
   // ── Rendering ─────────────────────────────────────────────────────────────
 
@@ -197,7 +263,19 @@ export default function VoiceMediaStage({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 relative">
+          <div ref={stageSurfaceRef} className="overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 relative">
+            <div className="absolute right-4 top-4 z-20">
+              <button
+                type="button"
+                onClick={() => void toggleFullscreen()}
+                className="rounded-xl border border-white/10 bg-black/55 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-black/75"
+                data-testid="media-stage-fullscreen"
+              >
+                {fullscreenActive
+                  ? t("mediaStage.exitFullscreen", { defaultValue: "Vollbild verlassen" })
+                  : t("mediaStage.enterFullscreen", { defaultValue: "Vollbild" })}
+              </button>
+            </div>
             {documentHidden ? (
               <div className="flex h-[70vh] w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_35%),linear-gradient(180deg,#05070b,#09090b)] px-6 text-center text-sm text-zinc-400">
                 {t("mediaStage.previewPaused")}

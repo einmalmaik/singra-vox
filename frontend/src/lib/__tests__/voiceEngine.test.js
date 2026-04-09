@@ -10,7 +10,12 @@
 jest.mock("livekit-client", () => ({
   Room: jest.fn(),
   RoomEvent: {
+    ParticipantConnected: "participantConnected",
+    TrackPublished: "trackPublished",
     ParticipantAttributesChanged: "participantAttributesChanged",
+    TrackStreamStateChanged: "trackStreamStateChanged",
+    TrackSubscriptionStatusChanged: "trackSubscriptionStatusChanged",
+    Reconnected: "reconnected",
   },
   Track: {
     Kind: { Audio: "audio", Video: "video" },
@@ -351,6 +356,68 @@ describe("VoiceEngine native cleanup", () => {
     engine.setScreenShareAudioVolume(135);
 
     expect(updateNativeScreenShareAudioVolume).toHaveBeenCalledWith(135);
+  });
+
+  it("marks remote screen-share publications as pending before the track arrives", () => {
+    const engine = new VoiceEngine();
+    const publication = {
+      kind: "video",
+      source: "screen_share",
+      track: null,
+      subscriptionStatus: "desired",
+      isDesired: true,
+    };
+
+    engine.userId = "user-1";
+    engine._syncRemoteVideoPublication({
+      identity: "screen-share:channel:user-2",
+      attributes: { owner_user_id: "user-2" },
+    }, publication);
+
+    expect(engine.listVideoTrackRefs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        participantId: "user-2",
+        participantIdentity: "screen-share:channel:user-2",
+        source: "screen_share",
+        state: "pending",
+      }),
+    ]));
+  });
+
+  it("forces remote video publications back into an enabled subscribed playback state", () => {
+    const engine = new VoiceEngine();
+    const publication = {
+      kind: "video",
+      source: "screen_share",
+      track: null,
+      subscriptionStatus: "desired",
+      isDesired: false,
+      isEnabled: false,
+      setSubscribed: jest.fn(),
+      setEnabled: jest.fn(),
+      setVideoDimensions: jest.fn(),
+    };
+    const participant = {
+      identity: "screen-share:channel:user-2",
+      attributes: { owner_user_id: "user-2" },
+      trackPublications: new Map([["pub-1", publication]]),
+    };
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
+    engine._syncRemoteVideoPublication(participant, publication);
+    const trackRefId = engine.getVideoTrackRefId("user-2", "screen_share");
+
+    engine.prepareTrackRefPlayback(trackRefId, { width: 1280, height: 720 });
+
+    expect(publication.setSubscribed).toHaveBeenCalledWith(true);
+    expect(publication.setEnabled).toHaveBeenCalledWith(true);
+    expect(publication.setVideoDimensions).toHaveBeenCalledWith({
+      width: 1280,
+      height: 720,
+    });
   });
 
   it("rehydrates an active native desktop screen share after a desktop reconnect", async () => {

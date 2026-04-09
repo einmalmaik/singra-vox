@@ -350,6 +350,9 @@ export class VoiceEngine {
     await safeRun("publishLocalTrack", () => this._publishLocalTrack());
     await safeRun("outputDevice", () => this._applyOutputDevice());
     await safeRun("remoteAudio", () => this._applyRemoteAudioState());
+    await safeRun("remoteVideoPublications", async () => {
+      this._syncExistingRemoteVideoPublications({ ensureSubscribed: true });
+    });
     await safeRun("muteState", () => this._applyMuteState());
     await safeRun("nativeScreenShareState", () => this._rehydrateNativeScreenShareSession());
 
@@ -1089,6 +1092,11 @@ export class VoiceEngine {
       return null;
     }
 
+    this.prepareTrackRefPlayback(trackRefId, {
+      width: element.clientWidth || element.offsetWidth || 0,
+      height: element.clientHeight || element.offsetHeight || 0,
+    });
+
     if (!this.videoTrackRefsById.has(trackRefId)) {
       this._syncVideoTrackRefs();
     }
@@ -1129,6 +1137,7 @@ export class VoiceEngine {
       } catch {
         // Detach-Fehler bei schnellen Overlay-Wechseln ignorieren
       }
+      this.releaseTrackRefPlayback(trackRefId);
     };
   }
 
@@ -1549,6 +1558,20 @@ export class VoiceEngine {
   _bindRoomEvents() {
     if (!this.room) return;
 
+    this.room.on(RoomEvent.ParticipantConnected, (participant) => {
+      this._syncParticipantStateFromLiveKit(participant);
+      participant.trackPublications?.forEach?.((publication) => {
+        this._syncRemoteVideoPublication(participant, publication, { ensureSubscribed: true });
+      });
+      this._emitRemoteMediaUpdate();
+    });
+
+    this.room.on(RoomEvent.TrackPublished, (publication, participant) => {
+      if (this._syncRemoteVideoPublication(participant, publication, { ensureSubscribed: true })) {
+        this._emitRemoteMediaUpdate();
+      }
+    });
+
     this.room.on(RoomEvent.TrackSubscribed, async (track, publication, participant) => {
       const source = track.source || Track.Source.Unknown;
       const participantIdentity = this._resolveParticipantIdentity(participant);
@@ -1589,6 +1612,7 @@ export class VoiceEngine {
           participant,
           track,
           source,
+          publication,
         });
       }
 
@@ -1596,7 +1620,7 @@ export class VoiceEngine {
       this._emit("peer_connected", { userId: participantEntry.userId, source, kind: track.kind });
     });
 
-    this.room.on(RoomEvent.TrackUnsubscribed, (track, _publication, participant) => {
+    this.room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
       const source = track.source || Track.Source.Unknown;
       const participantIdentity = this._resolveParticipantIdentity(participant);
       const participantUserId = this._resolveParticipantUserId(participant);
@@ -1613,7 +1637,19 @@ export class VoiceEngine {
           this.audioElements.delete(trackKey);
         }
       } else if (track.kind === Track.Kind.Video) {
-        this.participantMediaRegistry.removeVideoTrack(participantIdentity, source);
+        if (publication) {
+          this.participantMediaRegistry.upsertVideoPublication({
+            participant,
+            publication,
+            source,
+          });
+          this.participantMediaRegistry.updateVideoTrackState(participantIdentity, source, {
+            track: null,
+            subscriptionStatus: publication.subscriptionStatus || null,
+          });
+        } else {
+          this.participantMediaRegistry.removeVideoTrack(participantIdentity, source);
+        }
       }
 
       this._setRemoteSpeakerIds(
@@ -1622,6 +1658,17 @@ export class VoiceEngine {
       this._applyParticipantAudio(participantUserId);
       this._emitRemoteMediaUpdate();
       this._emit("peer_disconnected", { userId: participantUserId, source, kind: track.kind });
+    });
+
+    this.room.on(RoomEvent.TrackUnpublished, (publication, participant) => {
+      const participantIdentity = this._resolveParticipantIdentity(participant);
+      const source = publication?.source || publication?.track?.source || Track.Source.Unknown;
+      if (!participantIdentity) {
+        return;
+      }
+
+      this.participantMediaRegistry.removeVideoTrack(participantIdentity, source);
+      this._emitRemoteMediaUpdate();
     });
 
     this.room.on(RoomEvent.ParticipantAttributesChanged, (_changedAttributes, participant) => {
@@ -1660,6 +1707,40 @@ export class VoiceEngine {
 
     this.room.on(RoomEvent.TrackSubscriptionStatusChanged, (publication, status, participant) => {
       reapplyRemoteAudioState(publication, participant, status);
+      if ((publication?.kind || publication?.track?.kind) === Track.Kind.Video) {
+        const trackState = this._syncRemoteVideoPublication(participant, publication);
+        if (trackState) {
+          this.participantMediaRegistry.updateVideoTrackState(
+            trackState.participantIdentity,
+            trackState.source,
+            {
+              subscriptionStatus: status || publication.subscriptionStatus || null,
+            },
+          );
+          this._emitRemoteMediaUpdate();
+        }
+      }
+    });
+
+    this.room.on(RoomEvent.TrackStreamStateChanged, (publication, streamState, participant) => {
+      if ((publication?.kind || publication?.track?.kind) !== Track.Kind.Video) {
+        return;
+      }
+
+      const trackState = this._syncRemoteVideoPublication(participant, publication);
+      if (!trackState) {
+        return;
+      }
+      this.participantMediaRegistry.updateVideoTrackState(
+        trackState.participantIdentity,
+        trackState.source,
+        { streamState },
+      );
+      this._emitRemoteMediaUpdate();
+    });
+
+    this.room.on(RoomEvent.Reconnected, () => {
+      this._syncExistingRemoteVideoPublications({ ensureSubscribed: true });
     });
 
     this.room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
@@ -1852,7 +1933,7 @@ export class VoiceEngine {
         participantId: trackState.participantId,
         participantIdentity: trackState.participantIdentity,
         source: trackState.source,
-        state: VIDEO_TRACK_STATE_READY,
+        state: trackState.track ? VIDEO_TRACK_STATE_READY : VIDEO_TRACK_STATE_PENDING,
         revision: trackState.revision || 0,
         hasAudio: trackState.source === Track.Source.ScreenShare
           ? remoteScreenShareAudioParticipantIds.has(trackState.participantId)
@@ -1861,6 +1942,9 @@ export class VoiceEngine {
         provider: trackState.participantIdentity?.startsWith("screen-share:")
           ? "tauri-native-livekit"
           : "livekit-remote",
+        publication: trackState.publication || null,
+        subscriptionStatus: trackState.subscriptionStatus || null,
+        streamState: trackState.streamState || null,
         track: trackState.track,
       }));
 
@@ -1875,8 +1959,175 @@ export class VoiceEngine {
       return null;
     }
 
-    const { track, ...publicTrackRef } = trackRef;
+    const { track, publication, ...publicTrackRef } = trackRef;
     return publicTrackRef;
+  }
+
+  _getRemoteParticipantByIdentity(participantIdentity) {
+    if (!this.room?.remoteParticipants || !participantIdentity) {
+      return null;
+    }
+
+    if (typeof this.room.remoteParticipants.get === "function") {
+      return this.room.remoteParticipants.get(participantIdentity) || null;
+    }
+
+    return Array.from(this.room.remoteParticipants.values?.() || [])
+      .find((participant) => participant?.identity === participantIdentity) || null;
+  }
+
+  _findRemoteVideoPublication(participantIdentity, source) {
+    const participant = this._getRemoteParticipantByIdentity(participantIdentity);
+    if (!participant?.trackPublications) {
+      return { participant, publication: null };
+    }
+
+    let publication = null;
+    participant.trackPublications.forEach?.((candidate) => {
+      if (publication) {
+        return;
+      }
+      const candidateSource = candidate?.source || candidate?.track?.source || Track.Source.Unknown;
+      const candidateKind = candidate?.kind || candidate?.track?.kind || null;
+      if (candidateKind === Track.Kind.Video && candidateSource === source) {
+        publication = candidate;
+      }
+    });
+
+    return { participant, publication };
+  }
+
+  _syncRemoteVideoPublication(participant, publication, { ensureSubscribed = false } = {}) {
+    if (!participant || !publication) {
+      return null;
+    }
+
+    const publicationKind = publication.kind || publication.track?.kind || null;
+    if (publicationKind !== Track.Kind.Video) {
+      return null;
+    }
+
+    if (ensureSubscribed && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
+      publication.setSubscribed(true);
+    }
+
+    return this.participantMediaRegistry.upsertVideoPublication({
+      participant,
+      publication,
+      source: publication.source || publication.track?.source || Track.Source.Unknown,
+    });
+  }
+
+  _syncExistingRemoteVideoPublications({ ensureSubscribed = false } = {}) {
+    if (!this.room?.remoteParticipants) {
+      return false;
+    }
+
+    let didUpdate = false;
+    this.room.remoteParticipants.forEach?.((participant) => {
+      this._syncParticipantStateFromLiveKit(participant);
+      participant.trackPublications?.forEach?.((publication) => {
+        if (this._syncRemoteVideoPublication(participant, publication, { ensureSubscribed })) {
+          didUpdate = true;
+        }
+      });
+    });
+
+    if (didUpdate) {
+      this._emitRemoteMediaUpdate();
+    }
+    return didUpdate;
+  }
+
+  prepareTrackRefPlayback(trackRefId, { width = 0, height = 0 } = {}) {
+    if (!trackRefId) {
+      return false;
+    }
+
+    if (!this.videoTrackRefsById.has(trackRefId)) {
+      this._syncVideoTrackRefs();
+    }
+
+    const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
+    if (!trackRef || trackRef.isLocal) {
+      return Boolean(trackRef?.track);
+    }
+
+    const nextWidth = Math.max(0, Math.round(width || 0));
+    const nextHeight = Math.max(0, Math.round(height || 0));
+    const { participant, publication } = trackRef.publication
+      ? {
+        participant: this._getRemoteParticipantByIdentity(trackRef.participantIdentity),
+        publication: trackRef.publication,
+      }
+      : this._findRemoteVideoPublication(trackRef.participantIdentity, trackRef.source);
+
+    if (!publication) {
+      return Boolean(trackRef.track);
+    }
+
+    if (typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
+      publication.setSubscribed(true);
+    }
+    if (typeof publication.setEnabled === "function" && publication.isEnabled !== true) {
+      publication.setEnabled(true);
+    }
+    if (
+      nextWidth > 0
+      && nextHeight > 0
+      && typeof publication.setVideoDimensions === "function"
+    ) {
+      publication.setVideoDimensions({
+        width: nextWidth,
+        height: nextHeight,
+      });
+    }
+
+    const nextTrack = publication.track || trackRef.track || null;
+    if (participant && nextTrack) {
+      this.participantMediaRegistry.upsertVideoTrack({
+        participant,
+        publication,
+        track: nextTrack,
+        source: trackRef.source,
+      });
+      this._syncVideoTrackRefs();
+    } else if (participant) {
+      this.participantMediaRegistry.upsertVideoPublication({
+        participant,
+        publication,
+        source: trackRef.source,
+      });
+      this._syncVideoTrackRefs();
+    }
+
+    return Boolean(nextTrack);
+  }
+
+  releaseTrackRefPlayback(trackRefId) {
+    if (!trackRefId) {
+      return false;
+    }
+
+    if (!this.videoTrackRefsById.has(trackRefId)) {
+      this._syncVideoTrackRefs();
+    }
+
+    const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
+    if (!trackRef || trackRef.isLocal) {
+      return false;
+    }
+
+    const publication = trackRef.publication
+      || this._findRemoteVideoPublication(trackRef.participantIdentity, trackRef.source).publication;
+    if (!publication) {
+      return false;
+    }
+
+    if (typeof publication.setEnabled === "function" && publication.isEnabled !== false) {
+      publication.setEnabled(false);
+    }
+    return true;
   }
 
   _syncVideoTrackRefs() {

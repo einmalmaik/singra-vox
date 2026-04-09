@@ -103,7 +103,7 @@ export class ParticipantMediaRegistry {
     return nextEntry;
   }
 
-  upsertVideoTrack({ participant, track, source }) {
+  upsertVideoTrack({ participant, track, source, publication = null }) {
     const participantEntry = this.upsertParticipant(participant);
     if (!participantEntry) {
       return null;
@@ -115,12 +115,60 @@ export class ParticipantMediaRegistry {
     const nextTrackState = {
       trackKey,
       track,
+      publication: publication || previousTrackState?.publication || null,
       source: normalizedSource,
       participantIdentity: participantEntry.participantIdentity,
       participantId: participantEntry.userId,
       revision: buildNextTrackRevision(previousTrackState, track),
+      subscriptionStatus: previousTrackState?.subscriptionStatus || null,
+      streamState: previousTrackState?.streamState || null,
     };
 
+    this.videoTracksByKey.set(trackKey, nextTrackState);
+    return nextTrackState;
+  }
+
+  upsertVideoPublication({ participant, publication, source = null }) {
+    const participantEntry = this.upsertParticipant(participant);
+    if (!participantEntry || !publication) {
+      return null;
+    }
+
+    const normalizedSource = normalizeSource(source || publication.source || publication.track?.source);
+    const trackKey = buildTrackKey(participantEntry.participantIdentity, normalizedSource);
+    const previousTrackState = this.videoTracksByKey.get(trackKey) || null;
+    const nextTrack = publication.track || previousTrackState?.track || null;
+    const nextTrackState = {
+      trackKey,
+      track: nextTrack,
+      publication,
+      source: normalizedSource,
+      participantIdentity: participantEntry.participantIdentity,
+      participantId: participantEntry.userId,
+      revision: buildNextTrackRevision(previousTrackState, nextTrack),
+      subscriptionStatus: publication.subscriptionStatus || previousTrackState?.subscriptionStatus || null,
+      streamState: previousTrackState?.streamState || null,
+    };
+
+    this.videoTracksByKey.set(trackKey, nextTrackState);
+    return nextTrackState;
+  }
+
+  updateVideoTrackState(participantIdentity, source, patch = {}) {
+    if (!participantIdentity) {
+      return null;
+    }
+
+    const trackKey = buildTrackKey(participantIdentity, source);
+    const previousTrackState = this.videoTracksByKey.get(trackKey);
+    if (!previousTrackState) {
+      return null;
+    }
+
+    const nextTrackState = {
+      ...previousTrackState,
+      ...patch,
+    };
     this.videoTracksByKey.set(trackKey, nextTrackState);
     return nextTrackState;
   }

@@ -100,4 +100,32 @@ describe("ParticipantMediaRegistry", () => {
     expect(secondRevision.screenShareTrackRevision).toBe(2);
     expect(secondRevision.hasScreenShare).toBe(true);
   });
+
+  it("keeps remote screen-share visibility from the publication before the track arrives", () => {
+    const registry = createParticipantMediaRegistry();
+
+    registry.upsertVideoPublication({
+      participant: {
+        identity: "screen-share:channel-1:user-2",
+        attributes: { owner_user_id: "user-2" },
+      },
+      publication: {
+        kind: "video",
+        source: Track.Source.ScreenShare,
+        track: null,
+        subscriptionStatus: "desired",
+      },
+    });
+
+    expect(registry.listRemoteMediaParticipants({ localUserId: "user-1" })).toEqual([
+      {
+        userId: "user-2",
+        hasCamera: false,
+        hasScreenShare: true,
+        hasScreenShareAudio: false,
+        cameraTrackRevision: 0,
+        screenShareTrackRevision: 0,
+      },
+    ]);
+  });
 });
