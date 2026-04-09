@@ -17,11 +17,20 @@ export const EMPTY_LOCAL_MEDIA_STATE = Object.freeze({
   hasScreenShareAudio: false,
 });
 
+function buildTrackRefStageState(trackRef = {}) {
+  return [
+    trackRef.id || "unknown",
+    trackRef.state || "missing",
+    Number(trackRef.revision || 0),
+    Number(Boolean(trackRef.hasAudio)),
+    trackRef.subscriptionStatus || "none",
+    trackRef.streamState || "none",
+  ].join(":");
+}
+
 function buildTrackRefSignature(trackRefs = []) {
   return [...trackRefs]
-    .map((trackRef) => (
-      `${trackRef.id}:${trackRef.state || "missing"}:${trackRef.revision || 0}:${Number(Boolean(trackRef.hasAudio))}`
-    ))
+    .map((trackRef) => buildTrackRefStageState(trackRef))
     .sort()
     .join("|");
 }
@@ -36,8 +45,7 @@ export function buildMediaStageRevision({
 
   return [
     selectedTrackRefId || "none",
-    selectedTrackRef?.state || "missing",
-    Number(selectedTrackRef?.revision || 0),
+    buildTrackRefStageState(selectedTrackRef),
     buildTrackRefSignature(trackRefs),
   ].join(":");
 }

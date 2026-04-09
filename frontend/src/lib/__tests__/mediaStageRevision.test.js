@@ -128,4 +128,39 @@ describe("mediaStageRevision", () => {
 
     expect(afterReplacement).not.toBe(beforeReplacement);
   });
+
+  it("changes when a selected pending track updates its subscription status", () => {
+    const beforeSubscriptionUpdate = buildMediaStageRevision({
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [
+        {
+          id: "remote:user-2:screen_share",
+          participantId: "user-2",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_PENDING,
+          revision: 0,
+          hasAudio: false,
+          subscriptionStatus: "desired",
+          streamState: "paused",
+        },
+      ],
+    });
+    const afterSubscriptionUpdate = buildMediaStageRevision({
+      selectedTrackRefId: "remote:user-2:screen_share",
+      trackRefs: [
+        {
+          id: "remote:user-2:screen_share",
+          participantId: "user-2",
+          source: "screen_share",
+          state: VIDEO_TRACK_STATE_PENDING,
+          revision: 0,
+          hasAudio: false,
+          subscriptionStatus: "subscribed",
+          streamState: "active",
+        },
+      ],
+    });
+
+    expect(afterSubscriptionUpdate).not.toBe(beforeSubscriptionUpdate);
+  });
 });
