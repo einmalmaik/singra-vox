@@ -28,7 +28,6 @@
  *
  * Erweiterung:
  *   Neue Qualitätsprofile → screenSharePresets.js
- *   LiveKit-Transport-Abstraktion → LiveKitTransport.js (noch nicht vollständig migriert)
  */
 
 import api from "@/lib/api";
@@ -101,9 +100,8 @@ export class VoiceEngine {
     this.runtimeConfig = null;
     // Audio and video can arrive from multiple sources per participant
     // (microphone, screen-share audio, camera, screen-share video). Audio
-    // element state stays local to the engine while participant/video mapping
-    // lives in a dedicated registry so LiveKit identity changes do not leak
-    // into UI state keys.
+    // playback stays local to the engine, while the registry normalizes the
+    // native screen-share proxy participant back to the owning user.
     this.audioElements = new Map();
     this.participantMediaRegistry = createParticipantMediaRegistry();
     this.videoTrackRefsById = new Map();

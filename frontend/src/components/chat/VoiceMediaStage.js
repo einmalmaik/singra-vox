@@ -56,7 +56,6 @@ export default function VoiceMediaStage({
   voiceEngineRef,
   trackRefId,
   selectedTrackRef,
-  participantId,
   participantName,
   source,
 }) {

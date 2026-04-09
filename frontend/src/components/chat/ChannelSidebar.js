@@ -183,9 +183,6 @@ export default function ChannelSidebar({
   const [stageState, setStageState] = useState({
     open: false,
     trackRefId: null,
-    participantId: null,
-    participantName: "",
-    source: null,
   });
   const [localVoicePreferences, setLocalVoicePreferences] = useState(
     loadVoicePreferences(user?.id, { isDesktop }),
@@ -227,10 +224,6 @@ export default function ChannelSidebar({
     () => new Map(videoTrackRefs.map((trackRef) => [trackRef.id, trackRef])),
     [videoTrackRefs],
   );
-  const selectedStageTrackRef = useMemo(
-    () => (stageState.trackRefId ? (videoTrackRefsById.get(stageState.trackRefId) || null) : null),
-    [stageState.trackRefId, videoTrackRefsById],
-  );
   const memberDisplayNames = useMemo(
     () => new Map(
       members.map((member) => [
@@ -240,6 +233,19 @@ export default function ChannelSidebar({
     ),
     [members, t],
   );
+  const selectedStageTrackRef = useMemo(
+    () => (stageState.trackRefId ? (videoTrackRefsById.get(stageState.trackRefId) || null) : null),
+    [stageState.trackRefId, videoTrackRefsById],
+  );
+  const selectedStageParticipantName = useMemo(() => {
+    if (!selectedStageTrackRef?.participantId) {
+      return "";
+    }
+    if (selectedStageTrackRef.participantId === user?.id) {
+      return resolveParticipantDisplayName(user, t);
+    }
+    return memberDisplayNames.get(selectedStageTrackRef.participantId) || t("common.unknown");
+  }, [memberDisplayNames, selectedStageTrackRef?.participantId, t, user]);
   const liveMediaEntries = useMemo(() => {
     return videoTrackRefs
       .filter((trackRef) => trackRef.state === "ready" || trackRef.isLocal)
@@ -534,9 +540,6 @@ export default function ChannelSidebar({
       setStageState({
         open: false,
         trackRefId: null,
-        participantId: null,
-        participantName: "",
-        source: null,
       });
     }
   }, [stageState, videoTrackRefsById]);
@@ -929,7 +932,7 @@ export default function ChannelSidebar({
     })?.id || null;
   }, [user?.id, videoTrackRefs]);
 
-  const openMediaStage = useCallback((participantId, participantName, source, explicitTrackRefId = null) => {
+  const openMediaStage = useCallback((participantId, source, explicitTrackRefId = null) => {
     const trackRefId = explicitTrackRefId || resolveStageTrackRefId(participantId, source);
     if (!trackRefId) {
       return;
@@ -937,9 +940,6 @@ export default function ChannelSidebar({
     setStageState({
       open: true,
       trackRefId,
-      participantId,
-      participantName,
-      source,
     });
   }, [resolveStageTrackRefId]);
 
@@ -1156,7 +1156,7 @@ export default function ChannelSidebar({
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        openMediaStage(participantId, participantName, "camera");
+                        openMediaStage(participantId, "camera");
                       }}
                       className="rounded p-0.5 text-[#22C55E] transition-colors hover:bg-[#27272A] hover:text-white"
                       title={t("channel.viewCamera")}
@@ -1175,7 +1175,7 @@ export default function ChannelSidebar({
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
-                        openMediaStage(participantId, participantName, "screen_share");
+                        openMediaStage(participantId, "screen_share");
                       }}
                       className="rounded p-0.5 text-[#22C55E] transition-colors hover:bg-[#27272A] hover:text-white"
                       title={t("channel.watchStream")}
@@ -1227,12 +1227,12 @@ export default function ChannelSidebar({
                   <>
                     <DropdownMenuSeparator className="bg-[#27272A]" />
                     {hasScreenShare && (
-                      <DropdownMenuItem onClick={() => openMediaStage(participantId, participantName, "screen_share")}>
+                      <DropdownMenuItem onClick={() => openMediaStage(participantId, "screen_share")}>
                         {t("channel.watchStream")}
                       </DropdownMenuItem>
                     )}
                     {hasCamera && (
-                      <DropdownMenuItem onClick={() => openMediaStage(participantId, participantName, "camera")}>
+                      <DropdownMenuItem onClick={() => openMediaStage(participantId, "camera")}>
                         {t("channel.viewCamera")}
                       </DropdownMenuItem>
                     )}
@@ -1483,12 +1483,7 @@ export default function ChannelSidebar({
                       <button
                         key={`${entry.userId}:${entry.source}`}
                         type="button"
-                        onClick={() => openMediaStage(
-                          entry.userId,
-                          entry.participantName,
-                          entry.source,
-                          entry.trackRefId,
-                        )}
+                        onClick={() => openMediaStage(entry.userId, entry.source, entry.trackRefId)}
                         className="workspace-card w-full px-3 py-2 text-left transition-colors hover:border-cyan-400/30 hover:bg-white/5"
                       >
                         <div className="flex items-center gap-2">
@@ -1856,15 +1851,11 @@ export default function ChannelSidebar({
         onClose={() => setStageState({
           open: false,
           trackRefId: null,
-          participantId: null,
-          participantName: "",
-          source: null,
         })}
         voiceEngineRef={voiceEngineRef}
         trackRefId={stageState.trackRefId}
-        participantId={stageState.participantId}
-        participantName={stageState.participantName}
-        source={stageState.source}
+        participantName={selectedStageParticipantName}
+        source={selectedStageTrackRef?.source || null}
         selectedTrackRef={selectedStageTrackRef}
       />
     </>

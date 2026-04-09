@@ -325,6 +325,13 @@ LiveKit ist ein Open-Source SFU (Selective Forwarding Unit) für WebRTC.
 - **E2EE Voice:** SFrame-Verschlüsselung (LiveKit-nativ, Key via ExternalE2EEKeyProvider)
 - **Key-Rotation:** Automatisch bei Teilnehmer-Wechsel
 
+Frontend-Viewer-Pfad:
+
+- **Quelle der Wahrheit:** LiveKit `publication + track`
+- **UI-Auswahl:** `videoTrackRefs.js` hält nur auswählbare Stream- und Kamera-Referenzen
+- **Native Desktop-Preview:** der Desktop-Screenshare publiziert über einen separaten Proxy-Teilnehmer; `participantMediaRegistry.js` mappt ihn wieder auf den owning user
+- **Preview-Rendering:** `VoiceMediaStage` attached den LiveKit-Track direkt an ein `<video>`-Element; es gibt keine zweite manuelle Receive-State-Maschine über LiveKit
+
 ---
 
 ## Design-Prinzipien
