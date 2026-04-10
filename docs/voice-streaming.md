@@ -63,6 +63,10 @@ Video subscription rules:
 - When a user explicitly opens the media stage for one video track, the
   frontend may express a playback intent for that selected track only. This is
   a narrow viewer-lifecycle safeguard, not a global video subscription policy.
+- In the browser with `adaptiveStream`, a subscribed video track may briefly
+  report `streamState: paused` until it is attached to a visible
+  `HTMLVideoElement`. The UI must not treat that transport state as
+  "unavailable" before calling `track.attach()`.
 
 ## Native desktop path
 

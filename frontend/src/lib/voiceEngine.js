@@ -44,6 +44,8 @@ export class VoiceEngine {
     this.audioElements = new Map();
     this.screenShareProxyMap = createScreenShareProxyMap();
     this.videoTrackRefsById = new Map();
+    this.videoTrackRefProjectionSignaturesById = new Map();
+    this.trackRefPlaybackRecoveryTimers = new Map();
     this.onStateChange = null;
     this.listeners = new Set();
 

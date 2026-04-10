@@ -11,6 +11,7 @@ import api from "@/lib/api";
 import { ExternalE2EEKeyProvider } from "livekit-client";
 import { loadLocalE2EEIdentity } from "@/lib/e2ee/deviceStorage";
 import { openMessageKey, randomBase64, sealMessageKey } from "@/lib/e2ee/crypto";
+import { assertEncryptedVoiceSupport } from "./mediaSupport";
 
 function base64ToArrayBuffer(value) {
   const binary = atob(value);
@@ -51,12 +52,13 @@ async function buildDeviceEnvelopes(recipients, mediaKeyB64) {
 async function resolveLocalIdentity(config) {
   const identity = await loadLocalE2EEIdentity(config);
   if (!identity?.deviceId || !identity?.devicePrivateKey || !identity?.devicePublicKey) {
-    throw new Error("A verified desktop device is required for encrypted voice");
+    throw new Error("A verified E2EE device is required for encrypted voice");
   }
   return identity;
 }
 
 export async function createEncryptedMediaController(config, channelId) {
+  assertEncryptedVoiceSupport(config);
   const keyProvider = new ExternalE2EEKeyProvider();
   const worker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
 

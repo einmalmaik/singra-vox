@@ -18,6 +18,7 @@ import {
   saveVoicePreferences,
   subscribeVoicePreferences,
 } from "@/lib/voicePreferences";
+import { attachVoiceDebugEngine } from "../../../../lib/voice/voiceDebug";
 import { EMPTY_LOCAL_MEDIA_STATE } from "@/lib/videoTrackRefs";
 import {
   createEmptyScreenShareMeta,
@@ -85,6 +86,7 @@ export function useVoiceChannelState({
   }, [preferredDeafened, preferredMuted, voiceChannel]);
 
   const bindVoiceEngine = useCallback((engine) => {
+    const detachVoiceDebug = attachVoiceDebugEngine(engine);
     const handleEvent = (event) => {
       if (event.type === "mute_change") setIsMuted(Boolean(event.isMuted));
       if (event.type === "deafen_change") setIsDeafened(Boolean(event.isDeafened));
@@ -133,7 +135,11 @@ export function useVoiceChannelState({
     };
 
     engine.onStateChange = handleEvent;
-    return engine.addStateListener(handleEvent);
+    const detachStateListener = engine.addStateListener(handleEvent);
+    return () => {
+      detachVoiceDebug?.();
+      detachStateListener?.();
+    };
   }, [voiceEngineRef]);
 
   useEffect(() => {
@@ -188,7 +194,12 @@ export function useVoiceChannelState({
   }, [channels, preferredDeafened, preferredMuted, user?.id, voiceChannel, voiceEngineRef]);
 
   useEffect(() => {
-    if (!voiceChannel?.is_private || !voiceEngineRef?.current || currentVoiceParticipantIds.length === 0) {
+    if (
+      !voiceChannel?.is_private
+      || !voiceEngineRef?.current
+      || currentVoiceParticipantIds.length === 0
+      || !currentVoiceParticipantIds.includes(user?.id)
+    ) {
       return undefined;
     }
 
@@ -216,7 +227,7 @@ export function useVoiceChannelState({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [currentVoiceParticipantIds, t, voiceChannel?.id, voiceChannel?.is_private, voiceEngineRef]);
+  }, [currentVoiceParticipantIds, t, user?.id, voiceChannel?.id, voiceChannel?.is_private, voiceEngineRef]);
 
   const updateLocalPreferences = useCallback(async (partialUpdate) => {
     const nextPreferences = saveVoicePreferences(user?.id, partialUpdate, { isDesktop });

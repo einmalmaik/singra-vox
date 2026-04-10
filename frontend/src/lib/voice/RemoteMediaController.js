@@ -164,12 +164,32 @@ export const remoteMediaMethods = {
       this._applyParticipantAudio(participantUserId);
     };
 
+    const reapplyRemoteVideoState = (publication, participant, event = null) => {
+      if ((publication?.kind || publication?.track?.kind) !== Track.Kind.Video) {
+        return false;
+      }
+
+      this.logger.debug("video publication state changed", {
+        event: event || "track_video_state_changed",
+        participantIdentity: this._resolveParticipantIdentity(participant),
+        source: publication?.source || publication?.track?.source || null,
+        isMuted: Boolean(publication?.isMuted),
+        subscriptionStatus: publication?.subscriptionStatus || null,
+        streamState: publication?.track?.streamState || publication?.streamState || null,
+      });
+      this._syncParticipantStateFromLiveKit(participant);
+      this._emitRemoteMediaUpdate();
+      return true;
+    };
+
     this.room.on(RoomEvent.TrackMuted, (publication, participant) => {
       reapplyRemoteAudioState(publication, participant);
+      reapplyRemoteVideoState(publication, participant, "track_muted");
     });
 
     this.room.on(RoomEvent.TrackUnmuted, (publication, participant) => {
       reapplyRemoteAudioState(publication, participant);
+      reapplyRemoteVideoState(publication, participant, "track_unmuted");
     });
 
     this.room.on(RoomEvent.TrackSubscriptionStatusChanged, (publication, status, participant) => {
@@ -186,7 +206,7 @@ export const remoteMediaMethods = {
       }
     });
 
-    this.room.on(RoomEvent.TrackStreamStateChanged, (publication, _streamState, participant) => {
+    this.room.on(RoomEvent.TrackStreamStateChanged, (publication, streamState, participant) => {
       if ((publication?.kind || publication?.track?.kind) !== Track.Kind.Video) {
         return;
       }
@@ -195,7 +215,7 @@ export const remoteMediaMethods = {
         event: "track_stream_state_changed",
         participantIdentity: this._resolveParticipantIdentity(participant),
         source: publication?.source || publication?.track?.source || null,
-        streamState: publication?.streamState || null,
+        streamState: streamState || publication?.track?.streamState || publication?.streamState || null,
       });
       this._syncParticipantStateFromLiveKit(participant);
       this._emitRemoteMediaUpdate();

@@ -11,11 +11,18 @@ jest.mock("livekit-client", () => ({
   Room: jest.fn(),
   RoomEvent: {
     ParticipantConnected: "participantConnected",
+    TrackSubscribed: "trackSubscribed",
+    TrackUnsubscribed: "trackUnsubscribed",
+    TrackUnpublished: "trackUnpublished",
     TrackPublished: "trackPublished",
+    TrackMuted: "trackMuted",
+    TrackUnmuted: "trackUnmuted",
     ParticipantAttributesChanged: "participantAttributesChanged",
     TrackStreamStateChanged: "trackStreamStateChanged",
     TrackSubscriptionStatusChanged: "trackSubscriptionStatusChanged",
     Reconnected: "reconnected",
+    ActiveSpeakersChanged: "activeSpeakersChanged",
+    Disconnected: "disconnected",
   },
   Track: {
     Kind: { Audio: "audio", Video: "video" },
@@ -31,6 +38,7 @@ jest.mock("livekit-client", () => ({
     CLIENT_INITIATED: 1,
     DUPLICATE_IDENTITY: 2,
   },
+  isE2EESupported: jest.fn(() => true),
   createLocalScreenTracks: jest.fn(),
   createLocalVideoTrack: jest.fn(),
 }));
@@ -49,6 +57,14 @@ jest.mock("@/lib/voicePreferences", () => ({
     locallyMutedParticipants: {},
   }),
 }), { virtual: true });
+
+jest.mock("@/lib/e2ee/media", () => ({
+  createEncryptedMediaController: jest.fn(),
+}), { virtual: true });
+
+jest.mock("../e2ee/mediaSupport", () => ({
+  getEncryptedVoiceSupport: jest.fn(() => ({ supported: true, reason: null })),
+}));
 
 jest.mock("@/lib/asyncControl", () => jest.requireActual("../asyncControl"), { virtual: true });
 jest.mock("@/lib/videoTrackRefs", () => jest.requireActual("../videoTrackRefs"), { virtual: true });
@@ -72,12 +88,15 @@ jest.mock("@/lib/AudioAnalyzer", () => ({
 }), { virtual: true });
 
 import api from "@/lib/api";
+import { createEncryptedMediaController } from "@/lib/e2ee/media";
 import {
   getNativeScreenShareSession,
   startNativeScreenShare,
   stopNativeScreenShare,
   updateNativeScreenShareAudioVolume,
 } from "@/lib/desktop";
+import { createLocalScreenTracks, Room } from "livekit-client";
+import { getEncryptedVoiceSupport } from "../e2ee/mediaSupport";
 import { VoiceEngine } from "../voiceEngine";
 
 function createNativeShare() {
@@ -87,11 +106,17 @@ function createNativeShare() {
 }
 
 function createVideoPublication(track = null, extra = {}) {
+  const nextTrack = track ? {
+    ...track,
+    streamState: track.streamState ?? extra.streamState ?? "active",
+  } : null;
   return {
     kind: "video",
     source: "screen_share",
-    track,
-    subscriptionStatus: "desired",
+    track: nextTrack,
+    subscriptionStatus: "subscribed",
+    isSubscribed: Boolean(nextTrack),
+    isMuted: false,
     isDesired: true,
     setSubscribed: jest.fn(),
     ...extra,
@@ -111,11 +136,15 @@ describe("VoiceEngine native cleanup", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    getEncryptedVoiceSupport.mockReturnValue({ supported: true, reason: null });
     warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     warnSpy.mockRestore();
+    Room.mockReset();
+    createEncryptedMediaController.mockReset();
+    getEncryptedVoiceSupport.mockReset();
   });
 
   it("runs native cleanup only once for parallel disconnect calls", async () => {
@@ -145,6 +174,101 @@ describe("VoiceEngine native cleanup", () => {
     expect(stopNativeScreenShare).toHaveBeenCalledTimes(1);
     expect(engine.nativeScreenShare).toBeNull();
     expect(engine.screenShareTracks).toEqual([]);
+  });
+
+  it("enables encrypted voice for supported web clients when the server requires it", async () => {
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    });
+    Object.defineProperty(global, "Worker", {
+      configurable: true,
+      value: jest.fn(),
+    });
+    Object.defineProperty(window, "crypto", {
+      configurable: true,
+      value: { subtle: {} },
+    });
+
+    const connect = jest.fn().mockResolvedValue(undefined);
+    const startAudio = jest.fn().mockResolvedValue(undefined);
+    const setE2EEEnabled = jest.fn().mockResolvedValue(undefined);
+    const room = {
+      on: jest.fn(),
+      connect,
+      startAudio,
+      setE2EEEnabled,
+    };
+
+    Room.mockImplementation(() => room);
+    createEncryptedMediaController.mockResolvedValue({
+      encryption: { keyProvider: "provider", worker: "worker" },
+      syncParticipantSet: jest.fn(),
+    });
+    api.post.mockResolvedValue({
+      data: {
+        server_url: "wss://livekit.example.test",
+        participant_token: "participant-token",
+        e2ee_required: true,
+      },
+    });
+
+    const engine = new VoiceEngine();
+    engine.serverId = "server-1";
+    engine.channelId = "channel-1";
+    engine.userId = "user-1";
+    engine.runtimeConfig = { isDesktop: false, platform: "web" };
+    engine._collectCurrentVoiceParticipantUserIds = jest.fn(() => ["user-1", "user-2"]);
+    engine.syncEncryptedMediaParticipants = jest.fn().mockResolvedValue({
+      rotated: false,
+      keyVersion: "key-version",
+      participantUserIds: ["user-1", "user-2"],
+    });
+    engine._ensureAudioContext = jest.fn();
+    engine._publishLocalTrack = jest.fn();
+    engine._applyOutputDevice = jest.fn();
+    engine._applyRemoteAudioState = jest.fn();
+    engine._syncExistingRemoteVideoPublications = jest.fn();
+    engine._applyMuteState = jest.fn();
+    engine._rehydrateNativeScreenShareSession = jest.fn();
+
+    await engine.joinChannel();
+
+    expect(createEncryptedMediaController).toHaveBeenCalledWith(engine.runtimeConfig, "channel-1");
+    expect(Room).toHaveBeenCalledWith(expect.objectContaining({
+      encryption: { keyProvider: "provider", worker: "worker" },
+    }));
+    expect(connect).toHaveBeenCalledWith("wss://livekit.example.test", "participant-token");
+    expect(setE2EEEnabled).toHaveBeenCalledWith(true);
+    expect(engine.syncEncryptedMediaParticipants).toHaveBeenCalledWith(
+      ["user-1", "user-2"],
+      "join-initial",
+    );
+  });
+
+  it("rejects encrypted voice joins in unsupported browser contexts before connecting", async () => {
+    getEncryptedVoiceSupport.mockReturnValueOnce({
+      supported: false,
+      reason: "Encrypted voice in the browser requires a secure context (HTTPS or localhost).",
+    });
+
+    api.post.mockResolvedValue({
+      data: {
+        server_url: "wss://livekit.example.test",
+        participant_token: "participant-token",
+        e2ee_required: true,
+      },
+    });
+
+    const engine = new VoiceEngine();
+    engine.serverId = "server-1";
+    engine.channelId = "channel-1";
+    engine.runtimeConfig = { isDesktop: false, platform: "web" };
+
+    await expect(engine.joinChannel()).rejects.toThrow(
+      "Encrypted voice in the browser requires a secure context",
+    );
+    expect(Room).not.toHaveBeenCalled();
   });
 
   it("attaches a native proxy video track via owner_user_id for the local stage", () => {
@@ -248,7 +372,9 @@ describe("VoiceEngine native cleanup", () => {
     participant.trackPublications.get("pub-1").track = {
       kind: "video",
       source: "screen_share",
+      streamState: "active",
     };
+    participant.trackPublications.get("pub-1").isSubscribed = true;
 
     engine._emitRemoteMediaUpdate();
 
@@ -286,7 +412,9 @@ describe("VoiceEngine native cleanup", () => {
       kind: "video",
       source: "screen_share",
       id: "track-b",
+      streamState: "active",
     };
+    publication.isSubscribed = true;
     engine._emitRemoteMediaUpdate();
 
     expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -375,6 +503,48 @@ describe("VoiceEngine native cleanup", () => {
     }));
   });
 
+  it("syncs encrypted participants before browser screen-share publish", async () => {
+    const engine = new VoiceEngine();
+    const videoTrack = {
+      kind: "video",
+      source: "screen_share",
+      mediaStreamTrack: {
+        addEventListener: jest.fn(),
+        getSettings: jest.fn(() => ({ width: 1280, height: 720, frameRate: 30 })),
+        contentHint: "",
+      },
+    };
+    const publishTrack = jest.fn().mockResolvedValue({});
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map(),
+      localParticipant: { publishTrack },
+    };
+    engine.mediaE2EEController = { encryption: {} };
+    engine.syncEncryptedMediaParticipants = jest.fn().mockResolvedValue({
+      rotated: false,
+      keyVersion: "key-version",
+      participantUserIds: ["user-1"],
+    });
+
+    createLocalScreenTracks.mockResolvedValue([videoTrack]);
+
+    await engine.startScreenShare({
+      audio: false,
+      displaySurface: "monitor",
+      resolution: { width: 1280, height: 720, frameRate: 30 },
+      qualityPreset: "balanced",
+    });
+
+    expect(engine.syncEncryptedMediaParticipants).toHaveBeenCalledWith(
+      ["user-1"],
+      "browser-screen-share-start",
+    );
+    expect(createLocalScreenTracks).toHaveBeenCalled();
+    expect(publishTrack).toHaveBeenCalled();
+  });
+
   it("forwards native desktop audio volume updates to the desktop bridge", () => {
     const engine = new VoiceEngine();
 
@@ -408,6 +578,44 @@ describe("VoiceEngine native cleanup", () => {
     ]));
   });
 
+  it("refreshes remote video availability on track unmute without waiting for unrelated room events", () => {
+    const engine = new VoiceEngine();
+    const listeners = {};
+    const publication = createVideoPublication({
+      kind: "video",
+      source: "screen_share",
+      streamState: "active",
+    }, {
+      isMuted: true,
+    });
+    const participant = createRemoteParticipant("screen-share:channel:user-2", "user-2", publication);
+    const listener = jest.fn();
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+      on: jest.fn((event, handler) => {
+        listeners[event] = handler;
+      }),
+    };
+    engine.addStateListener(listener);
+
+    engine._bindRoomEvents();
+    publication.isMuted = false;
+    listeners.trackUnmuted?.(publication, participant);
+
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: "media_tracks_update",
+      trackRefs: expect.arrayContaining([
+        expect.objectContaining({
+          participantId: "user-2",
+          source: "screen_share",
+          isAvailable: true,
+        }),
+      ]),
+    }));
+  });
+
   it("does not expose transport-only fields in public video track refs", () => {
     const engine = new VoiceEngine();
     const publication = createVideoPublication({
@@ -438,6 +646,40 @@ describe("VoiceEngine native cleanup", () => {
     expect(trackRef).not.toHaveProperty("revision");
   });
 
+  it("keeps a subscribed video track attachable while adaptive stream is paused", () => {
+    const engine = new VoiceEngine();
+    const publication = createVideoPublication({
+      kind: "video",
+      source: "screen_share",
+      sid: "track-1",
+      attach: jest.fn(),
+      detach: jest.fn(),
+    }, {
+      sid: "pub-1",
+      trackSid: "pub-1",
+    });
+    const participant = createRemoteParticipant("screen-share:channel:user-2", "user-2", publication);
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
+
+    const firstTrackRef = engine.listVideoTrackRefs().find((candidate) => candidate.participantId === "user-2");
+    const secondTrackRef = engine.listVideoTrackRefs().find((candidate) => candidate.participantId === "user-2");
+
+    expect(secondTrackRef).toBe(firstTrackRef);
+
+    publication.track.streamState = "paused";
+
+    const thirdTrackRef = engine.listVideoTrackRefs().find((candidate) => candidate.participantId === "user-2");
+
+    expect(thirdTrackRef).toBe(firstTrackRef);
+    expect(thirdTrackRef).toEqual(expect.objectContaining({
+      isAvailable: true,
+    }));
+  });
+
   it("attaches a remote video publication without mutating video subscription state", () => {
     const engine = new VoiceEngine();
     const track = {
@@ -450,7 +692,10 @@ describe("VoiceEngine native cleanup", () => {
       kind: "video",
       source: "screen_share",
       track,
-      subscriptionStatus: "desired",
+      subscriptionStatus: "subscribed",
+      isSubscribed: true,
+      streamState: "active",
+      isMuted: false,
       isDesired: false,
       isEnabled: false,
       setSubscribed: jest.fn(),
@@ -480,13 +725,17 @@ describe("VoiceEngine native cleanup", () => {
     expect(publication.setEnabled).not.toHaveBeenCalled();
   });
 
-  it("requests playback subscription only for the actively viewed remote video track", () => {
+  it("requests playback subscription for the actively viewed remote video track when no video is attached yet", () => {
     const engine = new VoiceEngine();
     const publication = {
       kind: "video",
       source: "screen_share",
       track: null,
-      isDesired: false,
+      isDesired: true,
+      subscriptionStatus: "desired",
+      isSubscribed: false,
+      streamState: "paused",
+      isMuted: false,
       setSubscribed: jest.fn(),
     };
     const participant = {
@@ -507,6 +756,43 @@ describe("VoiceEngine native cleanup", () => {
     expect(publication.setSubscribed).toHaveBeenCalledWith(true);
   });
 
+  it("does not resubscribe an already attached remote video track just because adaptive stream is paused", () => {
+    const engine = new VoiceEngine();
+    const track = {
+      kind: "video",
+      source: "screen_share",
+      attach: jest.fn(),
+      detach: jest.fn(),
+      streamState: "paused",
+    };
+    const publication = {
+      kind: "video",
+      source: "screen_share",
+      track,
+      isDesired: true,
+      subscriptionStatus: "subscribed",
+      isSubscribed: true,
+      isMuted: false,
+      setSubscribed: jest.fn(),
+    };
+    const participant = {
+      identity: "screen-share:channel:user-2",
+      attributes: { owner_user_id: "user-2" },
+      trackPublications: new Map([["pub-1", publication]]),
+    };
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
+
+    const trackRefId = engine.getVideoTrackRefId("user-2", "screen_share");
+    const result = engine.ensureTrackRefPlayback(trackRefId);
+
+    expect(result).toBe(true);
+    expect(publication.setSubscribed).not.toHaveBeenCalled();
+  });
+
   it("prefers the current room publication over a cached stale video publication", () => {
     const engine = new VoiceEngine();
     const stalePublication = {
@@ -514,6 +800,9 @@ describe("VoiceEngine native cleanup", () => {
       source: "screen_share",
       track: null,
       subscriptionStatus: "desired",
+      isSubscribed: false,
+      streamState: "paused",
+      isMuted: false,
       isDesired: false,
       isEnabled: false,
       setSubscribed: jest.fn(),
@@ -529,7 +818,10 @@ describe("VoiceEngine native cleanup", () => {
         attach: jest.fn(),
         detach: jest.fn(),
       },
-      subscriptionStatus: "desired",
+      subscriptionStatus: "subscribed",
+      isSubscribed: true,
+      streamState: "active",
+      isMuted: false,
       isDesired: false,
       isEnabled: false,
       setSubscribed: jest.fn(),
@@ -619,7 +911,10 @@ describe("VoiceEngine native cleanup", () => {
       kind: "video",
       source: "screen_share",
       track,
-      subscriptionStatus: "desired",
+      subscriptionStatus: "subscribed",
+      isSubscribed: true,
+      streamState: "active",
+      isMuted: false,
       isDesired: true,
       isEnabled: true,
       setSubscribed: jest.fn(),

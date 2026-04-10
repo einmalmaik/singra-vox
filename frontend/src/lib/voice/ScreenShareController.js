@@ -82,6 +82,13 @@ export const screenShareMethods = {
       await this._ensureAudioContext();
     }
 
+    if (this.mediaE2EEController) {
+      await this.syncEncryptedMediaParticipants(
+        this._collectCurrentVoiceParticipantUserIds(),
+        "browser-screen-share-start",
+      );
+    }
+
     this.screenShareTracks = await createLocalScreenTracks({
       audio: Boolean(audio),
       video: { displaySurface },

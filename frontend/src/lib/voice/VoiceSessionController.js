@@ -11,6 +11,7 @@
 import api from "@/lib/api";
 import { DisconnectReason, Room } from "livekit-client";
 import { getDefaultVoicePreferences } from "@/lib/voicePreferences";
+import { getEncryptedVoiceSupport } from "../e2ee/mediaSupport";
 
 export const voiceSessionMethods = {
   addStateListener(listener) {
@@ -123,7 +124,12 @@ export const voiceSessionMethods = {
     }
 
     let encryptionOptions;
-    if (tokenResponse.data.e2ee_required && this.runtimeConfig?.isDesktop) {
+    if (tokenResponse.data.e2ee_required) {
+      const voiceE2EESupport = getEncryptedVoiceSupport(this.runtimeConfig);
+      if (!voiceE2EESupport.supported) {
+        throw new Error(voiceE2EESupport.reason);
+      }
+
       const { createEncryptedMediaController } = await import("@/lib/e2ee/media");
       this.mediaE2EEController = await createEncryptedMediaController(this.runtimeConfig, this.channelId);
       encryptionOptions = this.mediaE2EEController.encryption;
@@ -156,6 +162,19 @@ export const voiceSessionMethods = {
       if (tokenResponse.data.e2ee_required && typeof this.room.setE2EEEnabled === "function") {
         await this.room.setE2EEEnabled(true);
       }
+    });
+
+    await safeRun("e2ee participant sync", "join_e2ee_participants", async () => {
+      if (!tokenResponse.data.e2ee_required || !this.mediaE2EEController) {
+        return;
+      }
+
+      const participantUserIds = this._collectCurrentVoiceParticipantUserIds?.() || [this.userId];
+      if (!participantUserIds.includes(this.userId)) {
+        participantUserIds.push(this.userId);
+      }
+
+      await this.syncEncryptedMediaParticipants(participantUserIds, "join-initial");
     });
 
     await safeRun("room audio start", "join_start_audio", async () => {
@@ -195,6 +214,7 @@ export const voiceSessionMethods = {
   },
 
   _clearRemoteMediaState() {
+    this._clearTrackRefPlaybackRecovery?.();
     this.audioElements.forEach(({ element }) => {
       try {
         element.pause?.();
@@ -205,6 +225,8 @@ export const voiceSessionMethods = {
     });
     this.audioElements.clear();
     this.screenShareProxyMap.clear();
+    this.videoTrackRefsById.clear();
+    this.videoTrackRefProjectionSignaturesById.clear();
     this._resetSpeakingState();
     this._emitRemoteMediaUpdate();
   },
@@ -226,6 +248,7 @@ export const voiceSessionMethods = {
   },
 
   forceCleanupForUnload(stopReason = "window_unload", { disconnectRoom = true } = {}) {
+    this._clearTrackRefPlaybackRecovery?.();
     const hadScreenShare = Boolean(this.nativeScreenShare) || this.screenShareTracks.length > 0;
     const hadCamera = Boolean(this.cameraTrack);
     const activeShare = this.nativeScreenShare;

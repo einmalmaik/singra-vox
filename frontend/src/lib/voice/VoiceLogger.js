@@ -9,6 +9,7 @@
  */
 
 import { sendDesktopVoiceLog } from "@/lib/desktop";
+import { recordVoiceDebugEvent } from "./voiceDebug";
 
 function buildPayload(getContext, fields = {}, error = null) {
   const baseContext = typeof getContext === "function" ? (getContext() || {}) : {};
@@ -27,6 +28,7 @@ function buildPayload(getContext, fields = {}, error = null) {
 function emit(method, message, payload) {
   const consoleMethod = console?.[method] || console.log;
   consoleMethod(`[VoiceEngine] ${message}`, payload);
+  recordVoiceDebugEvent(method, message, payload);
   void sendDesktopVoiceLog(method, message, payload);
 }
 

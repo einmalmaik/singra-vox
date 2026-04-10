@@ -7,7 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MonitorPlay, VideoCamera } from "@phosphor-icons/react";
 import {
@@ -20,12 +20,30 @@ import {
 import { useRuntime } from "@/contexts/RuntimeContext";
 import { observeVideoReadiness } from "@/lib/videoReadiness";
 
-const MAX_RETRIES = 8;
 const RETRY_INTERVAL_MS = 500;
-const FRAME_READY_GRACE_MS = 1_500;
+const PLAYBACK_RECOVERY_RETRY_MS = 250;
+const FRAME_READY_GRACE_MS = 2_000;
 const VIEW_STATE_LOADING = "loading";
 const VIEW_STATE_READY = "ready";
 const VIEW_STATE_UNAVAILABLE = "unavailable";
+
+function getPlaybackRecoveryPolicy(isDesktopRuntime) {
+  if (isDesktopRuntime) {
+    return {
+      maxAttachRetries: 8,
+      maxPlaybackRecoveryAttempts: 1,
+      pendingPlaybackRecoveryAfterAttempts: 4,
+      pendingPlaybackRecoveryRepeatEveryAttempts: null,
+    };
+  }
+
+  return {
+    maxAttachRetries: 12,
+    maxPlaybackRecoveryAttempts: 3,
+    pendingPlaybackRecoveryAfterAttempts: 4,
+    pendingPlaybackRecoveryRepeatEveryAttempts: 2,
+  };
+}
 
 /**
  * The stage renders exactly one selected LiveKit-backed track ref.
@@ -48,6 +66,10 @@ export default function VoiceMediaStage({
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
+  const playbackRecoveryPolicy = useMemo(
+    () => getPlaybackRecoveryPolicy(Boolean(config?.isDesktop)),
+    [config?.isDesktop],
+  );
   const videoRef = useRef(null);
   const stageSurfaceRef = useRef(null);
   const [videoElement, setVideoElement] = useState(null);
@@ -134,6 +156,28 @@ export default function VoiceMediaStage({
     let cancelled = false;
     let frameReady = false;
     let attachAttempts = 0;
+    let playbackRecoveryAttempts = 0;
+
+    const requestPlaybackRecovery = (event) => {
+      if (playbackRecoveryAttempts >= playbackRecoveryPolicy.maxPlaybackRecoveryAttempts) {
+        return false;
+      }
+
+      const didRecoverPlayback = engine.recoverTrackRefPlayback?.(trackRefId);
+      if (!didRecoverPlayback) {
+        return false;
+      }
+
+      playbackRecoveryAttempts += 1;
+      engine.logger?.debug?.("stage requested playback recovery", {
+        event,
+        trackRefId,
+        source,
+        attachAttempts,
+        playbackRecoveryAttempts,
+      });
+      return true;
+    };
 
     const cleanupAttachment = () => {
       stopReadinessObserver?.();
@@ -158,14 +202,14 @@ export default function VoiceMediaStage({
       });
     };
 
-    const scheduleRetry = () => {
+    const scheduleRetry = (delayMs = RETRY_INTERVAL_MS) => {
       cleanupAttachment();
-      if (attachAttempts >= MAX_RETRIES) {
+      if (attachAttempts >= playbackRecoveryPolicy.maxAttachRetries) {
         setUnavailable();
         return;
       }
       attachAttempts += 1;
-      retryTimer = setTimeout(tryAttach, RETRY_INTERVAL_MS);
+      retryTimer = setTimeout(tryAttach, delayMs);
     };
 
     const tryAttach = () => {
@@ -189,13 +233,28 @@ export default function VoiceMediaStage({
 
       detachFn = engine.attachTrackRefElement(trackRefId, videoElement);
       if (!detachFn) {
+        const shouldAttemptPendingRecovery = attachAttempts >= playbackRecoveryPolicy.pendingPlaybackRecoveryAfterAttempts
+          && (
+            attachAttempts === playbackRecoveryPolicy.pendingPlaybackRecoveryAfterAttempts
+            || (
+              playbackRecoveryPolicy.pendingPlaybackRecoveryRepeatEveryAttempts
+              && (
+                (attachAttempts - playbackRecoveryPolicy.pendingPlaybackRecoveryAfterAttempts)
+                % playbackRecoveryPolicy.pendingPlaybackRecoveryRepeatEveryAttempts
+              ) === 0
+            )
+          );
+        const didRecoverPlayback = shouldAttemptPendingRecovery
+          && requestPlaybackRecovery("stage_playback_recovery_pending");
         engine.logger?.debug?.("stage attach pending", {
           event: "stage_attach_pending",
           trackRefId,
           source,
           attachAttempts,
+          playbackRecoveryAttempts,
+          didRecoverPlayback: Boolean(didRecoverPlayback),
         });
-        scheduleRetry();
+        scheduleRetry(didRecoverPlayback ? PLAYBACK_RECOVERY_RETRY_MS : RETRY_INTERVAL_MS);
         return;
       }
 
@@ -221,13 +280,18 @@ export default function VoiceMediaStage({
         if (cancelled || frameReady) {
           return;
         }
+
+        const didRecoverPlayback = requestPlaybackRecovery("stage_playback_recovery_frame");
+
         engine.logger?.debug?.("stage attach retry after missing frame", {
           event: "stage_attach_retry",
           trackRefId,
           source,
           attachAttempts,
+          playbackRecoveryAttempts,
+          didRecoverPlayback: Boolean(didRecoverPlayback),
         });
-        scheduleRetry();
+        scheduleRetry(didRecoverPlayback ? PLAYBACK_RECOVERY_RETRY_MS : RETRY_INTERVAL_MS);
       }, FRAME_READY_GRACE_MS);
     };
 
@@ -242,7 +306,7 @@ export default function VoiceMediaStage({
       videoElement?.pause?.();
       cleanupAttachment();
     };
-  }, [documentHidden, open, source, trackAvailabilityKey, trackRefId, videoElement, voiceEngineRef]);
+  }, [documentHidden, open, playbackRecoveryPolicy, source, trackAvailabilityKey, trackRefId, videoElement, voiceEngineRef]);
 
   const isScreenShare = source === "screen_share";
   const title = isScreenShare

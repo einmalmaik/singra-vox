@@ -10,6 +10,8 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 
+let mockRuntimeConfig = { isDesktop: false };
+
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key, options = {}) => options.defaultValue || key,
@@ -18,7 +20,7 @@ jest.mock("react-i18next", () => ({
 
 jest.mock("@/contexts/RuntimeContext", () => ({
   useRuntime: () => ({
-    config: { isDesktop: false },
+    config: mockRuntimeConfig,
   }),
 }), { virtual: true });
 
@@ -45,6 +47,7 @@ describe("VoiceMediaStage", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRuntimeConfig = { isDesktop: false };
     jest.spyOn(window.HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
     jest.spyOn(window.HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     container = document.createElement("div");
@@ -98,6 +101,7 @@ describe("VoiceMediaStage", () => {
 
   it("marks the stage as unavailable after bounded attach retries", async () => {
     jest.useFakeTimers();
+    mockRuntimeConfig = { isDesktop: true };
     const attachTrackRefElement = jest.fn(() => null);
     const ensureTrackRefPlayback = jest.fn(() => false);
     const logger = { debug: jest.fn(), warn: jest.fn() };
@@ -130,6 +134,158 @@ describe("VoiceMediaStage", () => {
         trackRefId: "remote:user-2:screen_share",
       }),
     );
+  });
+
+  it("requests a playback recovery wakeup before retrying an attached-but-stalled stream", async () => {
+    jest.useFakeTimers();
+    const detach = jest.fn();
+    const attachTrackRefElement = jest.fn(() => detach);
+    const ensureTrackRefPlayback = jest.fn(() => true);
+    const recoverTrackRefPlayback = jest.fn(() => true);
+    const logger = { debug: jest.fn(), warn: jest.fn() };
+
+    observeVideoReadiness.mockImplementation(() => jest.fn());
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={{
+            current: {
+              attachTrackRefElement,
+              ensureTrackRefPlayback,
+              recoverTrackRefPlayback,
+              logger,
+            },
+          }}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(2_260);
+    });
+
+    expect(recoverTrackRefPlayback).toHaveBeenCalledWith("remote:user-2:screen_share");
+    expect(attachTrackRefElement).toHaveBeenCalledTimes(2);
+  });
+
+  it("requests a playback recovery wakeup when the track never becomes attachable on its own", async () => {
+    jest.useFakeTimers();
+    const attachTrackRefElement = jest.fn(() => null);
+    const ensureTrackRefPlayback = jest.fn(() => false);
+    const recoverTrackRefPlayback = jest.fn(() => true);
+    const logger = { debug: jest.fn(), warn: jest.fn() };
+
+    observeVideoReadiness.mockImplementation(() => jest.fn());
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={{
+            current: {
+              attachTrackRefElement,
+              ensureTrackRefPlayback,
+              recoverTrackRefPlayback,
+              logger,
+            },
+          }}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable={false}
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(2_100);
+    });
+
+    expect(recoverTrackRefPlayback).toHaveBeenCalledWith("remote:user-2:screen_share");
+    expect(attachTrackRefElement).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps issuing bounded pending recoveries in web mode while the stream stays stuck", async () => {
+    jest.useFakeTimers();
+    const attachTrackRefElement = jest.fn(() => null);
+    const ensureTrackRefPlayback = jest.fn(() => false);
+    const recoverTrackRefPlayback = jest.fn(() => true);
+    const logger = { debug: jest.fn(), warn: jest.fn() };
+
+    observeVideoReadiness.mockImplementation(() => jest.fn());
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={{
+            current: {
+              attachTrackRefElement,
+              ensureTrackRefPlayback,
+              recoverTrackRefPlayback,
+              logger,
+            },
+          }}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable={false}
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(3_600);
+    });
+
+    expect(recoverTrackRefPlayback).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps the desktop recovery policy unchanged", async () => {
+    jest.useFakeTimers();
+    mockRuntimeConfig = { isDesktop: true };
+    const attachTrackRefElement = jest.fn(() => null);
+    const ensureTrackRefPlayback = jest.fn(() => false);
+    const recoverTrackRefPlayback = jest.fn(() => true);
+    const logger = { debug: jest.fn(), warn: jest.fn() };
+
+    observeVideoReadiness.mockImplementation(() => jest.fn());
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={{
+            current: {
+              attachTrackRefElement,
+              ensureTrackRefPlayback,
+              recoverTrackRefPlayback,
+              logger,
+            },
+          }}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable={false}
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    await act(async () => {
+      jest.advanceTimersByTime(4_500);
+    });
+
+    expect(recoverTrackRefPlayback).toHaveBeenCalledTimes(1);
   });
 
   it("does not restart the attach effect when only the projected track object would have changed", async () => {

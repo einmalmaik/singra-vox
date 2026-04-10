@@ -14,9 +14,48 @@ import {
   buildRemoteMediaParticipantsFromTrackRefs,
   buildVideoTrackRefId,
   findVideoTrackRef,
-  indexVideoTrackRefs,
   sortVideoTrackRefs,
 } from "@/lib/videoTrackRefs";
+
+const ACTIVE_STREAM_STATE = "active";
+const PLAYBACK_RECOVERY_DELAY_MS = 150;
+
+function resolvePublicationId(publication) {
+  return publication?.trackSid || publication?.sid || null;
+}
+
+function resolveTrackId(track) {
+  return track?.sid || track?.mediaStreamTrack?.id || null;
+}
+
+function resolvePublicationStreamState(publication, track = publication?.track || null) {
+  if (track?.streamState != null) {
+    return track.streamState;
+  }
+  if (publication?.streamState != null) {
+    return publication.streamState;
+  }
+  return track ? ACTIVE_STREAM_STATE : null;
+}
+
+function buildTrackRefProjectionSignature(trackRef, { publication = null, track = null } = {}) {
+  return JSON.stringify({
+    id: trackRef.id,
+    participantId: trackRef.participantId || null,
+    participantIdentity: trackRef.participantIdentity || null,
+    source: trackRef.source || null,
+    isAvailable: Boolean(trackRef.isAvailable),
+    hasAudio: Boolean(trackRef.hasAudio),
+    isLocal: Boolean(trackRef.isLocal),
+    provider: trackRef.provider || null,
+    sourceKind: trackRef.sourceKind || null,
+    sourceLabel: trackRef.sourceLabel || null,
+    publicationId: resolvePublicationId(publication),
+    trackId: resolveTrackId(track),
+    subscriptionStatus: publication?.subscriptionStatus || null,
+    isMuted: Boolean(publication?.isMuted),
+  });
+}
 
 export const remoteVideoMethods = {
   _getLocalVideoTrack(source) {
@@ -75,6 +114,59 @@ export const remoteVideoMethods = {
     );
   },
 
+  _isPublicationSubscribed(publication) {
+    if (!publication) {
+      return false;
+    }
+    if (typeof publication.isSubscribed === "boolean") {
+      return publication.isSubscribed;
+    }
+    return publication.subscriptionStatus === "subscribed";
+  },
+
+  _isRemoteVideoPublicationAvailable(publication) {
+    // In the JS SDK, adaptive stream may keep a subscribed video track in a
+    // paused streamState until it is attached to a visible HTMLVideoElement.
+    // Treating paused as unavailable creates a browser-only deadlock where the
+    // stage never calls track.attach(), so the stream never resumes.
+    return Boolean(
+      publication?.track
+      && this._isPublicationSubscribed(publication)
+      && !publication?.isMuted
+    );
+  },
+
+  _buildVideoTrackRefEntry(trackRef, { publication = null, track = null } = {}) {
+    return {
+      trackRef,
+      signature: buildTrackRefProjectionSignature(trackRef, { publication, track }),
+    };
+  },
+
+  _coalesceStableVideoTrackRefs(trackRefEntries, { commit = false } = {}) {
+    const previousTrackRefsById = this.videoTrackRefsById || new Map();
+    const previousSignaturesById = this.videoTrackRefProjectionSignaturesById || new Map();
+    const nextTrackRefsById = new Map();
+    const nextSignaturesById = new Map();
+
+    trackRefEntries.forEach(({ trackRef, signature }) => {
+      const previousTrackRef = previousTrackRefsById.get(trackRef.id) || null;
+      const stableTrackRef = previousTrackRef && previousSignaturesById.get(trackRef.id) === signature
+        ? previousTrackRef
+        : trackRef;
+
+      nextTrackRefsById.set(trackRef.id, stableTrackRef);
+      nextSignaturesById.set(trackRef.id, signature);
+    });
+
+    if (commit) {
+      this.videoTrackRefsById = nextTrackRefsById;
+      this.videoTrackRefProjectionSignaturesById = nextSignaturesById;
+    }
+
+    return sortVideoTrackRefs(Array.from(nextTrackRefsById.values()));
+  },
+
   _syncRemoteVideoPublication(participant, publication) {
     if (!participant || !publication) {
       return null;
@@ -126,7 +218,7 @@ export const remoteVideoMethods = {
     return didTouch;
   },
 
-  _buildVideoTrackRefs() {
+  _buildVideoTrackRefEntries() {
     // Track refs are a UI projection only. They intentionally describe which
     // stream slot exists and whether it is currently attachable, but they do
     // not cache LiveKit transport objects.
@@ -142,10 +234,13 @@ export const remoteVideoMethods = {
     const localScreenShareTrack = this._getLocalVideoTrack(Track.Source.ScreenShare)
       || nativeScreenShareProxyTrack
       || null;
+    const localScreenShareAvailable = this.screenShareTracks.some((track) => track.kind === Track.Kind.Video)
+      ? Boolean(localScreenShareTrack)
+      : this._isRemoteVideoPublicationAvailable(nativeScreenShareProxyState.publication);
     const localTrackRefs = [];
 
     if (localCameraTrack) {
-      localTrackRefs.push({
+      localTrackRefs.push(this._buildVideoTrackRefEntry({
         id: buildVideoTrackRefId({
           participantId: this.userId,
           source: Track.Source.Camera,
@@ -158,11 +253,13 @@ export const remoteVideoMethods = {
         hasAudio: false,
         isLocal: true,
         provider: "livekit-local",
-      });
+      }, {
+        track: localCameraTrack,
+      }));
     }
 
     if (this.nativeScreenShare || this.screenShareTracks.some((track) => track.kind === Track.Kind.Video)) {
-      localTrackRefs.push({
+      localTrackRefs.push(this._buildVideoTrackRefEntry({
         id: buildVideoTrackRefId({
           participantId: this.userId,
           source: Track.Source.ScreenShare,
@@ -171,14 +268,17 @@ export const remoteVideoMethods = {
         participantId: this.userId,
         participantIdentity: this.nativeScreenShare?.participantIdentity || this.userId,
         source: Track.Source.ScreenShare,
-        isAvailable: Boolean(localScreenShareTrack),
+        isAvailable: localScreenShareAvailable,
         hasAudio: Boolean(this.nativeScreenShare?.hasAudio)
           || this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
         isLocal: true,
         provider: this.nativeScreenShare?.provider || "livekit-local",
         sourceKind: this.nativeScreenShare?.sourceKind || null,
         sourceLabel: this.nativeScreenShare?.sourceLabel || null,
-      });
+      }, {
+        publication: nativeScreenShareProxyState.publication,
+        track: localScreenShareTrack,
+      }));
     }
 
     const remoteTrackRefs = [];
@@ -197,7 +297,7 @@ export const remoteVideoMethods = {
         }
 
         const track = publication.track || null;
-        remoteTrackRefs.push({
+        remoteTrackRefs.push(this._buildVideoTrackRefEntry({
           id: buildVideoTrackRefId({
             participantId: participantEntry.userId,
             source,
@@ -206,7 +306,7 @@ export const remoteVideoMethods = {
           participantId: participantEntry.userId,
           participantIdentity,
           source,
-          isAvailable: Boolean(track),
+          isAvailable: this._isRemoteVideoPublicationAvailable(publication),
           hasAudio: source === Track.Source.ScreenShare
             ? remoteScreenShareAudioParticipantIds.has(participantEntry.userId)
             : false,
@@ -214,19 +314,28 @@ export const remoteVideoMethods = {
           provider: participantIdentity?.startsWith("screen-share:")
             ? "tauri-native-livekit"
             : "livekit-remote",
-        });
+        }, {
+          publication,
+          track,
+        }));
       });
     });
 
-    return sortVideoTrackRefs([
+    return [
       ...localTrackRefs,
       ...remoteTrackRefs,
-    ]);
+    ];
+  },
+
+  _buildVideoTrackRefs() {
+    return this._coalesceStableVideoTrackRefs(this._buildVideoTrackRefEntries());
   },
 
   _syncVideoTrackRefs() {
-    const trackRefs = this._buildVideoTrackRefs();
-    this.videoTrackRefsById = indexVideoTrackRefs(trackRefs);
+    const trackRefs = this._coalesceStableVideoTrackRefs(
+      this._buildVideoTrackRefEntries(),
+      { commit: true },
+    );
     return trackRefs;
   },
 
@@ -348,22 +457,111 @@ export const remoteVideoMethods = {
     };
   },
 
+  _isTrackBindingAttachable(binding) {
+    if (!binding?.track) {
+      return false;
+    }
+    if (!binding.publication) {
+      return true;
+    }
+    return this._isRemoteVideoPublicationAvailable(binding.publication);
+  },
+
+  _clearTrackRefPlaybackRecovery(trackRefId = null) {
+    if (!this.trackRefPlaybackRecoveryTimers?.size) {
+      return;
+    }
+
+    if (trackRefId) {
+      const timer = this.trackRefPlaybackRecoveryTimers.get(trackRefId);
+      if (timer) {
+        clearTimeout(timer);
+        this.trackRefPlaybackRecoveryTimers.delete(trackRefId);
+      }
+      return;
+    }
+
+    this.trackRefPlaybackRecoveryTimers.forEach((timer) => clearTimeout(timer));
+    this.trackRefPlaybackRecoveryTimers.clear();
+  },
+
   ensureTrackRefPlayback(trackRefId) {
     const binding = this._resolveTrackBinding(trackRefId);
     const publication = binding?.publication || null;
 
-    if (publication && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
+    if (
+      publication
+      && typeof publication.setSubscribed === "function"
+      && (
+        !binding?.track
+        || !this._isPublicationSubscribed(publication)
+      )
+    ) {
       this.logger.debug("track playback intent requested", {
         event: "track_playback_intent",
         trackRefId,
         participantId: binding?.trackRef?.participantId || null,
         source: binding?.trackRef?.source || null,
+        subscriptionStatus: publication.subscriptionStatus || null,
+        isSubscribed: this._isPublicationSubscribed(publication),
+        streamState: resolvePublicationStreamState(publication),
+        isMuted: Boolean(publication.isMuted),
+        hasTrack: Boolean(binding?.track),
       });
       publication.setSubscribed(true);
-      return true;
     }
 
-    return Boolean(binding?.track);
+    return this._isTrackBindingAttachable(binding);
+  },
+
+  recoverTrackRefPlayback(trackRefId) {
+    const binding = this._resolveTrackBinding(trackRefId);
+    const publication = binding?.publication || null;
+    if (!publication || typeof publication.setSubscribed !== "function") {
+      return false;
+    }
+
+    this._clearTrackRefPlaybackRecovery(trackRefId);
+    this.logger.debug("track playback recovery requested", {
+      event: "track_playback_recovery",
+      trackRefId,
+      participantId: binding?.trackRef?.participantId || null,
+      source: binding?.trackRef?.source || null,
+      subscriptionStatus: publication.subscriptionStatus || null,
+      streamState: resolvePublicationStreamState(publication),
+      isMuted: Boolean(publication.isMuted),
+      hasTrack: Boolean(binding?.track),
+    });
+
+    try {
+      if (publication.isDesired === false || publication.subscriptionStatus === "unsubscribed") {
+        publication.setSubscribed(true);
+        return true;
+      }
+
+      publication.setSubscribed(false);
+      const recoveryTimer = setTimeout(() => {
+        this.trackRefPlaybackRecoveryTimers.delete(trackRefId);
+        try {
+          const latestPublication = this._resolveTrackBinding(trackRefId)?.publication || publication;
+          latestPublication?.setSubscribed?.(true);
+        } catch (error) {
+          this.logger.warn("track playback recovery resubscribe failed", {
+            event: "track_playback_recovery_resubscribe",
+            trackRefId,
+          }, error);
+        }
+      }, PLAYBACK_RECOVERY_DELAY_MS);
+
+      this.trackRefPlaybackRecoveryTimers.set(trackRefId, recoveryTimer);
+      return true;
+    } catch (error) {
+      this.logger.warn("track playback recovery failed", {
+        event: "track_playback_recovery_failed",
+        trackRefId,
+      }, error);
+      return false;
+    }
   },
 
   attachTrackRefElement(trackRefId, element) {
@@ -378,12 +576,17 @@ export const remoteVideoMethods = {
     const binding = this._resolveTrackBinding(trackRefId);
     const trackRef = binding?.trackRef || null;
     const track = binding?.track || null;
-    if (!track) {
+    if (!this._isTrackBindingAttachable(binding)) {
       this.logger.debug("track attach deferred because no track is available yet", {
         event: "track_attach_pending",
         trackRefId,
         participantId: trackRef?.participantId || null,
         source: trackRef?.source || null,
+        hasTrack: Boolean(track),
+        subscriptionStatus: binding?.publication?.subscriptionStatus || null,
+        isSubscribed: this._isPublicationSubscribed(binding?.publication),
+        streamState: resolvePublicationStreamState(binding?.publication, track),
+        isMuted: Boolean(binding?.publication?.isMuted),
       });
       return null;
     }
