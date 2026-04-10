@@ -44,14 +44,22 @@ publication, subscription, and track state.
 
 ## Viewer lifecycle
 
-- Remote and proxy-backed video is projected from LiveKit publications.
-- `videoTrackRefs` is only a UI-friendly projection. It is not a second media
-  engine.
+- Remote and proxy-backed video is projected directly from the current
+  LiveKit publications and tracks.
+- `videoTrackRefs` is only a UI-friendly projection. It does not cache
+  publications, tracks, subscription status, stream state, or revisions.
 - `VoiceMediaStage` attaches exactly one selected track ref.
-- Closing the stage only detaches the element. It does not manually disable a
-  LiveKit publication.
-- The stage keeps a small retry window for one specific case: a publication is
-  attachable, but Chromium has not produced the first renderable frame yet.
+- Closing the stage only detaches the element. It does not manually disable or
+  resubscribe a video publication.
+- The stage keeps one small retry window for one specific case: a publication
+  is attachable, but Chromium has not produced the first renderable frame yet.
+
+Video subscription rules:
+
+- Video relies on `autoSubscribe: true` from the LiveKit room options.
+- The frontend does not manually call `setSubscribed(true)` for video tracks.
+- Audio is the only explicit exception: local mute/deafen can still force
+  remote audio publications on or off.
 
 ## Native desktop path
 
@@ -86,11 +94,10 @@ Current platform status:
 
 ## Important debugging signal
 
-The most important viewer failure mode we have seen is stale UI track state:
-the LiveKit publication already has a renderable track, but the cached track ref
-still says `pending`. The attach path now refreshes the projected track refs
-from the current room publications before binding the stage element. That avoids
-the old behavior where an unrelated stream event could "wake up" another stream.
+The most important viewer failure mode we have seen is stale UI state layered
+on top of real LiveKit state. The current design avoids that by keeping
+publication and track ownership inside LiveKit and exposing only a small
+availability projection to the UI.
 
 ## Manual verification
 

@@ -41,7 +41,6 @@ export const screenShareMethods = {
     } catch (error) {
       this.logger.warn("native screen share stop failed", { event: "native_screen_share_stop" }, error);
     } finally {
-      this._clearNativeScreenShareSync?.();
       activeShare?.keySubscriptionCleanup?.();
       this.nativeScreenShare = null;
       this._emitScreenShareDisabled(stopReason, previousCaptureMode);
@@ -141,7 +140,6 @@ export const screenShareMethods = {
 
     const hasAudio = Boolean(screenShareAudioTrackRaw);
     this._emitRemoteMediaUpdate();
-    this._scheduleNativeScreenShareSync?.("native_start");
     this._emit("screen_share_change", {
       enabled: true,
       provider: "browser",
@@ -259,7 +257,6 @@ export const screenShareMethods = {
     };
 
     this._emitRemoteMediaUpdate();
-    this._scheduleNativeScreenShareSync?.("native_rehydrate");
     this._emit("screen_share_change", {
       enabled: true,
       provider: activeSession.provider || "tauri-native-livekit",

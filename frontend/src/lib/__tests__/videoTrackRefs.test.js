@@ -19,8 +19,6 @@ jest.mock("livekit-client", () => ({
 }));
 
 import {
-  VIDEO_TRACK_STATE_PENDING,
-  VIDEO_TRACK_STATE_READY,
   buildLocalMediaStateFromTrackRefs,
   buildRemoteMediaParticipantsFromTrackRefs,
   findVideoTrackRef,
@@ -33,8 +31,7 @@ describe("videoTrackRefs", () => {
         id: "local:user-1:camera",
         participantId: "user-1",
         source: "camera",
-        state: VIDEO_TRACK_STATE_READY,
-        revision: 1,
+        isAvailable: true,
         isLocal: true,
         hasAudio: false,
       },
@@ -42,8 +39,7 @@ describe("videoTrackRefs", () => {
         id: "local:user-1:screen_share",
         participantId: "user-1",
         source: "screen_share",
-        state: VIDEO_TRACK_STATE_PENDING,
-        revision: 0,
+        isAvailable: false,
         isLocal: true,
         hasAudio: true,
       },
@@ -51,11 +47,7 @@ describe("videoTrackRefs", () => {
 
     expect(localMediaState).toEqual({
       hasCamera: true,
-      hasCameraTrack: true,
-      cameraTrackRevision: 1,
       hasScreenShare: true,
-      hasScreenShareTrack: false,
-      screenShareTrackRevision: 0,
       hasScreenShareAudio: true,
     });
   });
@@ -66,8 +58,7 @@ describe("videoTrackRefs", () => {
         id: "remote:user-2:screen_share",
         participantId: "user-2",
         source: "screen_share",
-        state: VIDEO_TRACK_STATE_READY,
-        revision: 2,
+        isAvailable: true,
         isLocal: false,
         hasAudio: true,
       },
@@ -75,8 +66,7 @@ describe("videoTrackRefs", () => {
         id: "remote:user-3:camera",
         participantId: "user-3",
         source: "camera",
-        state: VIDEO_TRACK_STATE_READY,
-        revision: 1,
+        isAvailable: true,
         isLocal: false,
         hasAudio: false,
       },
@@ -88,16 +78,12 @@ describe("videoTrackRefs", () => {
         hasCamera: false,
         hasScreenShare: true,
         hasScreenShareAudio: true,
-        cameraTrackRevision: 0,
-        screenShareTrackRevision: 2,
       },
       {
         userId: "user-3",
         hasCamera: true,
         hasScreenShare: false,
         hasScreenShareAudio: false,
-        cameraTrackRevision: 1,
-        screenShareTrackRevision: 0,
       },
     ]);
   });
@@ -108,16 +94,14 @@ describe("videoTrackRefs", () => {
         id: "remote:user-1:screen_share",
         participantId: "user-1",
         source: "screen_share",
-        state: VIDEO_TRACK_STATE_READY,
-        revision: 1,
+        isAvailable: true,
         isLocal: false,
       },
       {
         id: "local:user-1:screen_share",
         participantId: "user-1",
         source: "screen_share",
-        state: VIDEO_TRACK_STATE_READY,
-        revision: 1,
+        isAvailable: true,
         isLocal: true,
       },
     ], {

@@ -212,8 +212,6 @@ describe("VoiceEngine native cleanup", () => {
         hasCamera: false,
         hasScreenShare: true,
         hasScreenShareAudio: false,
-        cameraTrackRevision: 0,
-        screenShareTrackRevision: 1,
       },
     ]);
   });
@@ -243,7 +241,6 @@ describe("VoiceEngine native cleanup", () => {
       type: "media_tracks_update",
       local: expect.objectContaining({
         hasScreenShare: true,
-        hasScreenShareTrack: false,
       }),
     }));
 
@@ -258,13 +255,11 @@ describe("VoiceEngine native cleanup", () => {
       type: "media_tracks_update",
       local: expect.objectContaining({
         hasScreenShare: true,
-        hasScreenShareTrack: true,
-        screenShareTrackRevision: 1,
       }),
     }));
   });
 
-  it("increments the local native screen-share revision when the proxy track is replaced", () => {
+  it("keeps local native screen-share availability driven by the current proxy track", () => {
     const engine = new VoiceEngine();
     const listener = jest.fn();
     const publication = createVideoPublication({
@@ -296,16 +291,13 @@ describe("VoiceEngine native cleanup", () => {
     expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "media_tracks_update",
       local: expect.objectContaining({
-        hasScreenShareTrack: true,
-        screenShareTrackRevision: 2,
+        hasScreenShare: true,
       }),
     }));
   });
 
-  it("polls the native proxy publication until the local screen-share track becomes available", () => {
-    jest.useFakeTimers();
+  it("keeps local native screen-share unavailable until the proxy track exists", () => {
     const engine = new VoiceEngine();
-    const listener = jest.fn();
     const publication = createVideoPublication(null, {
       isDesired: false,
       subscriptionStatus: "unsubscribed",
@@ -320,33 +312,15 @@ describe("VoiceEngine native cleanup", () => {
       participantIdentity: "screen-share:channel:user-1",
       keySubscriptionCleanup: jest.fn(),
     };
-    engine.logger = {
-      debug: jest.fn(),
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-    };
-    engine.addStateListener(listener);
 
-    engine._scheduleNativeScreenShareSync("test", { intervalMs: 100, maxAttempts: 3 });
-    expect(publication.setSubscribed).toHaveBeenCalledWith(true);
-
-    publication.track = {
-      kind: "video",
-      source: "screen_share",
-      id: "track-ready",
-    };
-    jest.advanceTimersByTime(110);
-
-    expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: "media_tracks_update",
-      local: expect.objectContaining({
-        hasScreenShare: true,
-        hasScreenShareTrack: true,
+    expect(engine.listVideoTrackRefs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        participantId: "user-1",
+        source: "screen_share",
+        isLocal: true,
+        isAvailable: false,
       }),
-    }));
-    expect(engine.nativeScreenShareSyncTimer).toBeNull();
-    jest.useRealTimers();
+    ]));
   });
 
   it("emits the effective native capture settings returned by the desktop publisher", async () => {
@@ -412,7 +386,7 @@ describe("VoiceEngine native cleanup", () => {
     expect(updateNativeScreenShareAudioVolume).toHaveBeenCalledWith(135);
   });
 
-  it("marks remote screen-share publications as pending before the track arrives", () => {
+  it("marks remote screen-share publications as unavailable before the track arrives", () => {
     const engine = new VoiceEngine();
     const publication = createVideoPublication(null);
     const participant = createRemoteParticipant("screen-share:channel:user-2", "user-2", publication);
@@ -428,12 +402,42 @@ describe("VoiceEngine native cleanup", () => {
         participantId: "user-2",
         participantIdentity: "screen-share:channel:user-2",
         source: "screen_share",
-        state: "pending",
+        isAvailable: false,
       }),
     ]));
   });
 
-  it("ensures remote video publications stay subscribed before attach", () => {
+  it("does not expose transport-only fields in public video track refs", () => {
+    const engine = new VoiceEngine();
+    const publication = createVideoPublication({
+      kind: "video",
+      source: "screen_share",
+      attach: jest.fn(),
+      detach: jest.fn(),
+    });
+    const participant = createRemoteParticipant("screen-share:channel:user-2", "user-2", publication);
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
+
+    const trackRef = engine.listVideoTrackRefs().find((candidate) => candidate.participantId === "user-2");
+
+    expect(trackRef).toEqual(expect.objectContaining({
+      participantId: "user-2",
+      participantIdentity: "screen-share:channel:user-2",
+      source: "screen_share",
+      isAvailable: true,
+    }));
+    expect(trackRef).not.toHaveProperty("track");
+    expect(trackRef).not.toHaveProperty("publication");
+    expect(trackRef).not.toHaveProperty("subscriptionStatus");
+    expect(trackRef).not.toHaveProperty("streamState");
+    expect(trackRef).not.toHaveProperty("revision");
+  });
+
+  it("attaches a remote video publication without mutating video subscription state", () => {
     const engine = new VoiceEngine();
     const track = {
       kind: "video",
@@ -470,7 +474,6 @@ describe("VoiceEngine native cleanup", () => {
 
     const detach = engine.attachTrackRefElement(trackRefId, element);
 
-    expect(publication.setSubscribed).toHaveBeenCalledWith(true);
     expect(typeof detach).toBe("function");
     expect(track.attach).toHaveBeenCalledWith(element);
     expect(publication.setEnabled).not.toHaveBeenCalled();
@@ -514,7 +517,6 @@ describe("VoiceEngine native cleanup", () => {
     engine.room = {
       remoteParticipants: new Map([[participant.identity, participant]]),
     };
-    engine._syncRemoteVideoPublication(participant, stalePublication);
     const trackRefId = engine.getVideoTrackRefId("user-2", "screen_share");
     const element = {
       play: jest.fn(() => Promise.resolve()),
@@ -523,7 +525,6 @@ describe("VoiceEngine native cleanup", () => {
 
     engine.attachTrackRefElement(trackRefId, element);
 
-    expect(livePublication.setSubscribed).toHaveBeenCalledWith(true);
     expect(livePublication.setEnabled).not.toHaveBeenCalled();
     expect(stalePublication.setSubscribed).not.toHaveBeenCalled();
     expect(stalePublication.setEnabled).not.toHaveBeenCalled();
@@ -573,7 +574,7 @@ describe("VoiceEngine native cleanup", () => {
     expect(typeof detach).toBe("function");
     expect(track.attach).toHaveBeenCalledWith(element);
     expect(engine.getVideoTrackRef(trackRefId)).toEqual(expect.objectContaining({
-      state: "ready",
+      isAvailable: true,
       participantIdentity: "screen-share:channel:user-1",
     }));
   });

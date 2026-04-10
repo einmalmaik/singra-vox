@@ -23,16 +23,19 @@ import { observeVideoReadiness } from "@/lib/videoReadiness";
 const MAX_RETRIES = 8;
 const RETRY_INTERVAL_MS = 500;
 const FRAME_READY_GRACE_MS = 1_500;
-const LOADING_TIMEOUT_MS = 10_000;
+const VIEW_STATE_LOADING = "loading";
+const VIEW_STATE_READY = "ready";
+const VIEW_STATE_UNAVAILABLE = "unavailable";
 
 /**
  * The stage renders exactly one selected LiveKit-backed track ref.
  *
- * Why the retry path still exists:
- * LiveKit can report an attachable publication before Chromium produces
- * the first renderable frame. The stage therefore retries only the
- * attach window and otherwise relies on Room events plus track refs as
- * the single source of truth.
+ * The only stage-specific media logic left here is:
+ * - attach/detach the currently selected track
+ * - wait for the first renderable frame
+ * - retry a bounded number of times when Chromium has not produced that frame yet
+ *
+ * Publication, subscription and track ownership stay in LiveKit/VoiceEngine.
  */
 export default function VoiceMediaStage({
   open,
@@ -49,9 +52,7 @@ export default function VoiceMediaStage({
   const stageSurfaceRef = useRef(null);
 
   const [documentHidden, setDocumentHidden] = useState(() => document.hidden);
-  const [videoLoading, setVideoLoading] = useState(true);
-  const [videoError, setVideoError] = useState(false);
-  const [retryNonce, setRetryNonce] = useState(0);
+  const [viewState, setViewState] = useState(VIEW_STATE_LOADING);
   const [fullscreenActive, setFullscreenActive] = useState(false);
 
   useEffect(() => {
@@ -79,21 +80,9 @@ export default function VoiceMediaStage({
 
   useEffect(() => {
     if (open) {
-      setVideoLoading(true);
-      setVideoError(false);
-      setRetryNonce(0);
+      setViewState(VIEW_STATE_LOADING);
     }
   }, [open, source, trackRefId]);
-
-  const handleVideoPlaying = useCallback(() => {
-    setVideoError(false);
-    setVideoLoading(false);
-  }, []);
-
-  const handleVideoLoadedData = useCallback(() => {
-    setVideoError(false);
-    setVideoLoading(false);
-  }, []);
 
   const toggleFullscreen = useCallback(async () => {
     const stageSurface = stageSurfaceRef.current;
@@ -112,16 +101,22 @@ export default function VoiceMediaStage({
     }
   }, []);
 
-  const trackStateKey = [
+  const trackAvailabilityKey = [
     trackRefId || "none",
-    selectedTrackRef?.state || "missing",
-    Number(selectedTrackRef?.revision || 0),
-    selectedTrackRef?.subscriptionStatus || "none",
-    selectedTrackRef?.streamState || "none",
+    Number(Boolean(selectedTrackRef?.isAvailable)),
   ].join(":");
 
   useEffect(() => {
-    if (documentHidden || !open || !voiceEngineRef?.current || !trackRefId || !source || !videoRef.current) {
+    if (!open) {
+      return undefined;
+    }
+
+    if (!trackRefId || !source || !selectedTrackRef) {
+      setViewState(VIEW_STATE_UNAVAILABLE);
+      return undefined;
+    }
+
+    if (documentHidden || !voiceEngineRef?.current || !videoRef.current) {
       return undefined;
     }
 
@@ -129,11 +124,11 @@ export default function VoiceMediaStage({
     const videoElement = videoRef.current;
     let detachFn = null;
     let stopReadinessObserver = null;
-    let retryCount = 0;
     let retryTimer = null;
     let frameReadyTimer = null;
     let cancelled = false;
     let frameReady = false;
+    let attachAttempts = 0;
 
     const cleanupAttachment = () => {
       stopReadinessObserver?.();
@@ -147,24 +142,24 @@ export default function VoiceMediaStage({
       }
     };
 
-    const failAttachment = () => {
+    const setUnavailable = () => {
       cleanupAttachment();
-      setVideoLoading(false);
-      setVideoError(true);
-      engine.logger?.warn?.("stage attach failed before first frame", {
-        event: "stage_attach_failed",
+      setViewState(VIEW_STATE_UNAVAILABLE);
+      engine.logger?.warn?.("stage unavailable after bounded attach retries", {
+        event: "stage_unavailable",
         trackRefId,
         source,
+        attachAttempts,
       });
     };
 
     const scheduleRetry = () => {
       cleanupAttachment();
-      if (retryCount >= MAX_RETRIES) {
-        failAttachment();
+      if (attachAttempts >= MAX_RETRIES) {
+        setUnavailable();
         return;
       }
-      retryCount += 1;
+      attachAttempts += 1;
       retryTimer = setTimeout(tryAttach, RETRY_INTERVAL_MS);
     };
 
@@ -173,6 +168,7 @@ export default function VoiceMediaStage({
         return;
       }
 
+      setViewState(VIEW_STATE_LOADING);
       frameReady = false;
       clearTimeout(frameReadyTimer);
       cleanupAttachment();
@@ -181,7 +177,7 @@ export default function VoiceMediaStage({
         event: "stage_attach_requested",
         trackRefId,
         source,
-        retryCount,
+        attachAttempts,
       });
 
       detachFn = engine.attachTrackRefElement(trackRefId, videoElement);
@@ -190,7 +186,7 @@ export default function VoiceMediaStage({
           event: "stage_attach_pending",
           trackRefId,
           source,
-          retryCount,
+          attachAttempts,
         });
         scheduleRetry();
         return;
@@ -207,10 +203,13 @@ export default function VoiceMediaStage({
           trackRefId,
           source,
         });
-        setVideoError(false);
-        setVideoLoading(false);
+        setViewState(VIEW_STATE_READY);
       });
-      void videoElement.play?.().catch(() => {});
+
+      const playResult = videoElement.play?.();
+      if (typeof playResult?.catch === "function") {
+        playResult.catch(() => {});
+      }
       frameReadyTimer = setTimeout(() => {
         if (cancelled || frameReady) {
           return;
@@ -219,7 +218,7 @@ export default function VoiceMediaStage({
           event: "stage_attach_retry",
           trackRefId,
           source,
-          retryCount,
+          attachAttempts,
         });
         scheduleRetry();
       }, FRAME_READY_GRACE_MS);
@@ -227,15 +226,8 @@ export default function VoiceMediaStage({
 
     tryAttach();
 
-    const safetyTimer = setTimeout(() => {
-      if (!cancelled && !frameReady) {
-        failAttachment();
-      }
-    }, LOADING_TIMEOUT_MS);
-
     return () => {
       cancelled = true;
-      clearTimeout(safetyTimer);
       clearTimeout(frameReadyTimer);
       if (retryTimer) {
         clearTimeout(retryTimer);
@@ -243,7 +235,7 @@ export default function VoiceMediaStage({
       videoElement?.pause?.();
       cleanupAttachment();
     };
-  }, [documentHidden, open, retryNonce, source, trackRefId, trackStateKey, voiceEngineRef]);
+  }, [documentHidden, open, source, trackAvailabilityKey, trackRefId, selectedTrackRef, voiceEngineRef]);
 
   const isScreenShare = source === "screen_share";
   const title = isScreenShare
@@ -284,7 +276,7 @@ export default function VoiceMediaStage({
               </div>
             ) : (
               <>
-                {videoLoading && !videoError && (
+                {viewState === VIEW_STATE_LOADING && (
                   <div
                     className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
                     data-testid="media-stage-loading"
@@ -297,30 +289,18 @@ export default function VoiceMediaStage({
                     </div>
                   </div>
                 )}
-                {videoError && (
+                {viewState === VIEW_STATE_UNAVAILABLE && (
                   <div
                     className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
-                    data-testid="media-stage-error"
+                    data-testid="media-stage-unavailable"
                   >
                     <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                       <MonitorPlay size={32} className="text-zinc-500" />
                       <p className="text-sm text-zinc-400">
-                        {t("mediaStage.loadFailed", {
-                          defaultValue: "Stream konnte nicht geladen werden. Die Quelle ist möglicherweise nicht mehr verfügbar.",
+                        {t("mediaStage.unavailable", {
+                          defaultValue: "Stream ist derzeit nicht verfügbar.",
                         })}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVideoError(false);
-                          setVideoLoading(true);
-                          setRetryNonce((currentValue) => currentValue + 1);
-                        }}
-                        className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-white/15"
-                        data-testid="media-stage-retry"
-                      >
-                        {t("common.retry", { defaultValue: "Erneut versuchen" })}
-                      </button>
                     </div>
                   </div>
                 )}
@@ -329,8 +309,6 @@ export default function VoiceMediaStage({
                   autoPlay
                   playsInline
                   controls={false}
-                  onPlaying={handleVideoPlaying}
-                  onLoadedData={handleVideoLoadedData}
                   className="h-[70vh] w-full bg-black object-contain"
                   data-testid="media-stage-video"
                 />

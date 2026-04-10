@@ -169,7 +169,7 @@ export const voiceSessionMethods = {
     await safeRun("output device", "join_output_device", () => this._applyOutputDevice());
     await safeRun("remote audio state", "join_remote_audio", () => this._applyRemoteAudioState());
     await safeRun("remote video sync", "join_remote_video", async () => {
-      this._syncExistingRemoteVideoPublications({ ensureSubscribed: true });
+      this._syncExistingRemoteVideoPublications();
     });
     await safeRun("mute state", "join_mute_state", () => this._applyMuteState());
     await safeRun("native screen share state", "join_native_rehydrate", () => this._rehydrateNativeScreenShareSession());
@@ -195,7 +195,6 @@ export const voiceSessionMethods = {
   },
 
   _clearRemoteMediaState() {
-    this._clearNativeScreenShareSync?.();
     this.audioElements.forEach(({ element }) => {
       try {
         element.pause?.();
@@ -206,7 +205,6 @@ export const voiceSessionMethods = {
     });
     this.audioElements.clear();
     this.screenShareProxyMap.clear();
-    this._clearRemoteVideoTrackRevisions();
     this._resetSpeakingState();
     this._emitRemoteMediaUpdate();
   },
@@ -234,7 +232,6 @@ export const voiceSessionMethods = {
     const previousCaptureMode = null;
 
     activeShare?.keySubscriptionCleanup?.();
-    this._clearNativeScreenShareSync?.();
     this.screenShareTracks.forEach((track) => track.stop?.());
     this.screenShareTracks = [];
     this.nativeScreenShare = null;

@@ -42,7 +42,7 @@ export function createClosedStageState() {
 
 export function buildLiveMediaEntries({ videoTrackRefs, user, memberDisplayNames, t }) {
   return (videoTrackRefs || [])
-    .filter((trackRef) => trackRef.state === "ready" || trackRef.isLocal)
+    .filter((trackRef) => trackRef.isAvailable || trackRef.isLocal)
     .map((trackRef) => ({
       trackRefId: trackRef.id,
       userId: trackRef.participantId,

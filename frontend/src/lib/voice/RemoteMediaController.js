@@ -63,12 +63,6 @@ export const remoteMediaMethods = {
         participantIdentity: this._resolveParticipantIdentity(participant),
       });
       this._syncParticipantStateFromLiveKit(participant);
-      participant.trackPublications?.forEach?.((publication) => {
-        const publicationKind = publication?.kind || publication?.track?.kind || null;
-        if (publicationKind === Track.Kind.Video && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
-          publication.setSubscribed(true);
-        }
-      });
       this._emitRemoteMediaUpdate();
     });
 
@@ -79,10 +73,6 @@ export const remoteMediaMethods = {
         source: publication?.source || publication?.track?.source || null,
         kind: publication?.kind || publication?.track?.kind || null,
       });
-      const publicationKind = publication?.kind || publication?.track?.kind || null;
-      if (publicationKind === Track.Kind.Video && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
-        publication.setSubscribed(true);
-      }
       this._syncParticipantStateFromLiveKit(participant);
       this._emitRemoteMediaUpdate();
     });
@@ -109,8 +99,6 @@ export const remoteMediaMethods = {
           participantIdentity,
           source,
         );
-      } else if (track.kind === Track.Kind.Video) {
-        this._captureRemoteTrackRevision(participantIdentity, source, track);
       }
 
       this._emitRemoteMediaUpdate();
@@ -133,8 +121,6 @@ export const remoteMediaMethods = {
       });
       if (track.kind === Track.Kind.Audio) {
         this._detachRemoteAudioTrack(track, participantIdentity, source);
-      } else if (track.kind === Track.Kind.Video) {
-        this._captureRemoteTrackRevision(participantIdentity, source, null);
       }
 
       this._setRemoteSpeakerIds(
@@ -152,7 +138,6 @@ export const remoteMediaMethods = {
         return;
       }
 
-      this._removeRemoteTrackRevision(participantIdentity, source);
       this._emitRemoteMediaUpdate();
     });
 
@@ -218,7 +203,7 @@ export const remoteMediaMethods = {
 
     this.room.on(RoomEvent.Reconnected, () => {
       this.logger.debug("room reconnected", { event: "room_reconnected" });
-      this._syncExistingRemoteVideoPublications({ ensureSubscribed: true });
+      this._syncExistingRemoteVideoPublications();
     });
 
     this.room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {

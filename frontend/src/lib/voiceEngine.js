@@ -44,7 +44,6 @@ export class VoiceEngine {
     this.audioElements = new Map();
     this.screenShareProxyMap = createScreenShareProxyMap();
     this.videoTrackRefsById = new Map();
-    this.remoteVideoTrackRevisions = new Map();
     this.onStateChange = null;
     this.listeners = new Set();
 
@@ -78,11 +77,6 @@ export class VoiceEngine {
     this.cameraTrack = null;
     this.screenShareTracks = [];
     this.nativeScreenShare = null;
-    this.nativeScreenShareSyncTimer = null;
-    this.localVideoTrackRevisions = {
-      camera: { track: null, revision: 0 },
-      screenShare: { track: null, revision: 0 },
-    };
 
     this.screenShareAudioGain = null;
     this.screenShareAudioSourceNode = null;

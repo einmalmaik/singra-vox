@@ -9,15 +9,9 @@
  */
 import { Track } from "livekit-client";
 
-export const VIDEO_TRACK_STATE_PENDING = "pending";
-export const VIDEO_TRACK_STATE_READY = "ready";
 export const EMPTY_LOCAL_MEDIA_STATE = Object.freeze({
   hasCamera: false,
-  hasCameraTrack: false,
-  cameraTrackRevision: 0,
   hasScreenShare: false,
-  hasScreenShareTrack: false,
-  screenShareTrackRevision: 0,
   hasScreenShareAudio: false,
 });
 
@@ -69,11 +63,7 @@ export function buildLocalMediaStateFromTrackRefs(trackRefs = [], { localUserId 
 
   return {
     hasCamera: Boolean(cameraTrackRef),
-    hasCameraTrack: cameraTrackRef?.state === VIDEO_TRACK_STATE_READY,
-    cameraTrackRevision: cameraTrackRef?.revision || 0,
     hasScreenShare: Boolean(screenShareTrackRef),
-    hasScreenShareTrack: screenShareTrackRef?.state === VIDEO_TRACK_STATE_READY,
-    screenShareTrackRevision: screenShareTrackRef?.revision || 0,
     hasScreenShareAudio: Boolean(screenShareTrackRef?.hasAudio),
   };
 }
@@ -91,25 +81,15 @@ export function buildRemoteMediaParticipantsFromTrackRefs(trackRefs = [], { loca
       hasCamera: false,
       hasScreenShare: false,
       hasScreenShareAudio: false,
-      cameraTrackRevision: 0,
-      screenShareTrackRevision: 0,
     };
 
     if (trackRef.source === Track.Source.Camera) {
       nextState.hasCamera = true;
-      nextState.cameraTrackRevision = Math.max(
-        nextState.cameraTrackRevision,
-        trackRef.revision || 0,
-      );
     }
 
     if (trackRef.source === Track.Source.ScreenShare) {
       nextState.hasScreenShare = true;
       nextState.hasScreenShareAudio = nextState.hasScreenShareAudio || Boolean(trackRef.hasAudio);
-      nextState.screenShareTrackRevision = Math.max(
-        nextState.screenShareTrackRevision,
-        trackRef.revision || 0,
-      );
     }
 
     participants.set(trackRef.participantId, nextState);

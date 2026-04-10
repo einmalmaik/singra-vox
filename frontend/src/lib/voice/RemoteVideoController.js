@@ -10,8 +10,6 @@
 
 import { Track } from "livekit-client";
 import {
-  VIDEO_TRACK_STATE_PENDING,
-  VIDEO_TRACK_STATE_READY,
   buildLocalMediaStateFromTrackRefs,
   buildRemoteMediaParticipantsFromTrackRefs,
   buildVideoTrackRefId,
@@ -21,100 +19,6 @@ import {
 } from "@/lib/videoTrackRefs";
 
 export const remoteVideoMethods = {
-  _clearNativeScreenShareSync() {
-    if (this.nativeScreenShareSyncTimer) {
-      clearTimeout(this.nativeScreenShareSyncTimer);
-      this.nativeScreenShareSyncTimer = null;
-    }
-  },
-
-  _scheduleNativeScreenShareSync(reason, {
-    attempt = 0,
-    maxAttempts = 24,
-    intervalMs = 250,
-  } = {}) {
-    this._clearNativeScreenShareSync();
-
-    if (!this.nativeScreenShare?.participantIdentity || !this.room) {
-      return;
-    }
-
-    const runSync = () => {
-      if (!this.nativeScreenShare?.participantIdentity || !this.room) {
-        this._clearNativeScreenShareSync();
-        return;
-      }
-
-      this.logger.debug("native screen-share sync tick", {
-        event: "native_screen_share_sync",
-        reason,
-        attempt,
-      });
-      this._syncExistingRemoteVideoPublications({ ensureSubscribed: true });
-
-      const { publication } = this._getNativeScreenShareProxyPublicationState();
-      const hasTrack = Boolean(publication?.track);
-      if (hasTrack || attempt >= maxAttempts) {
-        if (!hasTrack && attempt >= maxAttempts) {
-          this.logger.warn("native screen-share proxy track did not appear in time", {
-            event: "native_screen_share_sync_timeout",
-            reason,
-            attempts: attempt + 1,
-          });
-        }
-        this._clearNativeScreenShareSync();
-        return;
-      }
-
-      this.nativeScreenShareSyncTimer = setTimeout(() => {
-        this._scheduleNativeScreenShareSync(reason, {
-          attempt: attempt + 1,
-          maxAttempts,
-          intervalMs,
-        });
-      }, intervalMs);
-    };
-
-    runSync();
-  },
-
-  _clearRemoteVideoTrackRevisions() {
-    this.remoteVideoTrackRevisions.clear();
-  },
-
-  _captureRemoteTrackRevision(participantIdentity, source, track) {
-    const key = this._trackKey(participantIdentity, source);
-    const previousState = this.remoteVideoTrackRevisions.get(key) || { track: null, revision: 0 };
-
-    if (!track) {
-      this.remoteVideoTrackRevisions.set(key, {
-        ...previousState,
-        track: null,
-      });
-      return previousState.revision || 0;
-    }
-
-    if (previousState.track === track) {
-      const nextRevision = previousState.revision || 1;
-      this.remoteVideoTrackRevisions.set(key, {
-        track,
-        revision: nextRevision,
-      });
-      return nextRevision;
-    }
-
-    const nextRevision = (previousState.revision || 0) + 1;
-    this.remoteVideoTrackRevisions.set(key, {
-      track,
-      revision: nextRevision,
-    });
-    return nextRevision;
-  },
-
-  _removeRemoteTrackRevision(participantIdentity, source) {
-    this.remoteVideoTrackRevisions.delete(this._trackKey(participantIdentity, source));
-  },
-
   _getLocalVideoTrack(source) {
     if (source === Track.Source.Camera) {
       return this.cameraTrack;
@@ -123,28 +27,6 @@ export const remoteVideoMethods = {
       return this.screenShareTracks.find((track) => track.kind === Track.Kind.Video) || null;
     }
     return null;
-  },
-
-  _captureLocalTrackRevision(source, track) {
-    const slotKey = source === Track.Source.Camera
-      ? "camera"
-      : (source === Track.Source.ScreenShare ? "screenShare" : null);
-    if (!slotKey) {
-      return 0;
-    }
-
-    const slot = this.localVideoTrackRevisions[slotKey];
-    if (!track) {
-      slot.track = null;
-      return slot.revision;
-    }
-
-    if (slot.track !== track) {
-      slot.track = track;
-      slot.revision += 1;
-    }
-
-    return slot.revision;
   },
 
   _getRemoteParticipantByIdentity(participantIdentity) {
@@ -193,7 +75,7 @@ export const remoteVideoMethods = {
     );
   },
 
-  _syncRemoteVideoPublication(participant, publication, { ensureSubscribed = false } = {}) {
+  _syncRemoteVideoPublication(participant, publication) {
     if (!participant || !publication) {
       return null;
     }
@@ -208,13 +90,8 @@ export const remoteVideoMethods = {
       return null;
     }
 
-    if (ensureSubscribed && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
-      publication.setSubscribed(true);
-    }
-
     const participantIdentity = this._resolveParticipantIdentity(participant);
     const source = publication.source || publication.track?.source || Track.Source.Unknown;
-    this._captureRemoteTrackRevision(participantIdentity, source, publication.track || null);
 
     return {
       participantIdentity,
@@ -225,51 +102,7 @@ export const remoteVideoMethods = {
     };
   },
 
-  _ensureTrackRefSubscribed(trackRefId) {
-    if (!trackRefId) {
-      return false;
-    }
-
-    if (!this.videoTrackRefsById.has(trackRefId)) {
-      this._syncVideoTrackRefs();
-    }
-
-    const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
-    if (!trackRef) {
-      return false;
-    }
-
-    const isProxyBackedLocalTrack = Boolean(
-      trackRef.isLocal
-      && trackRef.source === Track.Source.ScreenShare
-      && trackRef.provider === "tauri-native-livekit"
-    );
-
-    if (trackRef.isLocal && !isProxyBackedLocalTrack) {
-      return Boolean(trackRef.track);
-    }
-
-    const publicationLookupIdentity = isProxyBackedLocalTrack
-      ? (this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity)
-      : trackRef.participantIdentity;
-    const { publication } = this._findRemoteVideoPublication(publicationLookupIdentity, trackRef.source);
-
-    if (!publication) {
-      return Boolean(trackRef.track);
-    }
-
-    if (typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
-      publication.setSubscribed(true);
-    }
-
-    if (isProxyBackedLocalTrack && !publication.track) {
-      this._scheduleNativeScreenShareSync("ensure_subscribed");
-    }
-
-    return Boolean(publication.track || trackRef.track);
-  },
-
-  _syncExistingRemoteVideoPublications({ ensureSubscribed = false } = {}) {
+  _syncExistingRemoteVideoPublications() {
     if (!this.room?.remoteParticipants) {
       return false;
     }
@@ -284,9 +117,6 @@ export const remoteVideoMethods = {
         }
 
         didTouch = true;
-        if (ensureSubscribed && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
-          publication.setSubscribed(true);
-        }
       });
     });
 
@@ -297,6 +127,9 @@ export const remoteVideoMethods = {
   },
 
   _buildVideoTrackRefs() {
+    // Track refs are a UI projection only. They intentionally describe which
+    // stream slot exists and whether it is currently attachable, but they do
+    // not cache LiveKit transport objects.
     const remoteScreenShareAudioParticipantIds = new Set(
       Array.from(this.audioElements.values())
         .filter((audioState) => audioState?.source === Track.Source.ScreenShareAudio)
@@ -309,14 +142,6 @@ export const remoteVideoMethods = {
     const localScreenShareTrack = this._getLocalVideoTrack(Track.Source.ScreenShare)
       || nativeScreenShareProxyTrack
       || null;
-    const localCameraTrackRevision = this._captureLocalTrackRevision(
-      Track.Source.Camera,
-      localCameraTrack,
-    );
-    const localScreenShareTrackRevision = this._captureLocalTrackRevision(
-      Track.Source.ScreenShare,
-      localScreenShareTrack,
-    );
     const localTrackRefs = [];
 
     if (localCameraTrack) {
@@ -329,12 +154,10 @@ export const remoteVideoMethods = {
         participantId: this.userId,
         participantIdentity: this.userId,
         source: Track.Source.Camera,
-        state: VIDEO_TRACK_STATE_READY,
-        revision: localCameraTrackRevision,
+        isAvailable: true,
         hasAudio: false,
         isLocal: true,
         provider: "livekit-local",
-        track: localCameraTrack,
       });
     }
 
@@ -348,18 +171,13 @@ export const remoteVideoMethods = {
         participantId: this.userId,
         participantIdentity: this.nativeScreenShare?.participantIdentity || this.userId,
         source: Track.Source.ScreenShare,
-        state: localScreenShareTrack ? VIDEO_TRACK_STATE_READY : VIDEO_TRACK_STATE_PENDING,
-        revision: localScreenShareTrackRevision,
+        isAvailable: Boolean(localScreenShareTrack),
         hasAudio: Boolean(this.nativeScreenShare?.hasAudio)
           || this.screenShareTracks.some((track) => track.source === Track.Source.ScreenShareAudio),
         isLocal: true,
         provider: this.nativeScreenShare?.provider || "livekit-local",
         sourceKind: this.nativeScreenShare?.sourceKind || null,
         sourceLabel: this.nativeScreenShare?.sourceLabel || null,
-        publication: nativeScreenShareProxyState.publication || null,
-        subscriptionStatus: nativeScreenShareProxyState.publication?.subscriptionStatus || null,
-        streamState: nativeScreenShareProxyState.publication?.streamState || null,
-        track: localScreenShareTrack,
       });
     }
 
@@ -379,7 +197,6 @@ export const remoteVideoMethods = {
         }
 
         const track = publication.track || null;
-        const revision = this._captureRemoteTrackRevision(participantIdentity, source, track);
         remoteTrackRefs.push({
           id: buildVideoTrackRefId({
             participantId: participantEntry.userId,
@@ -389,8 +206,7 @@ export const remoteVideoMethods = {
           participantId: participantEntry.userId,
           participantIdentity,
           source,
-          state: track ? VIDEO_TRACK_STATE_READY : VIDEO_TRACK_STATE_PENDING,
-          revision,
+          isAvailable: Boolean(track),
           hasAudio: source === Track.Source.ScreenShare
             ? remoteScreenShareAudioParticipantIds.has(participantEntry.userId)
             : false,
@@ -398,10 +214,6 @@ export const remoteVideoMethods = {
           provider: participantIdentity?.startsWith("screen-share:")
             ? "tauri-native-livekit"
             : "livekit-remote",
-          publication,
-          subscriptionStatus: publication.subscriptionStatus || null,
-          streamState: publication.streamState || null,
-          track,
         });
       });
     });
@@ -412,15 +224,6 @@ export const remoteVideoMethods = {
     ]);
   },
 
-  _stripTrackRef(trackRef) {
-    if (!trackRef) {
-      return null;
-    }
-
-    const { track, publication, ...publicTrackRef } = trackRef;
-    return publicTrackRef;
-  },
-
   _syncVideoTrackRefs() {
     const trackRefs = this._buildVideoTrackRefs();
     this.videoTrackRefsById = indexVideoTrackRefs(trackRefs);
@@ -428,28 +231,21 @@ export const remoteVideoMethods = {
   },
 
   listVideoTrackRefs() {
-    if (this.videoTrackRefsById.size === 0) {
-      this._syncVideoTrackRefs();
-    }
-
+    this._syncVideoTrackRefs();
     return sortVideoTrackRefs(
       Array.from(this.videoTrackRefsById.values())
-        .map((trackRef) => this._stripTrackRef(trackRef))
         .filter(Boolean),
     );
   },
 
   getVideoTrackRef(trackRefId) {
-    if (!this.videoTrackRefsById.has(trackRefId)) {
-      this._syncVideoTrackRefs();
-    }
-
-    return this._stripTrackRef(this.videoTrackRefsById.get(trackRefId) || null);
+    this._syncVideoTrackRefs();
+    return this.videoTrackRefsById.get(trackRefId) || null;
   },
 
   getVideoTrackRefId(participantId, source, { preferLocal = false } = {}) {
     const trackRef = findVideoTrackRef(
-      this._syncVideoTrackRefs().map((nextTrackRef) => this._stripTrackRef(nextTrackRef)),
+      this._syncVideoTrackRefs(),
       {
         participantId,
         source,
@@ -471,27 +267,85 @@ export const remoteVideoMethods = {
 
   _buildRemoteMediaParticipants() {
     return buildRemoteMediaParticipantsFromTrackRefs(
-      this._buildVideoTrackRefs().map((trackRef) => this._stripTrackRef(trackRef)),
+      this._buildVideoTrackRefs(),
       { localUserId: this.userId },
     );
   },
 
   _emitRemoteMediaUpdate() {
     const trackRefs = this._syncVideoTrackRefs();
-    const publicTrackRefs = trackRefs.map((trackRef) => this._stripTrackRef(trackRef));
 
     this._emit("media_tracks_update", {
-      trackRefs: publicTrackRefs,
-      participants: buildRemoteMediaParticipantsFromTrackRefs(publicTrackRefs, {
+      trackRefs,
+      participants: buildRemoteMediaParticipantsFromTrackRefs(trackRefs, {
         localUserId: this.userId,
       }),
       local: {
         userId: this.userId,
-        ...buildLocalMediaStateFromTrackRefs(publicTrackRefs, {
+        ...buildLocalMediaStateFromTrackRefs(trackRefs, {
           localUserId: this.userId,
         }),
       },
     });
+  },
+
+  _resolveTrackBinding(trackRefId) {
+    if (!trackRefId) {
+      return null;
+    }
+
+    // Resolve the binding from the current Room/local-media state every time so
+    // the stage never depends on stale cached transport objects.
+    const trackRef = this.getVideoTrackRef(trackRefId);
+    if (!trackRef) {
+      return null;
+    }
+
+    if (trackRef.isLocal && trackRef.source === Track.Source.Camera) {
+      return {
+        trackRef,
+        participant: null,
+        publication: null,
+        track: this.cameraTrack || null,
+      };
+    }
+
+    if (trackRef.isLocal && trackRef.source === Track.Source.ScreenShare) {
+      const localTrack = this._getLocalVideoTrack(Track.Source.ScreenShare);
+      if (localTrack) {
+        return {
+          trackRef,
+          participant: null,
+          publication: null,
+          track: localTrack,
+        };
+      }
+
+      const proxyIdentity = this.nativeScreenShare?.participantIdentity || trackRef.participantIdentity;
+      const { participant, publication } = this._findRemoteVideoPublication(
+        proxyIdentity,
+        Track.Source.ScreenShare,
+      );
+
+      return {
+        trackRef,
+        participant,
+        publication,
+        track: publication?.track || null,
+      };
+    }
+
+    const { participant, publication } = this._findRemoteVideoPublication(
+      trackRef.participantIdentity,
+      trackRef.source,
+    );
+
+    return {
+      trackRef,
+      participant,
+      publication,
+      track: publication?.track || null,
+    };
   },
 
   attachTrackRefElement(trackRefId, element) {
@@ -503,25 +357,10 @@ export const remoteVideoMethods = {
       event: "track_attach_requested",
       trackRefId,
     });
-    // Rebuild the track-ref projection around the current Room publications
-    // before we read from it again. Native proxy-backed screen shares can gain
-    // their renderable track between UI events, so relying on the previous
-    // cached track ref here is exactly what caused "another stream wakes this
-    // stream up" behaviour in the stage.
-    this._ensureTrackRefSubscribed(trackRefId);
-    this._syncVideoTrackRefs();
-
-    const trackRef = this.videoTrackRefsById.get(trackRefId) || null;
-    const track = trackRef?.track || null;
+    const binding = this._resolveTrackBinding(trackRefId);
+    const trackRef = binding?.trackRef || null;
+    const track = binding?.track || null;
     if (!track) {
-      const isProxyBackedLocalTrack = Boolean(
-        trackRef?.isLocal
-        && trackRef?.source === Track.Source.ScreenShare
-        && trackRef?.provider === "tauri-native-livekit"
-      );
-      if (isProxyBackedLocalTrack) {
-        this._scheduleNativeScreenShareSync("attach_pending");
-      }
       this.logger.debug("track attach deferred because no track is available yet", {
         event: "track_attach_pending",
         trackRefId,
@@ -535,12 +374,6 @@ export const remoteVideoMethods = {
     element.playsInline = true;
     element.muted = true;
     track.attach(element);
-
-    const tryPlay = () => {
-      void element.play?.().catch(() => {});
-    };
-    tryPlay();
-    const playRetryTimer = setTimeout(tryPlay, 150);
     this.logger.debug("track attached to stage element", {
       event: "track_attach_bound",
       trackRefId,
@@ -549,7 +382,6 @@ export const remoteVideoMethods = {
     });
 
     return () => {
-      clearTimeout(playRetryTimer);
       try {
         element.pause?.();
         track.detach(element);
