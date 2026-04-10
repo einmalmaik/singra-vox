@@ -95,7 +95,10 @@ export function useMediaStageState({
       trackRefId: stageState.trackRefId,
       participantName: selectedParticipantName,
       source: selectedTrackRef?.source || null,
-      selectedTrackRef,
+      // The stage only needs primitive availability data. Passing the whole
+      // track-ref object would retrigger attach effects whenever the projection
+      // is rebuilt, even when the selected stream itself did not change.
+      selectedTrackAvailable: Boolean(selectedTrackRef?.isAvailable),
     },
   };
 }

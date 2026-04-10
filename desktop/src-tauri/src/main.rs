@@ -139,6 +139,21 @@ fn get_desktop_runtime_info() -> DesktopRuntimeInfo {
     }
 }
 
+#[tauri::command]
+fn debug_voice_log(level: String, message: String, payload: String) -> bool {
+    #[cfg(debug_assertions)]
+    {
+        eprintln!("[voice_frontend][{level}] {message} {payload}");
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (&level, &message, &payload);
+    }
+
+    true
+}
+
 #[cfg(target_os = "windows")]
 fn canonicalize_shortcut(shortcut: &str) -> String {
     let mut ctrl = false;
@@ -804,6 +819,7 @@ fn main() {
             get_secret,
             delete_secret,
             get_desktop_runtime_info,
+            debug_voice_log,
             configure_ptt_listener,
             clear_ptt_listener,
             open_url,

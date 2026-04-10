@@ -117,6 +117,28 @@ export async function getDesktopRuntimeInfo() {
   }
 }
 
+export async function sendDesktopVoiceLog(level, message, payload = {}) {
+  if (!isDesktopApp() || process.env.NODE_ENV !== "development") {
+    return false;
+  }
+
+  const invoke = await getInvoke();
+  if (!invoke) {
+    return false;
+  }
+
+  try {
+    await invoke("debug_voice_log", {
+      level,
+      message,
+      payload: JSON.stringify(payload || {}),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function configureDesktopPttListener(shortcut, enabled, handler) {
   const invoke = await getInvoke();
   if (!invoke) return null;

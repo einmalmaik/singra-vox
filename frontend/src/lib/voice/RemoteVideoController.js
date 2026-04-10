@@ -348,6 +348,24 @@ export const remoteVideoMethods = {
     };
   },
 
+  ensureTrackRefPlayback(trackRefId) {
+    const binding = this._resolveTrackBinding(trackRefId);
+    const publication = binding?.publication || null;
+
+    if (publication && typeof publication.setSubscribed === "function" && publication.isDesired !== true) {
+      this.logger.debug("track playback intent requested", {
+        event: "track_playback_intent",
+        trackRefId,
+        participantId: binding?.trackRef?.participantId || null,
+        source: binding?.trackRef?.source || null,
+      });
+      publication.setSubscribed(true);
+      return true;
+    }
+
+    return Boolean(binding?.track);
+  },
+
   attachTrackRefElement(trackRefId, element) {
     if (!element) {
       return null;

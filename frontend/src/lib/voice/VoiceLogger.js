@@ -8,6 +8,8 @@
  * (at your option) any later version.
  */
 
+import { sendDesktopVoiceLog } from "@/lib/desktop";
+
 function buildPayload(getContext, fields = {}, error = null) {
   const baseContext = typeof getContext === "function" ? (getContext() || {}) : {};
   const payload = {
@@ -25,6 +27,7 @@ function buildPayload(getContext, fields = {}, error = null) {
 function emit(method, message, payload) {
   const consoleMethod = console?.[method] || console.log;
   consoleMethod(`[VoiceEngine] ${message}`, payload);
+  void sendDesktopVoiceLog(method, message, payload);
 }
 
 export function createVoiceLogger(getContext = () => ({})) {

@@ -42,7 +42,7 @@ export default function VoiceMediaStage({
   onClose,
   voiceEngineRef,
   trackRefId,
-  selectedTrackRef,
+  selectedTrackAvailable,
   participantName,
   source,
 }) {
@@ -50,6 +50,7 @@ export default function VoiceMediaStage({
   const { config } = useRuntime();
   const videoRef = useRef(null);
   const stageSurfaceRef = useRef(null);
+  const [videoElement, setVideoElement] = useState(null);
 
   const [documentHidden, setDocumentHidden] = useState(() => document.hidden);
   const [viewState, setViewState] = useState(VIEW_STATE_LOADING);
@@ -101,9 +102,14 @@ export default function VoiceMediaStage({
     }
   }, []);
 
+  const handleVideoRef = useCallback((node) => {
+    videoRef.current = node;
+    setVideoElement(node);
+  }, []);
+
   const trackAvailabilityKey = [
     trackRefId || "none",
-    Number(Boolean(selectedTrackRef?.isAvailable)),
+    Number(Boolean(selectedTrackAvailable)),
   ].join(":");
 
   useEffect(() => {
@@ -111,17 +117,16 @@ export default function VoiceMediaStage({
       return undefined;
     }
 
-    if (!trackRefId || !source || !selectedTrackRef) {
+    if (!trackRefId || !source) {
       setViewState(VIEW_STATE_UNAVAILABLE);
       return undefined;
     }
 
-    if (documentHidden || !voiceEngineRef?.current || !videoRef.current) {
+    if (documentHidden || !voiceEngineRef?.current || !videoElement) {
       return undefined;
     }
 
     const engine = voiceEngineRef.current;
-    const videoElement = videoRef.current;
     let detachFn = null;
     let stopReadinessObserver = null;
     let retryTimer = null;
@@ -180,6 +185,8 @@ export default function VoiceMediaStage({
         attachAttempts,
       });
 
+      engine.ensureTrackRefPlayback?.(trackRefId);
+
       detachFn = engine.attachTrackRefElement(trackRefId, videoElement);
       if (!detachFn) {
         engine.logger?.debug?.("stage attach pending", {
@@ -235,7 +242,7 @@ export default function VoiceMediaStage({
       videoElement?.pause?.();
       cleanupAttachment();
     };
-  }, [documentHidden, open, source, trackAvailabilityKey, trackRefId, selectedTrackRef, voiceEngineRef]);
+  }, [documentHidden, open, source, trackAvailabilityKey, trackRefId, videoElement, voiceEngineRef]);
 
   const isScreenShare = source === "screen_share";
   const title = isScreenShare
@@ -305,7 +312,7 @@ export default function VoiceMediaStage({
                   </div>
                 )}
                 <video
-                  ref={videoRef}
+                  ref={handleVideoRef}
                   autoPlay
                   playsInline
                   controls={false}

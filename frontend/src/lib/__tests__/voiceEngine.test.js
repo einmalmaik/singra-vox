@@ -59,6 +59,7 @@ jest.mock("@/lib/desktop", () => ({
   stopNativeScreenShare: jest.fn(() => Promise.resolve(true)),
   updateNativeScreenShareAudioVolume: jest.fn(() => Promise.resolve(true)),
   updateNativeScreenShareKey: jest.fn(() => Promise.resolve(true)),
+  sendDesktopVoiceLog: jest.fn(() => Promise.resolve(false)),
 }), { virtual: true });
 
 jest.mock("@/lib/screenSharePresets", () => ({
@@ -477,6 +478,33 @@ describe("VoiceEngine native cleanup", () => {
     expect(typeof detach).toBe("function");
     expect(track.attach).toHaveBeenCalledWith(element);
     expect(publication.setEnabled).not.toHaveBeenCalled();
+  });
+
+  it("requests playback subscription only for the actively viewed remote video track", () => {
+    const engine = new VoiceEngine();
+    const publication = {
+      kind: "video",
+      source: "screen_share",
+      track: null,
+      isDesired: false,
+      setSubscribed: jest.fn(),
+    };
+    const participant = {
+      identity: "screen-share:channel:user-2",
+      attributes: { owner_user_id: "user-2" },
+      trackPublications: new Map([["pub-1", publication]]),
+    };
+
+    engine.userId = "user-1";
+    engine.room = {
+      remoteParticipants: new Map([[participant.identity, participant]]),
+    };
+
+    const trackRefId = engine.getVideoTrackRefId("user-2", "screen_share");
+    const result = engine.ensureTrackRefPlayback(trackRefId);
+
+    expect(typeof result).toBe("boolean");
+    expect(publication.setSubscribed).toHaveBeenCalledWith(true);
   });
 
   it("prefers the current room publication over a cached stale video publication", () => {

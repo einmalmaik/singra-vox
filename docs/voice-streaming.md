@@ -60,6 +60,9 @@ Video subscription rules:
 - The frontend does not manually call `setSubscribed(true)` for video tracks.
 - Audio is the only explicit exception: local mute/deafen can still force
   remote audio publications on or off.
+- When a user explicitly opens the media stage for one video track, the
+  frontend may express a playback intent for that selected track only. This is
+  a narrow viewer-lifecycle safeguard, not a global video subscription policy.
 
 ## Native desktop path
 
@@ -98,6 +101,30 @@ The most important viewer failure mode we have seen is stale UI state layered
 on top of real LiveKit state. The current design avoids that by keeping
 publication and track ownership inside LiveKit and exposing only a small
 availability projection to the UI.
+
+One concrete production failure looked like this:
+
+1. the native proxy participant connected
+2. the screen-share track was published
+3. the viewer briefly subscribed to the track
+4. the track immediately fell back to `desired` / unsubscribed again
+
+That pattern means the stream was not "missing". The receive lifecycle was
+unstable. The final stabilization combined two changes:
+
+- the stage now depends on primitive availability state instead of whole
+  projected track-ref objects, so unrelated room updates do not constantly
+  restart the attach effect
+- opening the stage can request playback intent for that selected track only,
+  which keeps the viewer from losing the stream before the first renderable
+  frame appears
+
+## Desktop debug bridge
+
+In desktop development builds, `VoiceLogger` events are mirrored into the Tauri
+stderr log. This makes it possible to correlate `track_published`,
+`track_subscribed`, `track_unsubscribed`, stage attach attempts, and first-frame
+events without changing the production runtime behavior.
 
 ## Manual verification
 

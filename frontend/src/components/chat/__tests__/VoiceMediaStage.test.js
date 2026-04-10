@@ -64,6 +64,7 @@ describe("VoiceMediaStage", () => {
   it("marks the stage as ready after the first renderable frame", async () => {
     const detach = jest.fn();
     const attachTrackRefElement = jest.fn(() => detach);
+    const ensureTrackRefPlayback = jest.fn(() => true);
     const logger = { debug: jest.fn(), warn: jest.fn() };
 
     observeVideoReadiness.mockImplementation((_element, onReady) => {
@@ -76,14 +77,9 @@ describe("VoiceMediaStage", () => {
         <VoiceMediaStage
           open
           onClose={() => {}}
-          voiceEngineRef={{ current: { attachTrackRefElement, logger } }}
+          voiceEngineRef={{ current: { attachTrackRefElement, ensureTrackRefPlayback, logger } }}
           trackRefId="local:user-1:screen_share"
-          selectedTrackRef={{
-            id: "local:user-1:screen_share",
-            participantId: "user-1",
-            source: "screen_share",
-            isAvailable: true,
-          }}
+          selectedTrackAvailable
           participantName="Alice"
           source="screen_share"
         />,
@@ -94,6 +90,7 @@ describe("VoiceMediaStage", () => {
       "local:user-1:screen_share",
       expect.any(HTMLVideoElement),
     );
+    expect(ensureTrackRefPlayback).toHaveBeenCalledWith("local:user-1:screen_share");
     expect(container.querySelector("[data-testid='media-stage-loading']")).toBeNull();
     expect(container.querySelector("[data-testid='media-stage-unavailable']")).toBeNull();
     expect(container.querySelector("[data-testid='media-stage-video']")).not.toBeNull();
@@ -102,6 +99,7 @@ describe("VoiceMediaStage", () => {
   it("marks the stage as unavailable after bounded attach retries", async () => {
     jest.useFakeTimers();
     const attachTrackRefElement = jest.fn(() => null);
+    const ensureTrackRefPlayback = jest.fn(() => false);
     const logger = { debug: jest.fn(), warn: jest.fn() };
 
     observeVideoReadiness.mockImplementation(() => jest.fn());
@@ -111,14 +109,9 @@ describe("VoiceMediaStage", () => {
         <VoiceMediaStage
           open
           onClose={() => {}}
-          voiceEngineRef={{ current: { attachTrackRefElement, logger } }}
+          voiceEngineRef={{ current: { attachTrackRefElement, ensureTrackRefPlayback, logger } }}
           trackRefId="remote:user-2:screen_share"
-          selectedTrackRef={{
-            id: "remote:user-2:screen_share",
-            participantId: "user-2",
-            source: "screen_share",
-            isAvailable: false,
-          }}
+          selectedTrackAvailable={false}
           participantName="Bob"
           source="screen_share"
         />,
@@ -137,5 +130,48 @@ describe("VoiceMediaStage", () => {
         trackRefId: "remote:user-2:screen_share",
       }),
     );
+  });
+
+  it("does not restart the attach effect when only the projected track object would have changed", async () => {
+    const detach = jest.fn();
+    const attachTrackRefElement = jest.fn(() => detach);
+    const ensureTrackRefPlayback = jest.fn(() => true);
+    const logger = { debug: jest.fn(), warn: jest.fn() };
+    const voiceEngineRef = { current: { attachTrackRefElement, ensureTrackRefPlayback, logger } };
+
+    observeVideoReadiness.mockImplementation((_element, onReady) => {
+      onReady();
+      return jest.fn();
+    });
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={voiceEngineRef}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={voiceEngineRef}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    expect(attachTrackRefElement).toHaveBeenCalledTimes(1);
   });
 });
