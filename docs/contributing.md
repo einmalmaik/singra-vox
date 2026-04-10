@@ -163,6 +163,14 @@ await log_audit(
 
 ## Frontend erweitern
 
+### Page-Schichtung
+
+- `frontend/src/pages/*.js` sind Composition-Roots. Sie lesen Contexts und Routing, enthalten aber keine grossen fachlichen State-Maschinen.
+- Seitenlogik gehoert in page-lokale Controller/Hooks, zum Beispiel unter `frontend/src/pages/main-layout/`.
+- View-Komponenten bleiben API-, Socket- und Context-frei. Sie erhalten bereits vorbereitete Props aus dem Controller.
+- Neue Workspace-Features gehoeren in die passende Domain-Hook-Schicht, etwa Server-Workspace, Direktnachrichten, Socket-Lifecycle oder Notification-Bootstrap.
+- Wenn eine Datei wieder zu einem Container waechst, zuerst Responsibilities trennen, dann erst Feature-Code ergaenzen.
+
 ### Neue Komponente
 
 ```jsx

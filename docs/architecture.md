@@ -56,6 +56,31 @@ Wichtig:
 - Voice-/Stream-Steuerung bleibt in den bestehenden Voice-Modulen; die Sidebar orchestriert nur UI-Zustand.
 - Test-IDs und sichtbares Verhalten bleiben stabil, damit bestehende UI-Regressionen erkennbar bleiben.
 
+## MainLayout-Schichtung
+
+Der Workspace-Entry-Point folgt jetzt derselben Aufteilung wie die Sidebar:
+
+- `frontend/src/pages/MainLayout.js`
+  Stabile Fassade fuer Routing und Context-Wiring; sie rendert nur noch den Shell-Controller.
+- `frontend/src/pages/main-layout/useMainLayoutController.js`
+  Einziger Page-Orchestrator fuer Workspace-Auswahl, Persistenz, Unread-Refresh, Socket-Binding und View-Props.
+- `frontend/src/pages/main-layout/hooks/useServerWorkspaceState.js`
+  Server-, Channel-, Member- und Timeline-State inklusive Snapshot- und Refresh-Aktionen.
+- `frontend/src/pages/main-layout/hooks/useDirectMessagesState.js`
+  Direktnachrichten-, Gruppen-DM-, Relay-DM- und Such-State inklusive DM-History.
+- `frontend/src/pages/main-layout/hooks/useMainLayoutSocket.js`
+  WebSocket-, Heartbeat- und Reconnect-Lifecycle ohne Render-Logik.
+- `frontend/src/pages/main-layout/hooks/useNotificationBootstrap.js`
+  Notification-Permission- und Push-Bootstrap ohne UI-Kopplung.
+- `frontend/src/pages/main-layout/*View.js`
+  Presentational Workspace-Views fuer Server- und DM-Ansicht.
+
+Wichtig:
+
+- Views duerfen keine direkten API-, Socket- oder Context-Zugriffe enthalten.
+- Page-lokale Spezialkomponenten wie der DM-Composer bleiben im `main-layout` Modul, solange sie nicht generisch genug fuer Shared-UI sind.
+- Neue Workspace-Features muessen in die passende Domain-Hook-Schicht, nicht zurueck in `MainLayout.js`.
+
 ## Verzeichnis-Struktur
 
 ```
