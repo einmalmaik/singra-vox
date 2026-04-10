@@ -9,11 +9,11 @@ from app.core.database import db
 from app.core.encryption import decrypt_metadata
 from app.core.utils import sanitize_user
 from app.dependencies import current_user
+from app.permissions import assert_server_permission, has_server_permission
 from app.rate_limits import enforce_fixed_window_rate_limit
 from app.schemas import ModerationInput
 from app.services.server_ops import (
     build_member_payload,
-    check_permission,
     clear_voice_membership,
     get_server_member,
     log_audit,
@@ -27,10 +27,9 @@ router = APIRouter(prefix="/api/servers", tags=["Servers"])
 @router.get("/{server_id}/moderation/bans")
 async def list_bans(server_id: str, request: Request):
     actor = await current_user(request)
-    if not (
-        await check_permission(actor["id"], server_id, "ban_members")
-        or await check_permission(actor["id"], server_id, "manage_members")
-    ):
+    can_ban = await has_server_permission(db, actor["id"], server_id, "ban_members")
+    can_manage = await has_server_permission(db, actor["id"], server_id, "manage_members")
+    if not (can_ban or can_manage):
         raise HTTPException(403, "No permission")
 
     banned_members = await db.server_members.find(
@@ -52,8 +51,7 @@ async def list_bans(server_id: str, request: Request):
 @router.post("/{server_id}/moderation/ban")
 async def ban_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "ban_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "ban_members", "No permission")
     await enforce_fixed_window_rate_limit(
         db,
         scope="moderation.ban",
@@ -82,8 +80,7 @@ async def ban_member(server_id: str, inp: ModerationInput, request: Request):
 @router.post("/{server_id}/moderation/unban")
 async def unban_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "ban_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "ban_members", "No permission")
     await enforce_fixed_window_rate_limit(
         db,
         scope="moderation.unban",
@@ -118,8 +115,7 @@ async def unban_member(server_id: str, inp: ModerationInput, request: Request):
 @router.post("/{server_id}/moderation/mute")
 async def mute_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "mute_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "mute_members", "No permission")
     await enforce_fixed_window_rate_limit(
         db,
         scope="moderation.mute",
@@ -148,8 +144,7 @@ async def mute_member(server_id: str, inp: ModerationInput, request: Request):
 @router.post("/{server_id}/moderation/unmute")
 async def unmute_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "mute_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "mute_members", "No permission")
     await enforce_fixed_window_rate_limit(
         db,
         scope="moderation.unmute",
@@ -169,8 +164,7 @@ async def unmute_member(server_id: str, inp: ModerationInput, request: Request):
 @router.post("/{server_id}/moderation/deafen")
 async def deafen_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "deafen_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "deafen_members", "No permission")
     await enforce_fixed_window_rate_limit(
         db,
         scope="moderation.deafen",
@@ -206,8 +200,7 @@ async def deafen_member(server_id: str, inp: ModerationInput, request: Request):
 @router.post("/{server_id}/moderation/undeafen")
 async def undeafen_member(server_id: str, inp: ModerationInput, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "deafen_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "deafen_members", "No permission")
     await enforce_fixed_window_rate_limit(
         db,
         scope="moderation.undeafen",
@@ -243,8 +236,7 @@ async def undeafen_member(server_id: str, inp: ModerationInput, request: Request
 @router.get("/{server_id}/moderation/audit-log")
 async def get_audit_log(server_id: str, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_server"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_server", "No permission")
     logs = await db.audit_log.find({"server_id": server_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     for log_entry in logs:
         actor = await db.users.find_one(

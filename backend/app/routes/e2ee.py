@@ -8,6 +8,7 @@ from app.core.constants import E2EE_PROTOCOL_VERSION
 from app.core.database import db
 from app.core.utils import new_id, now_utc
 from app.dependencies import current_user, request_device_id, require_verified_device
+from app.permissions import assert_channel_permission
 from app.schemas import (
     E2EEBootstrapInput,
     E2EEDeviceInput,
@@ -27,7 +28,6 @@ from app.services.e2ee import (
     list_channel_recipient_user_ids,
     list_group_recipient_user_ids,
 )
-from app.services.server_ops import check_permission
 
 
 router = APIRouter(prefix="/api/e2ee", tags=["E2EE"])
@@ -208,8 +208,7 @@ async def channel_recipients(channel_id: str, request: Request):
         raise HTTPException(404, "Channel not found")
     if not channel.get("is_private"):
         raise HTTPException(400, "Only private channels use the end-to-end recipient API")
-    if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
-        raise HTTPException(403, "No permission")
+    await assert_channel_permission(db, user["id"], channel, "read_messages", "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     recipients = await list_channel_recipient_user_ids(channel)
     return await build_e2ee_recipient_payload(recipients)
@@ -338,8 +337,7 @@ async def get_current_media_key(channel_id: str, request: Request):
         raise HTTPException(404, "Channel not found")
     if not channel.get("is_private") or channel.get("type") != "voice":
         raise HTTPException(400, "Only private voice channels use encrypted media keys")
-    if not await check_permission(user["id"], channel["server_id"], "join_voice", channel=channel):
-        raise HTTPException(403, "No permission")
+    await assert_channel_permission(db, user["id"], channel, "join_voice", "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     active_voice_user_ids = await list_active_voice_participant_user_ids(channel_id)
     if user["id"] not in active_voice_user_ids:
@@ -372,8 +370,7 @@ async def rotate_media_key(channel_id: str, inp: EncryptedMediaKeyInput, request
         raise HTTPException(404, "Channel not found")
     if not channel.get("is_private") or channel.get("type") != "voice":
         raise HTTPException(400, "Only private voice channels use encrypted media keys")
-    if not await check_permission(user["id"], channel["server_id"], "join_voice", channel=channel):
-        raise HTTPException(403, "No permission")
+    await assert_channel_permission(db, user["id"], channel, "join_voice", "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
 
     participant_user_ids = sorted({participant_id for participant_id in (inp.participant_user_ids or []) if participant_id})

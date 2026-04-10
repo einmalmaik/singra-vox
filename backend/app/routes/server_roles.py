@@ -5,9 +5,8 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.database import db
 from app.core.utils import new_id, now_utc
 from app.dependencies import current_user
-from app.permissions import DEFAULT_PERMISSIONS
+from app.permissions import DEFAULT_PERMISSIONS, assert_server_permission
 from app.schemas import RoleCreateInput
-from app.services.server_ops import check_permission
 from app.ws import ws_mgr
 
 
@@ -23,8 +22,7 @@ async def list_roles(server_id: str, request: Request):
 @router.post("/{server_id}/roles")
 async def create_role(server_id: str, inp: RoleCreateInput, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_roles"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_roles", "No permission")
 
     role = {
         "id": new_id(),
@@ -47,8 +45,7 @@ async def create_role(server_id: str, inp: RoleCreateInput, request: Request):
 @router.put("/{server_id}/roles/{role_id}")
 async def update_role(server_id: str, role_id: str, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_roles"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_roles", "No permission")
 
     role = await db.roles.find_one({"id": role_id, "server_id": server_id}, {"_id": 0})
     if not role:
@@ -80,8 +77,7 @@ async def update_role(server_id: str, role_id: str, request: Request):
 @router.delete("/{server_id}/roles/{role_id}")
 async def delete_role(server_id: str, role_id: str, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_roles"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_roles", "No permission")
 
     role = await db.roles.find_one({"id": role_id}, {"_id": 0})
     if role and role.get("is_default"):

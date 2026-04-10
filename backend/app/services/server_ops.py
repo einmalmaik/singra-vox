@@ -1,32 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from app.core.database import db
 from app.core.encryption import encrypt_metadata, encryption_enabled
 from app.core.utils import new_id, now_utc, sanitize_user
 from app.permissions import DEFAULT_PERMISSIONS
 from app.ws import ws_mgr
-
-
-async def check_permission(user_id: str, server_id: str, permission: str, *, channel: Optional[dict] = None) -> bool:
-    from app.permissions import has_channel_permission, has_server_permission
-
-    if channel is not None:
-        return await has_channel_permission(db, user_id, channel, permission)
-    return await has_server_permission(db, user_id, server_id, permission)
-
-
-async def get_message_history_cutoff(
-    user_id: str,
-    server_id: str,
-    *,
-    channel: Optional[dict] = None,
-) -> Optional[str]:
-    from app.permissions import get_message_history_cutoff as get_permission_history_cutoff
-
-    return await get_permission_history_cutoff(db, user_id, server_id, channel=channel)
 
 
 async def log_audit(server_id, actor_id, action, target_type, target_id, details) -> None:

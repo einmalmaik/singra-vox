@@ -55,6 +55,11 @@ class SvidLoginToInstanceInput(BaseModel):
     svid_access_token: str
 
 
+class SvidLinkInput(BaseModel):
+    svid_access_token: str
+    disable_local_password_login: bool = True
+
+
 class BootstrapInput(BaseModel):
     instance_name: str = Field(min_length=2, max_length=80)
     owner_email: str

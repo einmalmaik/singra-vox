@@ -81,6 +81,33 @@ Wichtig:
 - Page-lokale Spezialkomponenten wie der DM-Composer bleiben im `main-layout` Modul, solange sie nicht generisch genug fuer Shared-UI sind.
 - Neue Workspace-Features muessen in die passende Domain-Hook-Schicht, nicht zurueck in `MainLayout.js`.
 
+## ChatArea-Schichtung
+
+Die Chat-Oberflaeche folgt jetzt derselben Schichtung wie `ChannelSidebar` und `MainLayout`.
+
+- `frontend/src/components/chat/ChatArea.js`
+  Stabile Fassade fuer bestehende Aufrufer; sie verdrahtet nur Controller und Shell.
+- `frontend/src/components/chat/chat-area/useChatAreaController.js`
+  Einziger Orchestrator fuer Chat-State, API-Aufrufe, E2EE-Decryption, Mention-Logik, Reply-Reveal, Read-Marker und Attachments.
+- `frontend/src/components/chat/chat-area/chatAreaState.js`
+  Pure Helper fuer Timeline-Merge, Highlighting, Reply-Aufloesung und abgeleitete Anzeige-Daten.
+- `frontend/src/components/chat/chat-area/ChatAreaShell.js`
+  Aeusseres Layout fuer Header, Timeline, Composer sowie Thread- und Pin-Panels.
+- `frontend/src/components/chat/chat-area/ChatHeader.js`
+  Presentational Header fuer Topic-, Search-, Notification- und Pin-Bedienung.
+- `frontend/src/components/chat/chat-area/ChatTimeline.js`
+  Presentational Timeline fuer leere States, E2EE-Hinweise, History und Typing.
+- `frontend/src/components/chat/chat-area/ChatMessageItem.js`
+  Presentational Nachricht inklusive Reply-Preview, Reactions, Edit/Delete, Pin und Attachments.
+- `frontend/src/components/chat/chat-area/ChatComposer.js`
+  Presentational Composer fuer Eingabe, Mentions und Pending-Attachments.
+
+Wichtig:
+
+- Neue Chat-Features kommen zuerst in `useChatAreaController.js` oder `chatAreaState.js`, nicht direkt in `ChatArea.js`.
+- Views unter `chat-area/` bleiben API-, Context- und Socket-frei.
+- `ChatArea.js` bleibt klein, damit Aenderungen isoliert testbar und fuer Open-Source-Mitwirkende nachvollziehbar bleiben.
+
 ## Verzeichnis-Struktur
 
 ```
@@ -319,6 +346,29 @@ Alle Permission-Checks laufen ausnahmslos über `backend/app/permissions.py`.
 - **Cross-Instance Invites** (Einladungen zwischen Instanzen)
 - **Instance Switcher** (Unread-Counts über Instanzen hinweg)
 
+### Lokaler Upgrade-Pfad
+
+Instanz-User können ihr bestehendes lokales Konto direkt aus dem DM-/Friends-Bereich
+zu einer Singra-ID aufwerten, ohne Server-Mitgliedschaften, Einstellungen oder
+lokale Workspace-Daten zu verlieren.
+
+- `frontend/src/pages/SvidSetupPage.js`
+  Geschützter Setup-Screen im Registrierungsdesign für bereits angemeldete lokale Nutzer.
+- `backend/app/services/svid_linking.py`
+  Zentrale Verknüpfungslogik zwischen lokalem Instanzkonto und Singra-ID-Konto.
+- `backend/app/routes/auth.py`
+  `POST /api/auth/link-svid` verknüpft die aktive lokale Session explizit mit einer
+  verifizierten Singra-ID und deaktiviert auf Wunsch den lokalen Passwort-Login.
+
+Wichtig:
+
+- Die Zuordnung wird bewusst auf beiden Seiten gepflegt:
+  - `users.svid_account_id`
+  - `svid_accounts.linked_user_id`
+- Login und Friends-/Relay-Funktionen nutzen aktuell unterschiedliche Lookup-Pfade.
+  Die zentrale Linking-Schicht hält beide Referenzen synchron, damit keine
+  stillen Inkonsistenzen zwischen Auth und Cross-Instance-Features entstehen.
+
 ### Jeder kann seinen eigenen ID-Server hosten
 
 Der ID-Server ist in jeder Singra-Vox-Instanz eingebaut (`/api/id/*`).
@@ -333,6 +383,7 @@ Man braucht nur `SVID_ISSUER` und `SVID_JWT_SECRET` zu setzen.
 POST   /api/auth/register            Registrieren
 POST   /api/auth/verify-email        E-Mail-Code bestätigen
 POST   /api/auth/login               Einloggen
+POST   /api/auth/link-svid           Lokales Konto explizit mit Singra-ID verknüpfen
 GET    /api/auth/me                  Eigene Nutzerdaten
 POST   /api/auth/logout              Ausloggen
 ```

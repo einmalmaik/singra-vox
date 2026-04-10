@@ -26,6 +26,7 @@ const ERROR_CODE_KEYS = {
   forgot_password_rate_limited: "errors.codes.forgot_password_rate_limited",
   reset_password_rate_limited: "errors.codes.reset_password_rate_limited",
   email_verification_required: "errors.codes.email_verification_required",
+  local_login_disabled: "errors.codes.local_login_disabled",
   legacy_signaling_disabled: "errors.codes.legacy_signaling_disabled",
 };
 

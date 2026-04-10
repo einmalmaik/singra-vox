@@ -265,7 +265,9 @@ async def svid_register(inp: SvidRegisterInput):
                 {"email": email},
                 {"$set": {"email_verified": True, "email_verified_at": _now()}},
             )
-            return {"ok": True, "verification_required": False, "email": email, "expires_at": None}
+            verified_account = await _db.svid_accounts.find_one({"email": email}, {"_id": 0})
+            session_payload = await _issue_svid_session(verified_account)
+            return {**session_payload, "verification_required": False}
 
     existing_username = await _db.svid_accounts.find_one({"username": username}, {"_id": 0})
     if existing_username:
@@ -311,7 +313,9 @@ async def svid_register(inp: SvidRegisterInput):
             {"id": account_id},
             {"$set": {"email_verified": True, "email_verified_at": _now()}},
         )
-        return {"ok": True, "verification_required": False, "email": email, "expires_at": None}
+        verified_account = await _db.svid_accounts.find_one({"id": account_id}, {"_id": 0})
+        session_payload = await _issue_svid_session(verified_account)
+        return {**session_payload, "verification_required": False}
 
 
 @router.post("/verify-email")

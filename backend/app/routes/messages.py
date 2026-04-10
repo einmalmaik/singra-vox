@@ -3,12 +3,15 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from app.core.database import db
+from app.permissions import (
+    assert_channel_permission,
+    get_message_history_cutoff,
+    has_channel_permission,
+)
 from app.core.utils import new_id, now_utc, sanitize_user
 from app.dependencies import current_user
 from app.services.e2ee import ensure_private_channel_member_access
 from app.services.message_mentions import hydrate_message_mentions, resolve_message_mentions
-from app.services.server_ops import check_permission
-from app.services.server_ops import get_message_history_cutoff as get_server_message_history_cutoff
 from app.ws import ws_mgr
 
 
@@ -86,7 +89,7 @@ async def delete_message(message_id: str, request: Request):
         raise HTTPException(404, "Message not found")
     channel = await db.channels.find_one({"id": message["channel_id"]}, {"_id": 0})
     is_author = message["author_id"] == user["id"]
-    can_manage = channel and await check_permission(user["id"], channel["server_id"], "manage_messages", channel=channel)
+    can_manage = channel and await has_channel_permission(db, user["id"], channel, "manage_messages")
     if not is_author and not can_manage:
         raise HTTPException(403, "No permission")
 
@@ -112,11 +115,10 @@ async def get_message(message_id: str, request: Request):
     channel = await db.channels.find_one({"id": message["channel_id"]}, {"_id": 0})
     if not channel:
         raise HTTPException(404, "Channel not found")
-    if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
-        raise HTTPException(403, "No permission")
+    await assert_channel_permission(db, user["id"], channel, "read_messages", "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
 
-    history_cutoff = await get_server_message_history_cutoff(user["id"], channel["server_id"], channel=channel)
+    history_cutoff = await get_message_history_cutoff(db, user["id"], channel["server_id"], channel=channel)
     if history_cutoff and message.get("created_at") and message["created_at"] < history_cutoff:
         raise HTTPException(403, "No permission to read message history")
 

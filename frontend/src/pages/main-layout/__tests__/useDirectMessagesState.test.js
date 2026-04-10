@@ -125,4 +125,58 @@ describe("useDirectMessagesState", () => {
       container.remove();
     }
   });
+
+  it("keeps action and mutator bags stable across parent rerenders", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const snapshots = [];
+
+    const fetchDmRecipients = jest.fn();
+    const inspectRecipientTrust = jest.fn();
+
+    function Probe({ tick }) {
+      const value = useDirectMessagesState({
+        userId: "user-1",
+        view: "dm",
+        e2eeReady: false,
+        fetchDmRecipients,
+        inspectRecipientTrust,
+      });
+
+      useEffect(() => {
+        snapshots.push({
+          tick,
+          actions: value.actions,
+          mutators: value.mutators,
+          refs: value.refs,
+        });
+      });
+
+      return null;
+    }
+
+    try {
+      await act(async () => {
+        root.render(<Probe tick={0} />);
+      });
+
+      await act(async () => {
+        root.render(<Probe tick={1} />);
+      });
+
+      const baseline = snapshots[0];
+      const latest = snapshots[snapshots.length - 1];
+
+      expect(snapshots.length).toBeGreaterThanOrEqual(2);
+      expect(latest.actions).toBe(baseline.actions);
+      expect(latest.mutators).toBe(baseline.mutators);
+      expect(latest.refs).toBe(baseline.refs);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
 });

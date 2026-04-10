@@ -4,8 +4,8 @@ import re
 from typing import Optional
 
 from app.core.database import db
+from app.permissions import has_channel_permission, has_server_permission
 from app.core.utils import sanitize_user
-from app.services.server_ops import check_permission
 
 
 async def hydrate_message_mentions(message: dict) -> dict:
@@ -61,7 +61,11 @@ async def resolve_message_mentions(
     ).to_list(2000)
     member_map = {member["user_id"]: member for member in member_docs}
 
-    can_mention_everyone = await check_permission(actor_id, server_id, "mention_everyone", channel=channel)
+    can_mention_everyone = (
+        await has_channel_permission(db, actor_id, channel, "mention_everyone")
+        if channel is not None
+        else await has_server_permission(db, actor_id, server_id, "mention_everyone")
+    )
 
     valid_user_ids: list[str] = []
     provided_user_ids = list(dict.fromkeys(mentioned_user_ids or []))

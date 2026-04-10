@@ -251,16 +251,22 @@ Bei neuem Gerät: Singra ID Login → alle Instanzen werden automatisch geladen.
 ### 3. Wie verknüpft ein bestehender User sein lokales Konto?
 
 ```
-Einstellungen → Konto → "Mit Singra ID verknüpfen"
+Direktnachrichten / Freunde → "Singra-ID einrichten"
     │
     ▼
-OAuth2-Flow → Singra ID bestätigt Identität
+Singra-ID Setup-Screen mit vorausgefüllten lokalen Profildaten
     │
     ▼
-Lokaler User bekommt Feld: singra_id = "abc123"
+Singra-ID Registrierung + E-Mail-Bestätigung
     │
     ▼
-Ab jetzt: Login mit Singra ID oder lokalem Passwort
+Explizites Linking:
+  users.svid_account_id = "abc123"
+  svid_accounts.linked_user_id = "<lokale user id>"
+    │
+    ▼
+Server, Einstellungen, Mitgliedschaften und lokale Daten bleiben bestehen.
+Optional kann der lokale Passwort-Login danach deaktiviert werden.
 ```
 
 ### 4. Können Instanzen untereinander kommunizieren?

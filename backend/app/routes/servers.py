@@ -4,10 +4,9 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.core.database import db
 from app.dependencies import current_user, require_instance_owner
-from app.permissions import build_viewer_context
+from app.permissions import assert_server_permission, build_viewer_context
 from app.schemas import OwnershipTransferInput, ServerCreateInput
 from app.services.server_ops import (
-    check_permission,
     clear_voice_membership,
     create_default_server,
     delete_server_cascade,
@@ -61,8 +60,7 @@ async def get_server(server_id: str, request: Request):
 @router.put("/{server_id}")
 async def update_server(server_id: str, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_server"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_server", "No permission")
     body = await request.json()
     updates = {
         key: value

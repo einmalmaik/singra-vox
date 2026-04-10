@@ -7,7 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/api";
 import { getCachedDmMessages, getPersistedWorkspaceState, setCachedDmMessages } from "@/lib/chatPersistence";
 import { fetchMessageHistoryPage, fetchMessageHistoryWindow, mergeTimelineMessages } from "@/lib/messageHistory";
@@ -206,48 +206,82 @@ export function useDirectMessagesState({
     setDmMessages((previous) => [...previous, message]);
   }, []);
 
-  return {
-    state: {
-      dmConversations,
-      dmSortMode,
-      currentDmUser,
-      dmMessages,
-      dmHasOlderMessages,
-      loadingOlderDmMessages,
-      dmTrustNotice,
-      dmSearchOpen,
-      dmSearchQuery,
-      dmSearchResults,
-      dmSearchLoading,
-      dmTab,
-      groupDMs,
-      currentGroupDM,
-      relayDmFriend,
-    },
-    refs: {
-      currentDmUserRef,
-    },
-    actions: {
-      loadDmConversations,
-      loadGroupDMs,
-      selectDmUser,
-      loadOlderDmMessages,
-      toggleSearch,
-      cycleSortMode,
-      setDmSearchQuery,
-      setDmTab,
-      selectGroupDm,
-      startRelayDm,
-      appendDmMessage,
-    },
-    mutators: {
-      setDmConversations,
-      setCurrentDmUser,
-      setDmMessages,
-      setCurrentGroupDM,
-      setRelayDmFriend,
-      setDmTrustNotice,
-      setDmSearchResults,
-    },
-  };
+  const state = useMemo(() => ({
+    dmConversations,
+    dmSortMode,
+    currentDmUser,
+    dmMessages,
+    dmHasOlderMessages,
+    loadingOlderDmMessages,
+    dmTrustNotice,
+    dmSearchOpen,
+    dmSearchQuery,
+    dmSearchResults,
+    dmSearchLoading,
+    dmTab,
+    groupDMs,
+    currentGroupDM,
+    relayDmFriend,
+  }), [
+    currentDmUser,
+    currentGroupDM,
+    dmConversations,
+    dmHasOlderMessages,
+    dmMessages,
+    dmSearchLoading,
+    dmSearchOpen,
+    dmSearchQuery,
+    dmSearchResults,
+    dmSortMode,
+    dmTab,
+    dmTrustNotice,
+    groupDMs,
+    loadingOlderDmMessages,
+    relayDmFriend,
+  ]);
+
+  const refs = useMemo(() => ({
+    currentDmUserRef,
+  }), []);
+
+  const actions = useMemo(() => ({
+    loadDmConversations,
+    loadGroupDMs,
+    selectDmUser,
+    loadOlderDmMessages,
+    toggleSearch,
+    cycleSortMode,
+    setDmSearchQuery,
+    setDmTab,
+    selectGroupDm,
+    startRelayDm,
+    appendDmMessage,
+  }), [
+    appendDmMessage,
+    cycleSortMode,
+    loadDmConversations,
+    loadGroupDMs,
+    loadOlderDmMessages,
+    selectDmUser,
+    selectGroupDm,
+    startRelayDm,
+    toggleSearch,
+  ]);
+
+  const mutators = useMemo(() => ({
+    setDmConversations,
+    setCurrentDmUser,
+    setDmMessages,
+    setCurrentGroupDM,
+    setRelayDmFriend,
+    setDmTrustNotice,
+    setDmSearchResults,
+  }), []);
+
+  return useMemo(() => ({
+    state,
+    refs,
+    actions,
+    mutators,
+  }), [actions, mutators, refs, state]);
 }

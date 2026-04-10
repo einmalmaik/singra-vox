@@ -27,6 +27,8 @@ codex.md
 .github/copilot*
 *.agent.md
 AGENTS.md
+.qoder/
+.codex-logs/
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/

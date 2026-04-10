@@ -5,9 +5,9 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.database import db
 from app.core.utils import sanitize_user
 from app.dependencies import current_user
+from app.permissions import assert_server_permission
 from app.services.server_ops import (
     build_member_payload,
-    check_permission,
     clear_voice_membership,
     log_audit,
 )
@@ -45,8 +45,7 @@ async def list_members(server_id: str, request: Request):
 @router.put("/{server_id}/members/{user_id}")
 async def update_member(server_id: str, user_id: str, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "manage_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "manage_members", "No permission")
 
     body = await request.json()
     updates = {}
@@ -71,8 +70,7 @@ async def update_member(server_id: str, user_id: str, request: Request):
 @router.delete("/{server_id}/members/{user_id}")
 async def kick_member(server_id: str, user_id: str, request: Request):
     actor = await current_user(request)
-    if not await check_permission(actor["id"], server_id, "kick_members"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, actor["id"], server_id, "kick_members", "No permission")
     server = await db.servers.find_one({"id": server_id}, {"_id": 0, "owner_id": 1})
     if server and server.get("owner_id") == user_id:
         raise HTTPException(400, "Cannot remove the server owner")

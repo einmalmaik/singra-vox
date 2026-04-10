@@ -12,12 +12,15 @@ from app.core.encryption import decrypt_channel_content, encrypt_channel_content
 from app.core.utils import new_id, now_utc
 from app.dependencies import current_user, require_verified_device
 from app.pagination import clamp_page_limit
+from app.permissions import (
+    assert_channel_permission,
+    assert_server_permission,
+    get_message_history_cutoff,
+)
 from app.schemas import MessageCreateInput
 from app.services.e2ee import ensure_private_channel_member_access
 from app.services.message_mentions import hydrate_message_mentions, resolve_message_mentions
 from app.services.notifications import send_notification as create_notification
-from app.services.server_ops import check_permission
-from app.services.server_ops import get_message_history_cutoff as get_server_message_history_cutoff
 from app.ws import ws_mgr
 
 
@@ -31,8 +34,7 @@ async def update_channel(channel_id: str, request: Request):
     channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not channel:
         raise HTTPException(404, "Channel not found")
-    if not await check_permission(user["id"], channel["server_id"], "manage_channels"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], channel["server_id"], "manage_channels", "No permission")
 
     body = await request.json()
     updates = {
@@ -75,8 +77,7 @@ async def delete_channel(channel_id: str, request: Request):
     channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not channel:
         raise HTTPException(404, "Channel not found")
-    if not await check_permission(user["id"], channel["server_id"], "manage_channels"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], channel["server_id"], "manage_channels", "No permission")
 
     if channel.get("type") == "category":
         await db.channels.update_many(
@@ -103,12 +104,11 @@ async def get_messages(channel_id: str, request: Request, before: Optional[str] 
     if not channel:
         raise HTTPException(404, "Channel not found")
     limit = clamp_page_limit(limit)
-    if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
-        raise HTTPException(403, "No permission")
+    await assert_channel_permission(db, user["id"], channel, "read_messages", "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
 
     query = {"channel_id": channel_id, "is_deleted": {"$ne": True}}
-    history_cutoff = await get_server_message_history_cutoff(user["id"], channel["server_id"], channel=channel)
+    history_cutoff = await get_message_history_cutoff(db, user["id"], channel["server_id"], channel=channel)
     created_at_filters: dict[str, str] = {}
     if before:
         created_at_filters["$lt"] = before
@@ -140,10 +140,9 @@ async def send_message(channel_id: str, inp: MessageCreateInput, request: Reques
     channel = await db.channels.find_one({"id": channel_id}, {"_id": 0})
     if not channel:
         raise HTTPException(404, "Channel not found")
-    if not await check_permission(user["id"], channel["server_id"], "send_messages", channel=channel):
-        raise HTTPException(403, "No permission")
-    if inp.attachments and not await check_permission(user["id"], channel["server_id"], "attach_files", channel=channel):
-        raise HTTPException(403, "No permission to upload files")
+    await assert_channel_permission(db, user["id"], channel, "send_messages", "No permission")
+    if inp.attachments:
+        await assert_channel_permission(db, user["id"], channel, "attach_files", "No permission to upload files")
     await ensure_private_channel_member_access(user["id"], channel)
 
     member = await db.server_members.find_one(

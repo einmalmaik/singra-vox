@@ -8,8 +8,8 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.database import db
 from app.core.utils import now_utc
 from app.dependencies import current_user
+from app.permissions import assert_server_permission
 from app.schemas import InviteCreateInput
-from app.services.server_ops import check_permission
 
 
 router = APIRouter(prefix="/api/servers", tags=["Servers"])
@@ -18,16 +18,14 @@ router = APIRouter(prefix="/api/servers", tags=["Servers"])
 @router.get("/{server_id}/invites")
 async def list_invites(server_id: str, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_server"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_server", "No permission")
     return await db.invites.find({"server_id": server_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
 
 
 @router.post("/{server_id}/invites")
 async def create_invite(server_id: str, inp: InviteCreateInput, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "create_invites"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "create_invites", "No permission")
 
     code = secrets.token_urlsafe(8)
     invite = {

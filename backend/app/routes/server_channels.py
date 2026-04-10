@@ -5,8 +5,9 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.database import db
 from app.core.utils import new_id, now_utc, sanitize_user
 from app.dependencies import current_user
+from app.permissions import assert_server_permission, has_channel_permission
 from app.schemas import ChannelCreateInput, ChannelReorderInput
-from app.services.server_ops import check_permission, log_audit
+from app.services.server_ops import log_audit
 from app.ws import ws_mgr
 
 
@@ -27,7 +28,7 @@ async def list_channels(server_id: str, request: Request):
     visible_channels = []
     for channel in channels:
         visible_permission = "join_voice" if channel.get("type") == "voice" else "read_messages"
-        if not await check_permission(user["id"], server_id, visible_permission, channel=channel):
+        if not await has_channel_permission(db, user["id"], channel, visible_permission):
             continue
         if channel["type"] == "voice":
             states = await db.voice_states.find({"channel_id": channel["id"]}, {"_id": 0}).to_list(50)
@@ -45,8 +46,7 @@ async def list_channels(server_id: str, request: Request):
 @router.post("/{server_id}/channels")
 async def create_channel(server_id: str, inp: ChannelCreateInput, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_channels"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_channels", "No permission")
 
     channel_type = (inp.type or "text").strip().lower()
     if channel_type not in {"text", "voice", "category"}:
@@ -88,8 +88,7 @@ async def create_channel(server_id: str, inp: ChannelCreateInput, request: Reque
 @router.put("/{server_id}/channels/reorder")
 async def reorder_channels(server_id: str, inp: ChannelReorderInput, request: Request):
     user = await current_user(request)
-    if not await check_permission(user["id"], server_id, "manage_channels"):
-        raise HTTPException(403, "No permission")
+    await assert_server_permission(db, user["id"], server_id, "manage_channels", "No permission")
     if not inp.items:
         return {"ok": True, "channels": []}
 

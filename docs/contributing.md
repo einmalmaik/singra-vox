@@ -133,11 +133,13 @@ app.include_router(mein_modul_r)
 ### Berechtigungsprüfung einbauen
 
 ```python
-from app.permissions import check_permission, assert_channel_permission
+from app.permissions import assert_server_permission, assert_channel_permission
 
 # Server-weite Berechtigung
-if not await check_permission(user["id"], server_id, "manage_server"):
-    raise HTTPException(403, "Keine Berechtigung")
+await assert_server_permission(
+    db, user["id"], server_id, "manage_server",
+    "Keine Berechtigung"
+)
 
 # Kanal-spezifische Berechtigung
 await assert_channel_permission(
@@ -171,41 +173,49 @@ await log_audit(
 - Neue Workspace-Features gehoeren in die passende Domain-Hook-Schicht, etwa Server-Workspace, Direktnachrichten, Socket-Lifecycle oder Notification-Bootstrap.
 - Wenn eine Datei wieder zu einem Container waechst, zuerst Responsibilities trennen, dann erst Feature-Code ergaenzen.
 
-### Neue Komponente
+### Neue View-Komponente
 
 ```jsx
 // frontend/src/components/mein-bereich/MeineKomponente.js
-import { useTranslation } from "react-i18next";
-import { useAuth } from "@/contexts/AuthContext";
-import api from "@/lib/api";
-
-export default function MeineKomponente({ serverId }) {
-  const { t } = useTranslation();
-  const { user } = useAuth();
-  const [items, setItems] = useState([]);
-
-  useEffect(() => {
-    api.get(`/api/mein-modul?server_id=${serverId}`)
-      .then(res => setItems(res.data))
-      .catch(console.error);
-  }, [serverId]);
-
+export default function MeineKomponente({ items, onSelectItem, t }) {
   return (
     <div data-testid="meine-komponente" className="workspace-card p-4">
       <h3 className="workspace-section-label">{t("mein.titel")}</h3>
-      {items.map(item => (
-        <div
+      {items.map((item) => (
+        <button
           key={item.id}
+          type="button"
+          onClick={() => onSelectItem(item.id)}
           data-testid={`mein-item-${item.id}`}
           className="workspace-toolbar-button p-2 mb-1"
         >
           {item.name}
-        </div>
+        </button>
       ))}
     </div>
   );
 }
 ```
+
+```jsx
+// frontend/src/components/mein-bereich/useMeineKomponenteController.js
+import { useEffect, useState } from "react";
+import api from "@/lib/api";
+
+export default function useMeineKomponenteController({ serverId }) {
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    api.get(`/api/mein-modul?server_id=${serverId}`)
+      .then((res) => setItems(res.data))
+      .catch(console.error);
+  }, [serverId]);
+
+  return { items };
+}
+```
+
+Views bleiben damit API-, Socket- und Context-frei. Side Effects gehoeren in Controller/Hooks.
 
 ### API-Aufruf (api.js)
 
@@ -288,8 +298,10 @@ PERMISSIONS = {
 
 ```python
 # 2. In der Route prüfen:
-if not await check_permission(user["id"], server_id, "mein_neues_recht"):
-    raise HTTPException(403, "Keine Berechtigung")
+await assert_server_permission(
+    db, user["id"], server_id, "mein_neues_recht",
+    "Keine Berechtigung"
+)
 ```
 
 ---

@@ -7,8 +7,9 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.database import db
 from app.core.utils import now_utc, sanitize_user
 from app.dependencies import current_user
+from app.permissions import assert_channel_permission
 from app.services.e2ee import ensure_private_channel_member_access
-from app.services.server_ops import check_permission, clear_voice_membership
+from app.services.server_ops import clear_voice_membership
 from app.ws import ws_mgr
 
 
@@ -26,8 +27,7 @@ async def voice_join(server_id: str, channel_id: str, request: Request):
     )
     if not channel:
         raise HTTPException(404, "Voice channel not found")
-    if not await check_permission(user["id"], server_id, "join_voice", channel=channel):
-        raise HTTPException(403, "No permission")
+    await assert_channel_permission(db, user["id"], channel, "join_voice", "No permission")
     await ensure_private_channel_member_access(user["id"], channel)
     await clear_voice_membership(user["id"])
 

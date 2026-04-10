@@ -39,6 +39,7 @@ from app.schemas import (
     RegisterInput,
     ResendVerificationInput,
     ResetPasswordInput,
+    SvidLinkInput,
     SvidLoginToInstanceInput,
     VerifyEmailInput,
 )
@@ -56,6 +57,7 @@ from app.services.auth_flow import (
 )
 from app.services.presence import broadcast_presence_update, log_status_history
 from app.services.server_ops import clear_voice_membership
+from app.services.svid_linking import link_local_user_to_svid
 from app.ws import ws_mgr
 
 
@@ -130,6 +132,11 @@ async def login(inp: LoginInput, request: Request, response: Response):
         code="login_rate_limited",
     )
     user = await db.users.find_one({"email": email}, {"_id": 0})
+    if user and user.get("local_login_disabled") and user.get("svid_account_id"):
+        raise HTTPException(403, {
+            "code": "local_login_disabled",
+            "message": "Dieses Konto verwendet jetzt Singra-ID. Bitte melde dich mit Singra-ID an.",
+        })
     valid_password = False
     needs_rehash = False
     if user:
@@ -263,8 +270,11 @@ async def password_reset_lookup(inp: PasswordResetLookupInput):
     email = inp.email.lower().strip()
     accounts = []
 
-    local_user = await db.users.find_one({"email": email}, {"_id": 0, "id": 1, "email_verified": 1})
-    if local_user and local_user.get("email_verified", True):
+    local_user = await db.users.find_one(
+        {"email": email},
+        {"_id": 0, "id": 1, "email_verified": 1, "local_login_disabled": 1},
+    )
+    if local_user and local_user.get("email_verified", True) and not local_user.get("local_login_disabled"):
         accounts.append("local")
 
     svid_account = await db.svid_accounts.find_one({"email": email}, {"_id": 0, "id": 1, "email_verified": 1})
@@ -287,6 +297,8 @@ async def forgot_password(inp: ForgotPasswordInput, request: Request):
         code="forgot_password_rate_limited",
     )
     user = await db.users.find_one({"email": email}, {"_id": 0})
+    if user and user.get("local_login_disabled") and user.get("svid_account_id"):
+        return {"ok": True}
     if not user or not user.get("email_verified", True):
         return {"ok": True}
 
@@ -318,6 +330,11 @@ async def reset_password(inp: ResetPasswordInput, request: Request):
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         raise HTTPException(400, "Invalid reset code")
+    if user.get("local_login_disabled") and user.get("svid_account_id"):
+        raise HTTPException(403, {
+            "code": "local_login_disabled",
+            "message": "Dieses Konto verwendet jetzt Singra-ID. Bitte setze das Passwort über Singra-ID zurück.",
+        })
 
     reset_request = await db.email_verifications.find_one(
         {"user_id": user["id"], "purpose": PASSWORD_RESET_PURPOSE},
@@ -487,9 +504,12 @@ async def login_with_svid(inp: SvidLoginToInstanceInput, request: Request, respo
     if not local_user:
         local_user = await db.users.find_one({"email": svid_email.lower().strip()}, {"_id": 0})
         if local_user:
-            await db.users.update_one(
-                {"id": local_user["id"]},
-                {"$set": {"svid_account_id": svid_account_id, "svid_server": payload.get("iss", "")}},
+            local_user, _linked_svid_account = await link_local_user_to_svid(
+                db,
+                local_user=local_user,
+                svid_account=svid_account,
+                svid_issuer=payload.get("iss", ""),
+                disable_local_password_login=bool(local_user.get("local_login_disabled")),
             )
         else:
             uid = str(uuid4())
@@ -511,10 +531,15 @@ async def login_with_svid(inp: SvidLoginToInstanceInput, request: Request, respo
                 "email_verified_at": now_utc(),
                 "svid_account_id": svid_account_id,
                 "svid_server": payload.get("iss", ""),
+                "local_login_disabled": True,
                 "created_at": now_utc(),
                 "last_seen": now_utc(),
             }
             await db.users.insert_one(local_user)
+            await db.svid_accounts.update_one(
+                {"id": svid_account_id},
+                {"$set": {"linked_user_id": uid}},
+            )
 
     await db.users.update_one(
         {"id": local_user["id"]},
@@ -524,3 +549,37 @@ async def login_with_svid(inp: SvidLoginToInstanceInput, request: Request, respo
     auth_payload = await issue_auth_response(local_user, request, response)
     await broadcast_presence_update(local_user["id"])
     return auth_payload
+
+
+@router.post("/link-svid")
+async def link_svid_account(inp: SvidLinkInput, request: Request):
+    from app.identity.oauth2 import decode_svid_token
+
+    local_user, _session = await load_current_user(db, request)
+
+    try:
+        payload = decode_svid_token(inp.svid_access_token)
+    except Exception:
+        raise HTTPException(401, "Invalid Singra Vox ID token")
+
+    svid_account_id = payload.get("sub")
+    if not svid_account_id:
+        raise HTTPException(401, "Invalid token payload")
+
+    svid_account = await db.svid_accounts.find_one({"id": svid_account_id}, {"_id": 0})
+    if not svid_account:
+        raise HTTPException(404, "Singra Vox ID account not found")
+
+    updated_user, linked_svid_account = await link_local_user_to_svid(
+        db,
+        local_user=local_user,
+        svid_account=svid_account,
+        svid_issuer=payload.get("iss", ""),
+        disable_local_password_login=inp.disable_local_password_login,
+    )
+
+    return {
+        "ok": True,
+        "user": sanitize_user(updated_user),
+        "svid_account": linked_svid_account,
+    }

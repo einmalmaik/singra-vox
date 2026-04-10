@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.config import livekit_api_key, livekit_api_secret, livekit_url
 from app.core.database import db
 from app.dependencies import current_user
+from app.permissions import get_channel_permissions
 from app.schemas import NativeScreenShareTokenInput, VoiceTokenInput
 from app.services.e2ee import ensure_private_channel_member_access
 from app.services.livekit_tokens import (
@@ -17,7 +18,6 @@ from app.services.livekit_tokens import (
     build_voice_room_name,
     create_voice_participant_token,
 )
-from app.services.server_ops import check_permission
 
 
 router = APIRouter(prefix="/api/voice", tags=["Voice"])
@@ -34,9 +34,10 @@ async def _resolve_voice_channel_context(request: Request, server_id: str, chann
     if not channel:
         raise HTTPException(404, "Voice channel not found")
 
-    can_join = await check_permission(user["id"], server_id, "join_voice", channel=channel)
-    can_speak = await check_permission(user["id"], server_id, "speak", channel=channel)
-    can_stream = await check_permission(user["id"], server_id, "stream", channel=channel)
+    permissions = await get_channel_permissions(db, user["id"], channel)
+    can_join = bool(permissions.get("join_voice", False))
+    can_speak = bool(permissions.get("speak", False))
+    can_stream = bool(permissions.get("stream", False))
     if not can_join:
         raise HTTPException(403, "No permission")
 

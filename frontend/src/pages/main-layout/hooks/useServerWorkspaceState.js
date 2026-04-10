@@ -7,7 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { formatAppError } from "@/lib/appErrors";
@@ -286,47 +286,82 @@ export function useServerWorkspaceState({ userId, navigate, t }) {
     clearChannelTimeline();
   }, [clearChannelTimeline]);
 
-  return {
-    state: {
-      servers,
-      currentServer,
-      channels,
-      currentChannel,
-      messages,
-      channelHasOlderMessages,
-      loadingOlderChannelMessages,
-      members,
-      roles,
-      viewerContext,
-      serverSettingsRequest,
-    },
-    refs: {
-      currentServerRef,
-      currentChannelRef,
-    },
-    actions: {
-      loadServers,
-      loadServerSnapshot,
-      selectServer,
-      selectChannel,
-      loadOlderChannelMessages,
-      refreshChannels,
-      refreshMembers,
-      openServerSettingsFromRail,
-      deleteServerFromRail,
-      clearChannelTimeline,
-      resetWorkspace,
-    },
-    mutators: {
-      setServers,
-      setCurrentServer,
-      setChannels,
-      setCurrentChannel,
-      setMessages,
-      setMembers,
-      setRoles,
-      setViewerContext,
-      setServerSettingsRequest,
-    },
-  };
+  const state = useMemo(() => ({
+    servers,
+    currentServer,
+    channels,
+    currentChannel,
+    messages,
+    channelHasOlderMessages,
+    loadingOlderChannelMessages,
+    members,
+    roles,
+    viewerContext,
+    serverSettingsRequest,
+  }), [
+    channelHasOlderMessages,
+    channels,
+    currentChannel,
+    currentServer,
+    loadingOlderChannelMessages,
+    members,
+    messages,
+    roles,
+    serverSettingsRequest,
+    servers,
+    viewerContext,
+  ]);
+
+  const refs = useMemo(() => ({
+    currentServerRef,
+    currentChannelRef,
+  }), []);
+
+  // The controller depends on these bags for effects and callbacks. Keep the
+  // object identities stable so parent effects do not refire just because the
+  // hook re-rendered with unrelated state changes.
+  const actions = useMemo(() => ({
+    loadServers,
+    loadServerSnapshot,
+    selectServer,
+    selectChannel,
+    loadOlderChannelMessages,
+    refreshChannels,
+    refreshMembers,
+    openServerSettingsFromRail,
+    deleteServerFromRail,
+    clearChannelTimeline,
+    resetWorkspace,
+  }), [
+    clearChannelTimeline,
+    deleteServerFromRail,
+    loadOlderChannelMessages,
+    loadServerSnapshot,
+    loadServers,
+    openServerSettingsFromRail,
+    refreshChannels,
+    refreshMembers,
+    resetWorkspace,
+    selectChannel,
+    selectServer,
+  ]);
+
+  const mutators = useMemo(() => ({
+    setServers,
+    setCurrentServer,
+    setChannels,
+    setCurrentChannel,
+    setMessages,
+    setMembers,
+    setRoles,
+    setViewerContext,
+    setServerSettingsRequest,
+  }), []);
+
+  return useMemo(() => ({
+    state,
+    refs,
+    actions,
+    mutators,
+  }), [actions, mutators, refs, state]);
 }

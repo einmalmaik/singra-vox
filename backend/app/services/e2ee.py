@@ -8,8 +8,7 @@ from fastapi import HTTPException
 
 from app.core.constants import E2EE_PROTOCOL_VERSION
 from app.core.database import db
-from app.permissions import has_channel_permission
-from app.services.server_ops import check_permission
+from app.permissions import assert_channel_permission, has_channel_permission
 
 
 def decode_base64_bytes(value: str, *, field_name: str) -> bytes:
@@ -159,8 +158,13 @@ async def authorize_blob_access(user: dict, blob_record: dict) -> None:
         channel = await db.channels.find_one({"id": scope_id}, {"_id": 0})
         if not channel:
             raise HTTPException(404, "Channel not found")
-        if not await check_permission(user["id"], channel["server_id"], "read_messages", channel=channel):
-            raise HTTPException(403, "No access to this encrypted attachment")
+        await assert_channel_permission(
+            db,
+            user["id"],
+            channel,
+            "read_messages",
+            "No access to this encrypted attachment",
+        )
         await ensure_private_channel_member_access(user["id"], channel)
         return
 
