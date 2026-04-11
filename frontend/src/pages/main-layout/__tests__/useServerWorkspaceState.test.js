@@ -9,6 +9,7 @@
  */
 import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import api from "@/lib/api";
 import { useServerWorkspaceState } from "../hooks/useServerWorkspaceState";
 
 jest.mock("@/lib/api", () => ({
@@ -94,6 +95,94 @@ describe("useServerWorkspaceState", () => {
       expect(latest.mutators).toBe(baseline.mutators);
       expect(latest.refs).toBe(baseline.refs);
     } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it("ignores stale channel refresh responses that resolve out of order", async () => {
+    const deferred = () => {
+      let resolve;
+      const promise = new Promise((nextResolve) => {
+        resolve = nextResolve;
+      });
+      return { promise, resolve };
+    };
+
+    const firstChannels = deferred();
+    const firstViewerContext = deferred();
+    const secondChannels = deferred();
+    const secondViewerContext = deferred();
+    const channelsCalls = [];
+    const viewerCalls = [];
+
+    api.get.mockImplementation((url) => {
+      if (url.endsWith("/channels")) {
+        const next = channelsCalls.length === 0 ? firstChannels : secondChannels;
+        channelsCalls.push(url);
+        return next.promise;
+      }
+      if (url.endsWith("/viewer-context")) {
+        const next = viewerCalls.length === 0 ? firstViewerContext : secondViewerContext;
+        viewerCalls.push(url);
+        return next.promise;
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let latestValue = null;
+
+    function Probe() {
+      const value = useServerWorkspaceState({
+        userId: "user-1",
+        navigate: jest.fn(),
+        t: (key) => key,
+      });
+
+      useEffect(() => {
+        latestValue = value;
+      });
+
+      return null;
+    }
+
+    try {
+      await act(async () => {
+        root.render(<Probe />);
+      });
+
+      await act(async () => {
+        latestValue.mutators.setCurrentServer({ id: "server-1", name: "Alpha" });
+      });
+
+      await act(async () => {
+        void latestValue.actions.refreshChannels();
+        void latestValue.actions.refreshChannels();
+      });
+
+      await act(async () => {
+        secondChannels.resolve({ data: [{ id: "voice-2", type: "voice" }] });
+        secondViewerContext.resolve({ data: { permissions: ["view_channel"] } });
+        await Promise.resolve();
+      });
+
+      expect(latestValue.state.channels).toEqual([{ id: "voice-2", type: "voice" }]);
+
+      await act(async () => {
+        firstChannels.resolve({ data: [{ id: "voice-1", type: "voice" }] });
+        firstViewerContext.resolve({ data: { permissions: ["stale"] } });
+        await Promise.resolve();
+      });
+
+      expect(latestValue.state.channels).toEqual([{ id: "voice-2", type: "voice" }]);
+      expect(latestValue.state.viewerContext).toEqual({ permissions: ["view_channel"] });
+    } finally {
+      api.get.mockImplementation(() => Promise.resolve({ data: [] }));
       await act(async () => {
         root.unmount();
       });

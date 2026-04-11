@@ -11,6 +11,9 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 
 let mockRuntimeConfig = { isDesktop: false };
+var mockGetDesktopWindowFullscreen = jest.fn(() => Promise.resolve(false));
+var mockObserveDesktopWindowFullscreen = jest.fn(() => Promise.resolve(jest.fn()));
+var mockSetDesktopWindowFullscreen = jest.fn(() => Promise.resolve(true));
 
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -36,6 +39,12 @@ jest.mock("@/lib/videoReadiness", () => ({
   observeVideoReadiness: jest.fn(),
 }), { virtual: true });
 
+jest.mock("@/lib/desktop", () => ({
+  getDesktopWindowFullscreen: (...args) => mockGetDesktopWindowFullscreen(...args),
+  observeDesktopWindowFullscreen: (...args) => mockObserveDesktopWindowFullscreen(...args),
+  setDesktopWindowFullscreen: (...args) => mockSetDesktopWindowFullscreen(...args),
+}), { virtual: true });
+
 import { observeVideoReadiness } from "@/lib/videoReadiness";
 import VoiceMediaStage from "../VoiceMediaStage";
 
@@ -44,10 +53,16 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 describe("VoiceMediaStage", () => {
   let container;
   let root;
+  const originalFullscreenDescriptor = Object.getOwnPropertyDescriptor(document, "fullscreenElement");
+  const originalExitFullscreen = document.exitFullscreen;
+  const originalRequestFullscreen = Element.prototype.requestFullscreen;
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockRuntimeConfig = { isDesktop: false };
+    mockGetDesktopWindowFullscreen.mockResolvedValue(false);
+    mockObserveDesktopWindowFullscreen.mockResolvedValue(jest.fn());
+    mockSetDesktopWindowFullscreen.mockResolvedValue(true);
     jest.spyOn(window.HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
     jest.spyOn(window.HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     container = document.createElement("div");
@@ -60,6 +75,13 @@ describe("VoiceMediaStage", () => {
       root.unmount();
     });
     container.remove();
+    if (originalFullscreenDescriptor) {
+      Object.defineProperty(document, "fullscreenElement", originalFullscreenDescriptor);
+    } else {
+      delete document.fullscreenElement;
+    }
+    document.exitFullscreen = originalExitFullscreen;
+    Element.prototype.requestFullscreen = originalRequestFullscreen;
     jest.restoreAllMocks();
     jest.useRealTimers();
   });
@@ -329,5 +351,105 @@ describe("VoiceMediaStage", () => {
     });
 
     expect(attachTrackRefElement).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses DOM fullscreen in web mode", async () => {
+    let fullscreenElement = null;
+    const requestFullscreen = jest.fn(async function requestFullscreenMock() {
+      fullscreenElement = this;
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+    const exitFullscreen = jest.fn(async () => {
+      fullscreenElement = null;
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => fullscreenElement,
+    });
+    document.exitFullscreen = exitFullscreen;
+    Element.prototype.requestFullscreen = requestFullscreen;
+
+    observeVideoReadiness.mockImplementation((_element, onReady) => {
+      onReady();
+      return jest.fn();
+    });
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={{ current: { attachTrackRefElement: jest.fn(() => jest.fn()), ensureTrackRefPlayback: jest.fn(), logger: { debug: jest.fn(), warn: jest.fn() } } }}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    await act(async () => {
+      container.querySelector("[data-testid='media-stage-fullscreen']").click();
+    });
+
+    expect(requestFullscreen).toHaveBeenCalled();
+    expect(mockSetDesktopWindowFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("uses native desktop fullscreen in Tauri mode and exits it on close", async () => {
+    mockRuntimeConfig = { isDesktop: true };
+    let desktopFullscreenListener = null;
+    mockObserveDesktopWindowFullscreen.mockImplementation(async (handler) => {
+      desktopFullscreenListener = handler;
+      return jest.fn();
+    });
+
+    observeVideoReadiness.mockImplementation((_element, onReady) => {
+      onReady();
+      return jest.fn();
+    });
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open
+          onClose={() => {}}
+          voiceEngineRef={{ current: { attachTrackRefElement: jest.fn(() => jest.fn()), ensureTrackRefPlayback: jest.fn(), logger: { debug: jest.fn(), warn: jest.fn() } } }}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    await act(async () => {
+      container.querySelector("[data-testid='media-stage-fullscreen']").click();
+    });
+
+    expect(mockSetDesktopWindowFullscreen).toHaveBeenCalledWith(true);
+
+    await act(async () => {
+      desktopFullscreenListener?.(true);
+    });
+
+    expect(container.textContent).toContain("Vollbild verlassen");
+
+    await act(async () => {
+      root.render(
+        <VoiceMediaStage
+          open={false}
+          onClose={() => {}}
+          voiceEngineRef={{ current: null }}
+          trackRefId="remote:user-2:screen_share"
+          selectedTrackAvailable
+          participantName="Bob"
+          source="screen_share"
+        />,
+      );
+    });
+
+    expect(mockSetDesktopWindowFullscreen).toHaveBeenCalledWith(false);
   });
 });

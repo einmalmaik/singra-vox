@@ -25,6 +25,19 @@ import {
   createEmptyVoiceActivity,
 } from "../channelSidebarUtils";
 
+const VOICE_SESSION_IDLE = "idle";
+const VOICE_SESSION_JOINING = "joining";
+const VOICE_SESSION_CONNECTED = "connected";
+const VOICE_SESSION_LEAVING = "leaving";
+
+function createIdleVoiceSession() {
+  return {
+    status: VOICE_SESSION_IDLE,
+    joinedChannelId: null,
+    snapshotConfirmed: false,
+  };
+}
+
 export function useVoiceChannelState({
   serverId,
   channels,
@@ -46,6 +59,7 @@ export function useVoiceChannelState({
   const [mediaParticipants, setMediaParticipants] = useState([]);
   const [videoTrackRefs, setVideoTrackRefs] = useState([]);
   const [localMediaState, setLocalMediaState] = useState(EMPTY_LOCAL_MEDIA_STATE);
+  const [voiceSession, setVoiceSession] = useState(createIdleVoiceSession);
   const [localVoicePreferences, setLocalVoicePreferences] = useState(
     loadVoicePreferences(user?.id, { isDesktop }),
   );
@@ -125,6 +139,7 @@ export function useVoiceChannelState({
         setVideoTrackRefs([]);
         setMediaParticipants([]);
         setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
+        setVoiceSession(createIdleVoiceSession());
         if (!event.wasClientInitiated) {
           if (voiceEngineRef?.current === engine) {
             voiceEngineRef.current = null;
@@ -151,19 +166,65 @@ export function useVoiceChannelState({
       channel.type === "voice"
       && channel.voice_states?.some((state) => state.user_id === user.id)
     )) || null;
+    const joinedVoiceChannelId = joinedVoiceChannel?.id || null;
     const hasLocalEngine = Boolean(voiceEngineRef?.current?.room);
+    const localJoinedChannelId = voiceSession.joinedChannelId;
+    const hasLocallyJoinedSession = (
+      (voiceSession.status === VOICE_SESSION_JOINING || voiceSession.status === VOICE_SESSION_CONNECTED)
+      && Boolean(localJoinedChannelId)
+    );
 
-    if (joinedVoiceChannel && !hasLocalEngine && !voiceChannel) {
+    if (joinedVoiceChannelId && joinedVoiceChannelId === localJoinedChannelId) {
+      if (voiceChannel?.id !== joinedVoiceChannelId) {
+        setVoiceChannel(joinedVoiceChannel);
+      }
+      setVoiceSession((previous) => (
+        previous.snapshotConfirmed
+          ? previous
+          : {
+            status: VOICE_SESSION_CONNECTED,
+            joinedChannelId: joinedVoiceChannelId,
+            snapshotConfirmed: true,
+          }
+      ));
       return;
     }
-    if (joinedVoiceChannel && hasLocalEngine && voiceChannel?.id !== joinedVoiceChannel.id) {
+
+    if (joinedVoiceChannel && (!hasLocallyJoinedSession || joinedVoiceChannelId !== localJoinedChannelId)) {
       setVoiceChannel(joinedVoiceChannel);
+      setVoiceSession({
+        status: VOICE_SESSION_CONNECTED,
+        joinedChannelId: joinedVoiceChannel.id,
+        snapshotConfirmed: true,
+      });
       return;
     }
+
+    // The channel snapshot can lag behind the successful join response by one
+    // render. Keep the local session hydrated until the server confirms it.
+    if (hasLocallyJoinedSession && hasLocalEngine && localJoinedChannelId) {
+      if (voiceChannel?.id !== localJoinedChannelId) {
+        const hydratedChannel = channels.find((channel) => channel.id === localJoinedChannelId) || voiceChannel;
+        if (hydratedChannel) {
+          setVoiceChannel(hydratedChannel);
+        }
+      }
+      return;
+    }
+
+    if (!joinedVoiceChannel && voiceSession.status === VOICE_SESSION_LEAVING) {
+      setVoiceSession(createIdleVoiceSession());
+      if (voiceChannel) {
+        setVoiceChannel(null);
+      }
+      return;
+    }
+
     if (!joinedVoiceChannel && voiceChannel) {
       setVoiceChannel(null);
+      setVoiceSession(createIdleVoiceSession());
     }
-  }, [channels, user?.id, voiceChannel, voiceEngineRef]);
+  }, [channels, user?.id, voiceChannel, voiceEngineRef, voiceSession]);
 
   useEffect(() => {
     if (!voiceChannel || !user?.id) {
@@ -171,8 +232,17 @@ export function useVoiceChannelState({
     }
     const nextChannel = channels.find((channel) => channel.id === voiceChannel.id);
     const selfState = nextChannel?.voice_states?.find((state) => state.user_id === user.id);
+    const hasLocalVoiceHydration = (
+      (voiceSession.status === VOICE_SESSION_JOINING || voiceSession.status === VOICE_SESSION_CONNECTED)
+      && voiceSession.joinedChannelId === voiceChannel.id
+      && Boolean(voiceEngineRef?.current?.room)
+    );
     if (!nextChannel || !selfState) {
+      if (hasLocalVoiceHydration) {
+        return;
+      }
       setVoiceChannel(null);
+      setVoiceSession(createIdleVoiceSession());
       setIsMuted(preferredMuted);
       setIsDeafened(preferredDeafened);
       setCameraEnabled(false);
@@ -191,7 +261,7 @@ export function useVoiceChannelState({
     }
     setIsMuted(Boolean(selfState.is_muted));
     setIsDeafened(Boolean(selfState.is_deafened));
-  }, [channels, preferredDeafened, preferredMuted, user?.id, voiceChannel, voiceEngineRef]);
+  }, [channels, preferredDeafened, preferredMuted, user?.id, voiceChannel, voiceEngineRef, voiceSession]);
 
   useEffect(() => {
     if (
@@ -253,6 +323,11 @@ export function useVoiceChannelState({
         voiceEngineRef.current = null;
       }
 
+      setVoiceSession({
+        status: VOICE_SESSION_JOINING,
+        joinedChannelId: channel.id,
+        snapshotConfirmed: false,
+      });
       const { VoiceEngine } = await import("@/lib/voiceEngine");
       const engine = new VoiceEngine();
       await engine.init({
@@ -278,6 +353,11 @@ export function useVoiceChannelState({
         is_muted: desiredMuted,
         is_deafened: desiredDeafened,
       });
+      setVoiceSession({
+        status: VOICE_SESSION_CONNECTED,
+        joinedChannelId: channel.id,
+        snapshotConfirmed: false,
+      });
       setVoiceChannel(channel);
       setIsMuted(Boolean(stateResponse?.data?.is_muted ?? desiredMuted));
       setIsDeafened(Boolean(stateResponse?.data?.is_deafened ?? desiredDeafened));
@@ -289,6 +369,12 @@ export function useVoiceChannelState({
       onRefreshChannels?.();
       toast.success(t("channel.voiceConnected"));
     } catch (error) {
+      if (voiceEngineRef?.current) {
+        await voiceEngineRef.current.disconnect().catch(() => {});
+        voiceEngineRef.current = null;
+      }
+      setVoiceSession(createIdleVoiceSession());
+      setVoiceChannel(null);
       console.error("Voice join error:", error);
       toast.error(formatAppError(t, error, { fallbackKey: "channel.joinVoiceFailed" }));
     }
@@ -312,6 +398,11 @@ export function useVoiceChannelState({
       return;
     }
     try {
+      setVoiceSession({
+        status: VOICE_SESSION_LEAVING,
+        joinedChannelId: voiceChannel.id,
+        snapshotConfirmed: false,
+      });
       if (voiceEngineRef?.current) {
         await voiceEngineRef.current.disconnect();
         voiceEngineRef.current = null;
@@ -326,11 +417,17 @@ export function useVoiceChannelState({
       setVideoTrackRefs([]);
       setMediaParticipants([]);
       setLocalMediaState(EMPTY_LOCAL_MEDIA_STATE);
+      setVoiceSession(createIdleVoiceSession());
       onRefreshChannels?.();
     } catch (error) {
+      setVoiceSession({
+        status: VOICE_SESSION_CONNECTED,
+        joinedChannelId: voiceChannel.id,
+        snapshotConfirmed: voiceSession.snapshotConfirmed,
+      });
       toast.error(formatAppError(t, error, { fallbackKey: "channel.leaveVoiceFailed" }));
     }
-  }, [onRefreshChannels, preferredDeafened, preferredMuted, serverId, t, voiceChannel, voiceEngineRef]);
+  }, [onRefreshChannels, preferredDeafened, preferredMuted, serverId, t, voiceChannel, voiceEngineRef, voiceSession.snapshotConfirmed]);
 
   const toggleMute = useCallback(async () => {
     const engine = voiceEngineRef?.current;

@@ -49,6 +49,16 @@ async function getDeepLinkPlugin() {
   }
 }
 
+async function getDesktopWindowApi() {
+  if (!isDesktopApp()) return null;
+  try {
+    const mod = await import("@tauri-apps/api/window");
+    return mod.getCurrentWindow?.() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getDesktopSecret(key) {
   const invoke = await getInvoke();
   if (!invoke) return null;
@@ -241,6 +251,70 @@ export async function updateNativeScreenShareAudioVolume(volume) {
   const invoke = await getInvoke();
   if (!invoke) return null;
   return invoke("update_native_screen_share_audio_volume", { volume });
+}
+
+export async function getDesktopWindowFullscreen() {
+  const appWindow = await getDesktopWindowApi();
+  if (!appWindow?.isFullscreen) {
+    return false;
+  }
+  try {
+    return Boolean(await appWindow.isFullscreen());
+  } catch {
+    return false;
+  }
+}
+
+export async function setDesktopWindowFullscreen(enabled) {
+  const appWindow = await getDesktopWindowApi();
+  if (!appWindow?.setFullscreen) {
+    return false;
+  }
+  try {
+    await appWindow.setFullscreen(Boolean(enabled));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function observeDesktopWindowFullscreen(handler) {
+  const appWindow = await getDesktopWindowApi();
+  if (!appWindow?.isFullscreen) {
+    return null;
+  }
+
+  let active = true;
+  const emitFullscreenState = async () => {
+    if (!active || typeof handler !== "function") {
+      return;
+    }
+    try {
+      handler(Boolean(await appWindow.isFullscreen()));
+    } catch {
+      // Ignore transient window-state races during fullscreen transitions.
+    }
+  };
+
+  let unlistenResize = null;
+  let unlistenFocus = null;
+  try {
+    unlistenResize = appWindow.onResized ? await appWindow.onResized(emitFullscreenState) : null;
+  } catch {
+    unlistenResize = null;
+  }
+  try {
+    unlistenFocus = appWindow.onFocusChanged ? await appWindow.onFocusChanged(emitFullscreenState) : null;
+  } catch {
+    unlistenFocus = null;
+  }
+  await emitFullscreenState();
+
+  return () => {
+    active = false;
+    unlistenResize?.();
+    unlistenFocus?.();
+  };
 }
 
 export async function openExternalUrl(url) {

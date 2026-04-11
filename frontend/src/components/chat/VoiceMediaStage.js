@@ -18,6 +18,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import {
+  getDesktopWindowFullscreen,
+  observeDesktopWindowFullscreen,
+  setDesktopWindowFullscreen,
+} from "@/lib/desktop";
 import { observeVideoReadiness } from "@/lib/videoReadiness";
 
 const RETRY_INTERVAL_MS = 500;
@@ -85,6 +90,9 @@ export default function VoiceMediaStage({
   }, []);
 
   useEffect(() => {
+    if (config?.isDesktop) {
+      return undefined;
+    }
     const handleFullscreenChange = () => {
       const fullscreenElement = document.fullscreenElement;
       setFullscreenActive(Boolean(
@@ -99,7 +107,40 @@ export default function VoiceMediaStage({
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
+  }, [config?.isDesktop]);
+
+  useEffect(() => {
+    if (!config?.isDesktop) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let detachObserver = null;
+
+    const bindDesktopFullscreen = async () => {
+      const initialFullscreen = await getDesktopWindowFullscreen();
+      if (!cancelled) {
+        setFullscreenActive(initialFullscreen);
+      }
+      const nextDetachObserver = await observeDesktopWindowFullscreen((nextFullscreen) => {
+        if (!cancelled) {
+          setFullscreenActive(Boolean(nextFullscreen));
+        }
+      });
+      if (!cancelled) {
+        detachObserver = nextDetachObserver;
+      } else {
+        nextDetachObserver?.();
+      }
+    };
+
+    void bindDesktopFullscreen();
+
+    return () => {
+      cancelled = true;
+      detachObserver?.();
+    };
+  }, [config?.isDesktop]);
 
   useEffect(() => {
     if (open) {
@@ -107,13 +148,27 @@ export default function VoiceMediaStage({
     }
   }, [open, source, trackRefId]);
 
-  const toggleFullscreen = useCallback(async () => {
-    const stageSurface = stageSurfaceRef.current;
-    if (!stageSurface) {
+  useEffect(() => {
+    if (!config?.isDesktop || open) {
       return;
     }
+    void setDesktopWindowFullscreen(false);
+  }, [config?.isDesktop, open]);
+
+  const toggleFullscreen = useCallback(async () => {
+    const stageSurface = stageSurfaceRef.current;
 
     try {
+      if (config?.isDesktop) {
+        const nextFullscreen = !(await getDesktopWindowFullscreen());
+        await setDesktopWindowFullscreen(nextFullscreen);
+        return;
+      }
+
+      if (!stageSurface) {
+        return;
+      }
+
       if (document.fullscreenElement === stageSurface) {
         await document.exitFullscreen?.();
         return;
@@ -122,7 +177,7 @@ export default function VoiceMediaStage({
     } catch {
       // Ignore fullscreen API failures on unsupported shells.
     }
-  }, []);
+  }, [config?.isDesktop]);
 
   const handleVideoRef = useCallback((node) => {
     videoRef.current = node;

@@ -30,6 +30,7 @@ export function useServerWorkspaceState({ userId, navigate, t }) {
   const currentServerRef = useRef(null);
   const currentChannelRef = useRef(null);
   const latestChannelLoadRef = useRef(0);
+  const latestChannelRefreshRef = useRef(0);
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
   const [channels, setChannels] = useState([]);
@@ -213,11 +214,16 @@ export function useServerWorkspaceState({ userId, navigate, t }) {
     if (!currentServerRef.current) {
       return;
     }
+    const requestId = latestChannelRefreshRef.current + 1;
+    latestChannelRefreshRef.current = requestId;
     try {
       const [channelResponse, viewerContextResponse] = await Promise.all([
         api.get(`/servers/${currentServerRef.current.id}/channels`),
         api.get(`/servers/${currentServerRef.current.id}/viewer-context`),
       ]);
+      if (latestChannelRefreshRef.current !== requestId) {
+        return;
+      }
       setChannels(channelResponse.data);
       setViewerContext(viewerContextResponse.data || null);
     } catch {

@@ -38,13 +38,13 @@ export default function AuthShell({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#06080d] px-3 py-4 text-white sm:px-6 sm:py-6">
+    <div className="relative min-h-screen overflow-x-hidden overflow-y-auto bg-[#06080d] px-3 py-4 text-white sm:px-6 sm:py-6">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.16),transparent_35%),linear-gradient(180deg,#06080d_0%,#090c12_45%,#05070b_100%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.08]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.12) 1px, transparent 1px)", backgroundSize: "42px 42px" }} />
       <div className="pointer-events-none absolute left-[-10%] top-[-10%] h-[28rem] w-[28rem] rounded-full bg-cyan-500/16 blur-[140px]" />
       <div className="pointer-events-none absolute bottom-[-15%] right-[-8%] h-[24rem] w-[24rem] rounded-full bg-zinc-500/14 blur-[120px]" />
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col items-center justify-center">
+      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-6xl flex-col items-center justify-start py-2 lg:justify-center lg:py-0">
         <main className={`workspace-panel-solid grid w-full max-w-5xl overflow-hidden p-0 lg:grid-cols-[minmax(0,1fr)_340px] ${cardClassName}`}>
           <section className="relative p-6 sm:p-8 xl:p-10">
             <div className={`mx-auto w-full max-w-md ${contentClassName}`}>
