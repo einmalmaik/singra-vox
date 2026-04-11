@@ -7,58 +7,62 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-import { deleteDesktopSecret, getDesktopSecret, isDesktopApp, setDesktopSecret } from "@/lib/desktop";
+import { deleteDesktopSecret, getDesktopSecret, isDesktopApp, setDesktopSecret } from "./desktop";
 
 const ACCESS_TOKEN_KEY = "auth.access_token";
 const REFRESH_TOKEN_KEY = "auth.refresh_token";
 
-// ── localStorage fallback (when OS keychain is unavailable) ──
-
-function lsGet(key) {
-  try { return localStorage.getItem(key) || null; } catch { return null; }
+function usesDesktopKeychain(config) {
+  return Boolean(config?.isDesktop && isDesktopApp());
 }
 
-function lsSet(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* storage full / blocked */ }
-}
-
-function lsRemove(key) {
-  try { localStorage.removeItem(key); } catch { /* noop */ }
-}
-
-async function safeGetSecret(key) {
+// Older desktop builds mirrored auth tokens into localStorage. Remove those
+// legacy copies, but never read or write them again for desktop sessions.
+function purgeLegacyLocalStorageSession() {
   try {
-    const val = await getDesktopSecret(key);
-    if (val) return val;
-  } catch { /* keychain unavailable */ }
-  return lsGet(key);
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  } catch {
+    // Ignore restricted or unavailable web storage in desktop shells.
+  }
 }
 
-async function safeSetSecret(key, value) {
-  // Write to both: keychain (primary) + localStorage (fallback)
-  lsSet(key, value);
+async function loadDesktopSecret(key) {
+  try {
+    return (await getDesktopSecret(key)) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveDesktopSecret(key, value) {
   try {
     await setDesktopSecret(key, value);
-  } catch { /* keychain unavailable – localStorage is the backup */ }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-async function safeDeleteSecret(key) {
-  lsRemove(key);
+async function clearDesktopSecret(key) {
   try {
     await deleteDesktopSecret(key);
-  } catch { /* noop */ }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-// ── Public API ──
-
 export async function loadStoredSession(config) {
-  if (!config?.isDesktop || !isDesktopApp()) {
+  if (!usesDesktopKeychain(config)) {
     return { accessToken: null, refreshToken: null };
   }
 
+  purgeLegacyLocalStorageSession();
+
   const [accessToken, refreshToken] = await Promise.all([
-    safeGetSecret(ACCESS_TOKEN_KEY),
-    safeGetSecret(REFRESH_TOKEN_KEY),
+    loadDesktopSecret(ACCESS_TOKEN_KEY),
+    loadDesktopSecret(REFRESH_TOKEN_KEY),
   ]);
 
   return {
@@ -68,19 +72,24 @@ export async function loadStoredSession(config) {
 }
 
 export async function saveStoredSession(config, session) {
-  if (!config?.isDesktop || !isDesktopApp()) return;
+  if (!usesDesktopKeychain(config)) return false;
 
   const ops = [];
-  if (session?.accessToken)  ops.push(safeSetSecret(ACCESS_TOKEN_KEY, session.accessToken));
-  if (session?.refreshToken) ops.push(safeSetSecret(REFRESH_TOKEN_KEY, session.refreshToken));
-  await Promise.all(ops);
+  if (session?.accessToken) ops.push(saveDesktopSecret(ACCESS_TOKEN_KEY, session.accessToken));
+  if (session?.refreshToken) ops.push(saveDesktopSecret(REFRESH_TOKEN_KEY, session.refreshToken));
+
+  const results = await Promise.all(ops);
+  purgeLegacyLocalStorageSession();
+  return results.every(Boolean);
 }
 
 export async function clearStoredSession(config) {
-  if (!config?.isDesktop || !isDesktopApp()) return;
+  if (!usesDesktopKeychain(config)) return false;
 
-  await Promise.all([
-    safeDeleteSecret(ACCESS_TOKEN_KEY),
-    safeDeleteSecret(REFRESH_TOKEN_KEY),
+  const results = await Promise.all([
+    clearDesktopSecret(ACCESS_TOKEN_KEY),
+    clearDesktopSecret(REFRESH_TOKEN_KEY),
   ]);
+  purgeLegacyLocalStorageSession();
+  return results.every(Boolean);
 }
