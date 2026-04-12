@@ -16,7 +16,10 @@ router = APIRouter(prefix="/api/servers", tags=["Servers"])
 @router.get("/{server_id}/roles")
 async def list_roles(server_id: str, request: Request):
     await current_user(request)
-    return await db.roles.find({"server_id": server_id}, {"_id": 0}).sort("position", -1).to_list(50)
+    roles = await db.roles.find({"server_id": server_id}, {"_id": 0}).sort("position", -1).to_list(50)
+    for role in roles:
+        role.setdefault("hoist", False)
+    return roles
 
 
 @router.post("/{server_id}/roles")

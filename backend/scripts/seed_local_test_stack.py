@@ -141,6 +141,7 @@ def upsert_role(db, *, role_id: str, server_id: str, name: str, permissions: dic
                 "position": position,
                 "is_default": is_default,
                 "mentionable": False,
+                "hoist": False,
             },
             "$setOnInsert": {"created_at": now},
         },

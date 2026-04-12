@@ -12,6 +12,8 @@ from app.auth_service import normalize_jwt_secret
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT_DIR / ".env")
+UPLOAD_ROOT = Path(os.environ.get("UPLOAD_ROOT", str(ROOT_DIR / "storage" / "uploads")))
+MEMORY_DIR = Path(os.environ.get("MEMORY_DIR", str(ROOT_DIR / "memory")))
 
 APP_NAME = "Singra Vox"
 JWT_ALG = "HS256"

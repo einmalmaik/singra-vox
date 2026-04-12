@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import os
 import pathlib
 from datetime import datetime, timezone
 
@@ -51,6 +50,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.auth_service import load_current_user
+from app.core.config import UPLOAD_ROOT
 from app.core.database import db
 from app.core.utils import now_utc, new_id
 from app.core.constants import MAX_UPLOAD_BYTES, INLINE_MIME_PREFIXES
@@ -68,9 +68,6 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["files"])
 
 # ── Storage root ──────────────────────────────────────────────────────────────
-UPLOAD_ROOT = pathlib.Path(
-    os.environ.get("UPLOAD_ROOT", "/app/backend/storage/uploads")
-)
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 

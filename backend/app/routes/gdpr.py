@@ -28,6 +28,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from app.auth_service import load_current_user
+from app.core.config import UPLOAD_ROOT
 from app.core.database import db
 from app.core.utils import now_utc
 from app.core.encryption import (
@@ -160,13 +161,10 @@ async def delete_account(request: Request) -> dict:
         await db[coll].delete_many({"user_id": uid})
 
     # 6. Delete uploaded files (metadata + disk)
-    import pathlib
-    import os
-    upload_root = pathlib.Path(os.environ.get("UPLOAD_ROOT", "/app/backend/storage/uploads"))
     file_records = await db.files.find({"uploaded_by": uid}, {"_id": 0}).to_list(500)
     for rec in file_records:
         month = rec.get("created_at", "")[:7]
-        path = upload_root / month / rec["id"]
+        path = UPLOAD_ROOT / month / rec["id"]
         if path.exists():
             path.unlink()
     await db.files.delete_many({"uploaded_by": uid})

@@ -18,6 +18,7 @@ mod rich_presence;
 mod voice_overlay;
 
 use serde::Serialize;
+#[cfg(target_os = "windows")]
 use std::sync::{Arc, Mutex};
 use tauri::{process::restart, Emitter, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
@@ -94,6 +95,7 @@ struct PttStatus {
     last_error: Option<String>,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopPttPayload {

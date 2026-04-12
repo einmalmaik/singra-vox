@@ -12,19 +12,32 @@ Tests: auth, registration, voice token, permissions, server/channel/invite
 import pytest
 import requests
 import os
+import uuid
+
+from pymongo import MongoClient
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://vox-identity.preview.emergentagent.com').rstrip('/')
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "singravox")
 
 ADMIN_EMAIL = "admin@singravox.local"
-ADMIN_PASS = "AdminPass123!"
-USER2_EMAIL = "testuser2@test.de"
+ADMIN_PASS = "Admin1234!"
+USER2_EMAIL = "testuser@singravox.local"
 USER2_PASS = "TestPass123!"
-NEW_USER_EMAIL = "testuser3@test.de"
 NEW_USER_PASS = "TestPass123!"
+
+
+def clear_rate_limits():
+    client = MongoClient(MONGO_URL)
+    try:
+        client[DB_NAME].rate_limits.delete_many({})
+    finally:
+        client.close()
 
 
 @pytest.fixture(scope="module")
 def admin_session():
+    clear_rate_limits()
     s = requests.Session()
     r = s.post(f"{BASE_URL}/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASS})
     assert r.status_code == 200, f"Admin login failed: {r.text}"
@@ -60,6 +73,7 @@ def channel_id(admin_session, server_id):
 # --- Auth Tests ---
 class TestAuth:
     def test_admin_login(self):
+        clear_rate_limits()
         s = requests.Session()
         r = s.post(f"{BASE_URL}/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASS})
         assert r.status_code == 200
@@ -69,6 +83,7 @@ class TestAuth:
         print(f"Admin login OK: {data['user']['display_name']}")
 
     def test_user2_login(self):
+        clear_rate_limits()
         s = requests.Session()
         r = s.post(f"{BASE_URL}/api/auth/login", json={"email": USER2_EMAIL, "password": USER2_PASS})
         assert r.status_code == 200, f"User2 login failed: {r.text}"
@@ -79,27 +94,26 @@ class TestAuth:
     def test_register_new_user(self):
         """Test registration with auto-verify (no SMTP)"""
         s = requests.Session()
+        suffix = uuid.uuid4().hex[:8]
+        new_user_email = f"testuser3_{suffix}@test.de"
+        new_username = f"testuser3_{suffix}"
         # Try to delete test user first
+        client = MongoClient(MONGO_URL)
         try:
-            from pymongo import MongoClient
-            c = MongoClient('mongodb://localhost:27017')
-            c['singravox'].users.delete_many({"email": NEW_USER_EMAIL})
-        except Exception:
-            pass
+            client[DB_NAME].users.delete_many({"email": new_user_email})
+        finally:
+            client.close()
         
         r = s.post(f"{BASE_URL}/api/auth/register", json={
-            "email": NEW_USER_EMAIL,
-            "username": "testuser3",
+            "email": new_user_email,
+            "username": new_username,
             "password": NEW_USER_PASS,
             "display_name": "Test User 3"
         })
-        assert r.status_code in [200, 201, 409], f"Register failed: {r.text}"
-        if r.status_code == 409:
-            print("User already exists - OK")
-        else:
-            data = r.json()
-            assert data.get("ok") == True or "user" in data or "email" in data
-            print(f"Register OK: {r.status_code}, data={data}")
+        assert r.status_code in [200, 201], f"Register failed: {r.text}"
+        data = r.json()
+        assert data.get("ok") is True or "user" in data or "email" in data
+        print(f"Register OK: {r.status_code}, data={data}")
 
     def test_auth_me(self, admin_session):
         r = admin_session.get(f"{BASE_URL}/api/auth/me")

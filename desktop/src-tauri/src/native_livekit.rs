@@ -6,6 +6,7 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 use serde::{Deserialize, Serialize};
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     Arc, Mutex,
@@ -45,10 +46,11 @@ use crate::native_audio_capture::{
     NativeSystemAudioCaptureConfig, NativeSystemAudioCaptureStream,
     DEFAULT_SYSTEM_AUDIO_CHANNELS, DEFAULT_SYSTEM_AUDIO_QUEUE_MS,
 };
+use crate::native_capture::DesktopCaptureStore;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 use crate::native_capture::{
     build_capture_config, ensure_capture_source_handle, fit_output_dimensions,
-    normalize_capture_dimensions, DesktopCaptureStore,
+    normalize_capture_dimensions,
 };
 
 #[derive(Debug, Clone, Deserialize)]

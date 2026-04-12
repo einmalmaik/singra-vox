@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import FastAPI
 
 from app.blob_storage import ensure_bucket
-from app.core.config import ADMIN_ROLE, APP_NAME, INSTANCE_SETTINGS_ID, OWNER_ROLE, USER_ROLE
+from app.core.config import ADMIN_ROLE, APP_NAME, INSTANCE_SETTINGS_ID, MEMORY_DIR, OWNER_ROLE, USER_ROLE
 from app.core.database import close as close_database
 from app.core.database import db
 from app.core.utils import now_utc
@@ -81,6 +80,15 @@ async def migrate_email_verification_state() -> None:
         logger.info("Marked %s legacy users as email verified", result.modified_count)
 
 
+async def migrate_role_hoist_state() -> None:
+    result = await db.roles.update_many(
+        {"hoist": {"$exists": False}},
+        {"$set": {"hoist": False}},
+    )
+    if result.modified_count:
+        logger.info("Backfilled hoist=false for %s legacy roles", result.modified_count)
+
+
 def register_lifecycle_handlers(app: FastAPI) -> None:
     @app.on_event("startup")
     async def startup() -> None:
@@ -145,9 +153,10 @@ def register_lifecycle_handlers(app: FastAPI) -> None:
         await migrate_legacy_instance_state()
         await migrate_default_roles()
         await migrate_email_verification_state()
+        await migrate_role_hoist_state()
 
-        Path("/app/memory").mkdir(exist_ok=True)
-        with open("/app/memory/test_credentials.md", "w", encoding="utf-8") as handle:
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        with open(MEMORY_DIR / "test_credentials.md", "w", encoding="utf-8") as handle:
             handle.write("# Singra Vox Setup\n\n")
             handle.write("- Open `/setup` on the instance after the first start.\n")
             handle.write("- The first admin is created through the setup wizard.\n\n")

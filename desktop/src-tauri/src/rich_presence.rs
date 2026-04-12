@@ -205,6 +205,7 @@ pub fn detect_activity(app_data_dir: &PathBuf) -> Option<DetectedActivity> {
     None
 }
 
+#[cfg(any(test, target_os = "windows"))]
 /// Prüft ob ein Prozessname wahrscheinlich ein Steam-Spiel ist.
 /// Heuristik: Nicht in der KNOWN_APPS-Liste, nicht system-typisch,
 /// und der Name enthält typische Spiel-Patterns.
@@ -228,6 +229,7 @@ fn is_likely_steam_game(process_name: &str) -> bool {
     false
 }
 
+#[cfg(any(test, target_os = "windows"))]
 /// Formatiert einen Prozessnamen zu einem lesbaren Spielnamen.
 /// "counter-strike_2" → "Counter Strike 2"
 fn format_game_name(process_name: &str) -> String {

@@ -10,13 +10,24 @@ Tests:
 import os
 import pytest
 import requests
+from pymongo import MongoClient
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-TEST_SERVER_ID = "6c0cc408-37c8-417e-b014-681e9e47cbde"
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "singravox")
+TEST_SERVER_ID = "03778528-7e75-4ddc-83df-f06260323967"
 TEST_CREDENTIALS = {
-    "email": "admin@mauntingstudios.de",
+    "email": "admin@singravox.local",
     "password": "Admin1234!"
 }
+
+
+def clear_rate_limits():
+    client = MongoClient(MONGO_URL)
+    try:
+        client[DB_NAME].rate_limits.delete_many({})
+    finally:
+        client.close()
 
 
 @pytest.fixture(scope="module")
@@ -26,6 +37,7 @@ def auth_session():
     session.headers.update({"Content-Type": "application/json"})
     
     # Login
+    clear_rate_limits()
     response = session.post(f"{BASE_URL}/api/auth/login", json=TEST_CREDENTIALS)
     assert response.status_code == 200, f"Login failed: {response.text}"
     

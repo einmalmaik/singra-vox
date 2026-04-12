@@ -21,6 +21,13 @@ if (process.platform === "win32" && !env.CARGO_TARGET_DIR) {
   env.CARGO_TARGET_DIR = targetDir;
 }
 
+if (process.platform === "linux" && !`${env.RUSTFLAGS ?? ""}`.includes("--cap-lints")) {
+  // rustc currently panics while rendering lint diagnostics for this Tauri
+  // crate graph on Linux. Capping lints keeps local Linux/WSL builds stable
+  // until the upstream compiler bug is fixed.
+  env.RUSTFLAGS = `${env.RUSTFLAGS ?? ""} --cap-lints allow`.trim();
+}
+
 const child = spawn("tauri", tauriArgs, {
   stdio: "inherit",
   env,

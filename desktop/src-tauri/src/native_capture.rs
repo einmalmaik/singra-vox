@@ -6,7 +6,9 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 use serde::Serialize;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::collections::HashMap;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
@@ -315,6 +317,7 @@ mod tests {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 pub async fn list_capture_sources(
     store: State<'_, DesktopCaptureStore>,
 ) -> Result<Vec<DesktopCaptureSourceSummary>, String> {

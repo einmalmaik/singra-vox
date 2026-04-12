@@ -10,15 +10,28 @@ import pytest
 import requests
 import os
 
+from pymongo import MongoClient
+
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-ADMIN_EMAIL = "admin@mauntingstudios.de"
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "singravox")
+ADMIN_EMAIL = "admin@singravox.local"
 ADMIN_PASSWORD = "Admin1234!"
 SERVER_ID = "03778528-7e75-4ddc-83df-f06260323967"
 CHANNEL_ID = "d0f0765a-35e1-4d3e-9acb-9f1ec22c0213"
 
 
+def clear_rate_limits():
+    client = MongoClient(MONGO_URL)
+    try:
+        client[DB_NAME].rate_limits.delete_many({})
+    finally:
+        client.close()
+
+
 @pytest.fixture(scope="module")
 def auth_headers():
+    clear_rate_limits()
     resp = requests.post(f"{BASE_URL}/api/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
     assert resp.status_code == 200, f"Login failed: {resp.text}"
     token = resp.json().get("access_token") or resp.json().get("token")
