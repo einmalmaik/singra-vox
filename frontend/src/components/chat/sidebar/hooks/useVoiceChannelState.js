@@ -309,6 +309,7 @@ export function useVoiceChannelState({
   }, [isDesktop, user?.id, voiceEngineRef]);
 
   const joinVoice = useCallback(async (channel) => {
+    let serverJoinConfirmed = false;
     try {
       if (voiceChannel?.id === channel.id) {
         return;
@@ -348,6 +349,7 @@ export function useVoiceChannelState({
       engine.setDeafened(desiredDeafened);
 
       await api.post(`/servers/${serverId}/voice/${channel.id}/join`);
+      serverJoinConfirmed = true;
       await engine.joinChannel();
       const stateResponse = await api.put(`/servers/${serverId}/voice/${channel.id}/state`, {
         is_muted: desiredMuted,
@@ -372,6 +374,10 @@ export function useVoiceChannelState({
       if (voiceEngineRef?.current) {
         await voiceEngineRef.current.disconnect().catch(() => {});
         voiceEngineRef.current = null;
+      }
+      if (serverJoinConfirmed) {
+        await api.post(`/servers/${serverId}/voice/${channel.id}/leave`).catch(() => {});
+        onRefreshChannels?.();
       }
       setVoiceSession(createIdleVoiceSession());
       setVoiceChannel(null);

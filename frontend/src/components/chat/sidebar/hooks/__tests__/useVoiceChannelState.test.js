@@ -250,4 +250,32 @@ describe("useVoiceChannelState", () => {
       await harness.cleanup();
     }
   });
+
+  it("rolls back the server voice state when LiveKit join fails after the REST join succeeded", async () => {
+    const engine = createEngine();
+    engine.joinChannel.mockRejectedValueOnce(new Error("livekit join failed"));
+    mockVoiceEngineFactory.mockReturnValue(engine);
+    mockApi.post
+      .mockResolvedValueOnce({ data: {} })
+      .mockResolvedValueOnce({ data: { ok: true } });
+    const harness = createHarness();
+
+    try {
+      await harness.render(harness.initialChannels);
+
+      await act(async () => {
+        await harness.value.joinVoice(baseChannel);
+      });
+
+      expect(mockApi.post).toHaveBeenNthCalledWith(1, "/servers/server-1/voice/voice-1/join");
+      expect(mockApi.post).toHaveBeenNthCalledWith(2, "/servers/server-1/voice/voice-1/leave");
+      expect(engine.disconnect).toHaveBeenCalledTimes(1);
+      expect(harness.voiceEngineRef.current).toBeNull();
+      expect(harness.value.voiceChannel).toBeNull();
+      expect(harness.onRefreshChannels).toHaveBeenCalledTimes(1);
+      expect(mockToast.error).toHaveBeenCalled();
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });
