@@ -260,7 +260,11 @@ async def svid_register(inp: SvidRegisterInput):
                 "expires_at": verify_state["expires_at"],
             }
         except Exception as exc:
-            logger.warning("SVID verification email failed (%s) – auto-verifying", exc)
+            logger.warning(
+                "SVID verification email failed for %s (%s) - registration remains unverified",
+                email,
+                exc,
+            )
             raise HTTPException(503, "Verification email could not be sent")
 
     existing_username = await _db.svid_accounts.find_one({"username": username}, {"_id": 0})
@@ -302,7 +306,11 @@ async def svid_register(inp: SvidRegisterInput):
             "expires_at": verify_state["expires_at"],
         }
     except Exception as exc:
-        logger.warning("SVID verification email failed (%s) – auto-verifying", exc)
+        logger.warning(
+            "SVID verification email failed for %s (%s) - registration remains unverified",
+            email,
+            exc,
+        )
         raise HTTPException(503, "Verification email could not be sent")
 
 
