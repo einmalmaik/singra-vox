@@ -97,7 +97,7 @@ class TestRoleHoisting:
         
         created_role = response.json()
         assert created_role.get("name") == "TEST_HoistedRole"
-        assert created_role.get("hoist") == True, "Created role should have hoist=true"
+        assert created_role.get("hoist"), "Created role should have hoist=true"
         assert created_role.get("color") == "#FF5733"
         
         # Store role ID for cleanup
@@ -122,7 +122,7 @@ class TestRoleHoisting:
         
         created_role = response.json()
         assert created_role.get("name") == "TEST_NonHoistedRole"
-        assert created_role.get("hoist") == False, "Created role should have hoist=false"
+        assert not created_role.get("hoist"), "Created role should have hoist=false"
         
         # Store role ID for cleanup
         self.__class__.non_hoisted_role_id = created_role.get("id")
@@ -146,7 +146,7 @@ class TestRoleHoisting:
         assert response.status_code == 200, f"Failed to update role: {response.text}"
         
         updated_role = response.json()
-        assert updated_role.get("hoist") == True, "Updated role should have hoist=true"
+        assert updated_role.get("hoist"), "Updated role should have hoist=true"
         
         print(f"✓ Updated role to hoisted: {updated_role.get('name')} with hoist={updated_role.get('hoist')}")
     
@@ -167,7 +167,7 @@ class TestRoleHoisting:
         assert response.status_code == 200, f"Failed to update role: {response.text}"
         
         updated_role = response.json()
-        assert updated_role.get("hoist") == False, "Updated role should have hoist=false"
+        assert not updated_role.get("hoist"), "Updated role should have hoist=false"
         
         print(f"✓ Updated role to non-hoisted: {updated_role.get('name')} with hoist={updated_role.get('hoist')}")
     

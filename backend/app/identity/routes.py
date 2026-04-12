@@ -58,7 +58,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 import jwt as pyjwt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.identity.config import (
     SVID_JWT_SECRET,

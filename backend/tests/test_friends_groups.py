@@ -73,7 +73,7 @@ class TestFriendsAPI:
         assert response.status_code == 403
         data = response.json()
         assert "detail" in data
-        print(f"✓ GET /api/id/friends/requests returns 403 without SVID")
+        print("✓ GET /api/id/friends/requests returns 403 without SVID")
 
     def test_send_friend_request_without_svid_returns_403(self, api_client):
         """POST /api/id/friends/request returns 403 if no SVID account."""
@@ -82,7 +82,7 @@ class TestFriendsAPI:
             json={"recipient_username": "testuser"},
         )
         assert response.status_code == 403
-        print(f"✓ POST /api/id/friends/request returns 403 without SVID")
+        print("✓ POST /api/id/friends/request returns 403 without SVID")
 
 
 class TestRelayMessagesAPI:
@@ -97,7 +97,7 @@ class TestRelayMessagesAPI:
         assert response.status_code == 403
         data = response.json()
         assert "detail" in data
-        print(f"✓ POST /api/id/relay/messages returns 403 without SVID")
+        print("✓ POST /api/id/relay/messages returns 403 without SVID")
 
 
 class TestGroupDMAPI:
@@ -166,7 +166,7 @@ class TestAuthEndpoints:
             json={"email": "wrong@example.com", "password": "wrongpass"},
         )
         assert response.status_code in [401, 400]
-        print(f"✓ Login rejected for invalid credentials")
+        print("✓ Login rejected for invalid credentials")
 
     def test_get_me_authenticated(self, api_client):
         """GET /api/auth/me returns current user."""

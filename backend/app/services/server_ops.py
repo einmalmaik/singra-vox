@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Optional
 
 from app.core.database import db
 from app.core.encryption import encrypt_metadata, encryption_enabled

@@ -37,7 +37,6 @@ from fastapi import APIRouter, HTTPException, Request
 from app.core.database import db
 from app.core.utils import now_utc, new_id
 from app.dependencies import current_user, require_verified_device
-from app.pagination import clamp_page_limit
 from app.permissions import (
     assert_channel_access,
     assert_channel_permission,

@@ -43,7 +43,6 @@ from __future__ import annotations
 import base64
 import logging
 import pathlib
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import Response

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Seed deterministic local fixtures for the Docker-based integration stack.
 
@@ -8,6 +6,8 @@ The production-like Docker stack intentionally boots only infrastructure, so
 this script provides the missing test baseline in a reusable way instead of
 relying on ad hoc manual Mongo edits.
 """
+
+from __future__ import annotations
 
 import os
 import sys

@@ -4,7 +4,6 @@
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
@@ -126,7 +125,7 @@ class TestRichPresenceAPI:
         })
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
-        assert data.get("show_coding_activity") == False
+        assert not data.get("show_coding_activity")
         assert data.get("default_visibility") == "selected_servers"
         print("✓ PUT /api/presence/settings updates settings")
         
@@ -144,7 +143,7 @@ class TestRichPresenceAPI:
         response = auth_session.delete(f"{BASE_URL}/api/presence/activity")
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
-        assert data.get("cleared") == True
+        assert data.get("cleared")
         print("✓ DELETE /api/presence/activity clears activity")
         
         # Verify it's cleared
