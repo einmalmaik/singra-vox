@@ -261,13 +261,7 @@ async def svid_register(inp: SvidRegisterInput):
             }
         except Exception as exc:
             logger.warning("SVID verification email failed (%s) – auto-verifying", exc)
-            await _db.svid_accounts.update_one(
-                {"email": email},
-                {"$set": {"email_verified": True, "email_verified_at": _now()}},
-            )
-            verified_account = await _db.svid_accounts.find_one({"email": email}, {"_id": 0})
-            session_payload = await _issue_svid_session(verified_account)
-            return {**session_payload, "verification_required": False}
+            raise HTTPException(503, "Verification email could not be sent")
 
     existing_username = await _db.svid_accounts.find_one({"username": username}, {"_id": 0})
     if existing_username:
@@ -309,13 +303,7 @@ async def svid_register(inp: SvidRegisterInput):
         }
     except Exception as exc:
         logger.warning("SVID verification email failed (%s) – auto-verifying", exc)
-        await _db.svid_accounts.update_one(
-            {"id": account_id},
-            {"$set": {"email_verified": True, "email_verified_at": _now()}},
-        )
-        verified_account = await _db.svid_accounts.find_one({"id": account_id}, {"_id": 0})
-        session_payload = await _issue_svid_session(verified_account)
-        return {**session_payload, "verification_required": False}
+        raise HTTPException(503, "Verification email could not be sent")
 
 
 @router.post("/verify-email")

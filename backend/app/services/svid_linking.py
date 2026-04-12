@@ -60,6 +60,17 @@ async def link_local_user_to_svid(
     if not local_user_id or not svid_account_id:
         raise HTTPException(400, "Invalid local or Singra-ID account")
 
+    current_svid_account_id = (local_user or {}).get("svid_account_id")
+    if current_svid_account_id and current_svid_account_id != svid_account_id:
+        raise HTTPException(409, "Dieses Instanzkonto ist bereits mit einer anderen Singra-ID verknüpft.")
+
+    existing_legacy_link = await db.svid_accounts.find_one(
+        {"linked_user_id": local_user_id, "id": {"$ne": svid_account_id}},
+        {"_id": 0, "id": 1},
+    )
+    if existing_legacy_link:
+        raise HTTPException(409, "Dieses Instanzkonto ist bereits mit einer anderen Singra-ID verknüpft.")
+
     existing_local = await db.users.find_one({"svid_account_id": svid_account_id}, {"_id": 0, "id": 1})
     if existing_local and existing_local.get("id") != local_user_id:
         raise HTTPException(409, "Diese Singra-ID ist bereits mit einem anderen Instanzkonto verknüpft.")
