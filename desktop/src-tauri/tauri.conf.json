@@ -86,7 +86,7 @@
             }
         },
         "updater": {
-            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUwNzU2NDlFRTA1RjJGMEEKUldRS0wxL2dubVIxVUtYc2ZibnZkdThEdVdLUVNwSCtIZzBqZ0RyWjRBNW43MXErM2daUWZ1N2MK",
+            "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDgxMUJEOTJERDg5NzBFQ0YKUldUUERwZllMZGtiZ1JmeGxHSVlwNkhpRFpqUEF2c2VVWHdnSmdPOWtNcnlGbnBjNTloeHZQSXEK",
             "endpoints": [
                 "https://github.com/einmalmaik/singra-vox/releases/latest/download/latest.json"
             ],
