@@ -108,7 +108,7 @@ class TestMemberSendMessages:
         data = r.json()
         assert "id" in data
         assert data["content"] == "Hello from testuser"
-        print(f"PASS: member can send messages → 200")
+        print("PASS: member can send messages → 200")
 
 
 # ── Test 2: Member cannot read channel overrides (manage_channels) ────────────
@@ -121,7 +121,7 @@ class TestMemberCannotReadOverrides:
             headers=auth(testuser_token)
         )
         assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
-        print(f"PASS: member cannot read overrides → 403")
+        print("PASS: member cannot read overrides → 403")
 
 
 # ── Test 3: Owner can read overrides ─────────────────────────────────────────
@@ -135,7 +135,7 @@ class TestOwnerCanReadOverrides:
         )
         assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
         assert isinstance(r.json(), list)
-        print(f"PASS: owner can read overrides → 200")
+        print("PASS: owner can read overrides → 200")
 
 
 # ── Test 4: testuser cannot create temp channel (no manage_channels) ─────────
@@ -149,7 +149,7 @@ class TestMemberCannotCreateTempChannel:
             headers=auth(testuser_token)
         )
         assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
-        print(f"PASS: member cannot create temp channel → 403")
+        print("PASS: member cannot create temp channel → 403")
 
 
 # ── Test 5: Admin can create temp channel ────────────────────────────────────
@@ -166,7 +166,7 @@ class TestOwnerCanCreateTempChannel:
         data = r.json()
         assert data["is_temporary"] is True
         assert data["name"] == "temp-test-channel"
-        print(f"PASS: owner can create temp channel → 200")
+        print("PASS: owner can create temp channel → 200")
 
 
 # ── Test 6: File upload and access by member ─────────────────────────────────
@@ -187,7 +187,7 @@ class TestFileAccess:
         # testuser (member with read_messages) should be able to access file
         r2 = requests.get(f"{BASE_URL}/api/files/{file_id}", headers=auth(testuser_token))
         assert r2.status_code == 200, f"Expected 200, got {r2.status_code}: {r2.text}"
-        print(f"PASS: member can access channel file → 200")
+        print("PASS: member can access channel file → 200")
 
 
 # ── Test 7: Non-member cannot list emojis ────────────────────────────────────
@@ -200,7 +200,7 @@ class TestNonMemberCannotListEmojis:
             headers=auth(outsider_token)
         )
         assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
-        print(f"PASS: non-member cannot list emojis → 403")
+        print("PASS: non-member cannot list emojis → 403")
 
 
 # ── Test 8: Member can list emojis ───────────────────────────────────────────
@@ -214,7 +214,7 @@ class TestMemberCanListEmojis:
         )
         assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
         assert isinstance(r.json(), list)
-        print(f"PASS: member can list emojis → 200")
+        print("PASS: member can list emojis → 200")
 
 
 # ── Test 9: Non-member cannot mark channel read ──────────────────────────────
@@ -228,7 +228,7 @@ class TestNonMemberCannotMarkRead:
             json={}
         )
         assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
-        print(f"PASS: non-member cannot mark channel read → 403")
+        print("PASS: non-member cannot mark channel read → 403")
 
 
 # ── Test 10: Member can mark channel read ────────────────────────────────────
@@ -243,7 +243,7 @@ class TestMemberCanMarkRead:
         )
         assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
         assert r.json().get("ok") is True
-        print(f"PASS: member can mark channel read → 200")
+        print("PASS: member can mark channel read → 200")
 
 
 # ── Test 11: Thread reply without send_messages → 403 ────────────────────────
@@ -302,7 +302,7 @@ class TestThreadReplyWithoutSendMessages:
         )
 
         assert r3.status_code == 403, f"Expected 403, got {r3.status_code}: {r3.text}"
-        print(f"PASS: thread reply without send_messages → 403")
+        print("PASS: thread reply without send_messages → 403")
 
 
 # ── Test 12: Revisions without membership → 403 ──────────────────────────────
@@ -325,7 +325,7 @@ class TestRevisionsWithoutMembership:
             headers=auth(outsider_token)
         )
         assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
-        print(f"PASS: revisions without membership → 403")
+        print("PASS: revisions without membership → 403")
 
 
 # ── Test 13: Voice token ──────────────────────────────────────────────────────
@@ -361,7 +361,7 @@ class TestDefaultPermissions:
         assert sp.get("read_messages") is True, f"read_messages should be True: {sp}"
         assert sp.get("attach_files") is True, f"attach_files should be True: {sp}"
         assert sp.get("manage_channels") is False, f"manage_channels should be False: {sp}"
-        print(f"PASS: default permissions correct → send_messages=True, read_messages=True, attach_files=True, manage_channels=False")
+        print("PASS: default permissions correct → send_messages=True, read_messages=True, attach_files=True, manage_channels=False")
 
 
 # ── Test 15: Owner bypass ─────────────────────────────────────────────────────

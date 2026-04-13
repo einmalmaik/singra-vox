@@ -7,3 +7,5 @@
 # (at your option) any later version.
 from app.main import app
 
+__all__ = ["app"]
+

@@ -11,7 +11,6 @@ import requests
 import os
 import base64
 import secrets
-import json
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001").rstrip("/")
 
@@ -96,10 +95,10 @@ class TestE2EEBootstrap:
                 TestE2EEBootstrap.bootstrapped_device_id = state_data["devices"][0]["device_id"]
                 print(f"E2EE already configured, using existing device: {TestE2EEBootstrap.bootstrapped_device_id}")
                 return
-            pytest.fail(f"Bootstrap failed with 409 and no existing devices")
+            pytest.fail("Bootstrap failed with 409 and no existing devices")
         assert resp.status_code == 200, f"Bootstrap failed: {resp.text}"
         data = resp.json()
-        assert data.get("enabled") == True, f"E2EE should be enabled after bootstrap"
+        assert data.get("enabled"), "E2EE should be enabled after bootstrap"
         TestE2EEBootstrap.bootstrapped_device_id = device_id
         print(f"Bootstrap success: enabled={data['enabled']}, devices={len(data.get('devices', []))}")
 
@@ -108,7 +107,7 @@ class TestE2EEBootstrap:
         resp = requests.get(f"{BASE_URL}/api/e2ee/state", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["enabled"] == True, f"E2EE should be enabled after bootstrap, got: {data}"
+        assert data["enabled"], f"E2EE should be enabled after bootstrap, got: {data}"
         assert data["account"] is not None
         assert len(data["devices"]) >= 1
         print(f"State after bootstrap: enabled={data['enabled']}, device_count={len(data['devices'])}")
@@ -143,7 +142,7 @@ class TestE2EEChannel:
         )
         assert resp.status_code == 200, f"Create E2EE channel failed: {resp.text}"
         data = resp.json()
-        assert data.get("is_private") == True
+        assert data.get("is_private")
         assert "e2ee_channel" in data["name"].lower()
         TestE2EEChannel.channel_id = data["id"]
         print(f"Created E2EE channel: {data['id']}, is_private={data['is_private']}")
@@ -202,7 +201,7 @@ class TestE2EEChannel:
         )
         assert resp.status_code == 200, f"Send E2EE message failed: {resp.text}"
         data = resp.json()
-        assert data.get("is_e2ee") == True, f"Message should be marked as e2ee"
+        assert data.get("is_e2ee"), "Message should be marked as e2ee"
         print(f"Sent E2EE message: id={data['id']}, is_e2ee={data.get('is_e2ee')}")
 
     def test_get_e2ee_messages(self, auth_headers):
@@ -224,7 +223,7 @@ class TestE2EEChannel:
         messages = data.get("messages", data) if isinstance(data, dict) else data
         if messages:
             msg = messages[-1]
-            assert msg.get("is_e2ee") == True, "Message should be marked as E2EE"
+            assert msg.get("is_e2ee"), "Message should be marked as E2EE"
             # Encrypted message should have ciphertext, not readable content
             assert msg.get("ciphertext") or msg.get("encrypted_content"), "Message should have ciphertext"
             print(f"Verified message encryption: is_e2ee={msg.get('is_e2ee')}, has_ciphertext={bool(msg.get('ciphertext'))}")

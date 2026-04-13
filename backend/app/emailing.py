@@ -22,20 +22,31 @@ from email.message import EmailMessage
 import logging
 import os
 import smtplib
-from typing import Tuple
+
+from app.email_templates import (
+    render_invite_email,
+    render_password_reset_email,
+    render_security_alert_email,
+    render_verification_email,
+    render_welcome_email,
+)
+
+__all__ = [
+    "MailSettings",
+    "load_mail_settings",
+    "send_email",
+    "render_invite_email",
+    "render_password_reset_email",
+    "render_security_alert_email",
+    "render_verification_email",
+    "render_welcome_email",
+]
 
 logger = logging.getLogger(__name__)
 
 # ── Re-export render functions so existing imports keep working ────────────────
 # Routes that do `from app.emailing import render_verification_email` will
 # continue to work without changes.
-from app.email_templates import (  # noqa: F401
-    render_verification_email,
-    render_password_reset_email,
-    render_welcome_email,
-    render_invite_email,
-    render_security_alert_email,
-)
 
 
 @dataclass(frozen=True)

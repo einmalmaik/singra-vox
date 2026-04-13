@@ -146,8 +146,6 @@ class TestAccountDeletion:
         assert user_data is not None, "Failed to create test user"
         
         user_id = user_data["user_id"]
-        email = user_data["email"]
-        
         # Verify user exists before deletion
         user_before = db.users.find_one({"id": user_id})
         assert user_before is not None, "User should exist before deletion"
@@ -159,8 +157,8 @@ class TestAccountDeletion:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["ok"] == True
-        assert data["deleted"]["profile"] == True
+        assert data["ok"]
+        assert data["deleted"]["profile"]
         
         # Verify user is deleted
         user_after = db.users.find_one({"id": user_id})
@@ -279,7 +277,6 @@ class TestAccountDeletion:
         # Status history is created on login, verify it exists
         import time
         time.sleep(0.5)
-        status_before = list(db.status_history.find({"user_id": user_id}))
         # May or may not have status history depending on implementation
         
         # Delete account
@@ -458,7 +455,7 @@ class TestAccountDeletion:
         data = response.json()
         
         # Verify response structure
-        assert data["ok"] == True
+        assert data["ok"]
         assert "deleted" in data
         
         deleted = data["deleted"]

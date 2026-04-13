@@ -7,8 +7,8 @@
 # (at your option) any later version.
 import uuid
 import logging
-from typing import Any, Dict, List, Optional, Set
-from fastapi import WebSocket, WebSocketDisconnect
+from typing import Dict, Optional, Set
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 

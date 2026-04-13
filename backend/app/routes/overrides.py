@@ -29,7 +29,6 @@ from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc, new_id
 from app.permissions import (
-    assert_channel_permission,
     assert_server_permission,
     has_server_permission,
 )
