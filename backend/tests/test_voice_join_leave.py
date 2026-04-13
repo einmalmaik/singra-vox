@@ -3,7 +3,6 @@
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
@@ -143,7 +142,7 @@ class TestVoiceLeave:
         assert leave_resp.status_code == 200
         
         data = leave_resp.json()
-        assert data.get("ok") == True
+        assert data.get("ok")
     
     def test_voice_leave_without_join(self, auth_session, test_server_and_channel):
         """Voice leave when not in channel should still return ok"""
@@ -212,7 +211,7 @@ class TestVoiceStateUpdate:
         assert update_resp.status_code == 200
         
         data = update_resp.json()
-        assert data.get("is_muted") == True
+        assert data.get("is_muted")
         
         # Cleanup
         auth_session.post(f"{BASE_URL}/api/servers/{server_id}/voice/{channel_id}/leave")

@@ -4,15 +4,14 @@
 import pytest
 import requests
 import os
-import time
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_EMAIL = "admin@mauntingstudios.de"
 TEST_PASSWORD = "Admin1234!"
-TEST_SERVER_ID = "6c0cc408-37c8-417e-b014-681e9e47cbde"
-TEST_THREAD_MSG_ID = "78ec1246-64b4-4f64-a2aa-388cd69e40b2"
+TEST_SERVER_ID = "03778528-7e75-4ddc-83df-f06260323967"
+TEST_CHANNEL_ID = "bee73bda-4936-48b2-afa0-a2745ba53d26"
 
 
 @pytest.fixture(scope="module")
@@ -34,6 +33,16 @@ def auth_session():
         session.headers.update({"Authorization": f"Bearer {token}"})
     
     return session
+
+
+@pytest.fixture(scope="module")
+def thread_message_id(auth_session):
+    response = auth_session.post(
+        f"{BASE_URL}/api/channels/{TEST_CHANNEL_ID}/messages",
+        json={"content": "Thread parent created by integration test"},
+    )
+    assert response.status_code in (200, 201), f"Failed to create thread parent: {response.text}"
+    return response.json()["id"]
 
 
 class TestHealthEndpoint:
@@ -116,7 +125,7 @@ class TestRichPresenceAPI:
         })
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
-        assert data.get("show_coding_activity") == False
+        assert not data.get("show_coding_activity")
         assert data.get("default_visibility") == "selected_servers"
         print("✓ PUT /api/presence/settings updates settings")
         
@@ -134,7 +143,7 @@ class TestRichPresenceAPI:
         response = auth_session.delete(f"{BASE_URL}/api/presence/activity")
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
-        assert data.get("cleared") == True
+        assert data.get("cleared")
         print("✓ DELETE /api/presence/activity clears activity")
         
         # Verify it's cleared
@@ -149,10 +158,10 @@ class TestRichPresenceAPI:
 class TestThreadSelfDestruct:
     """Thread Self-Destruct API tests"""
     
-    def test_patch_self_destruct_sets_timer(self, auth_session):
+    def test_patch_self_destruct_sets_timer(self, auth_session, thread_message_id):
         """PATCH /api/threads/{msg_id}/self-destruct sets timer with duration_minutes"""
         response = auth_session.patch(
-            f"{BASE_URL}/api/threads/{TEST_THREAD_MSG_ID}/self-destruct",
+            f"{BASE_URL}/api/threads/{thread_message_id}/self-destruct",
             json={"duration_minutes": 60}  # 1 hour
         )
         assert response.status_code == 200, f"Failed: {response.text}"
@@ -161,19 +170,19 @@ class TestThreadSelfDestruct:
         assert data.get("self_destruct_at") is not None
         print("✓ PATCH /api/threads/{msg_id}/self-destruct sets timer")
     
-    def test_get_thread_returns_self_destruct_at(self, auth_session):
+    def test_get_thread_returns_self_destruct_at(self, auth_session, thread_message_id):
         """GET /api/messages/{msg_id}/thread returns self_destruct_at field"""
-        response = auth_session.get(f"{BASE_URL}/api/messages/{TEST_THREAD_MSG_ID}/thread")
+        response = auth_session.get(f"{BASE_URL}/api/messages/{thread_message_id}/thread")
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
         assert "self_destruct_at" in data
         assert data.get("self_destruct_at") is not None
         print("✓ GET /api/messages/{msg_id}/thread returns self_destruct_at")
     
-    def test_patch_self_destruct_removes_timer(self, auth_session):
+    def test_patch_self_destruct_removes_timer(self, auth_session, thread_message_id):
         """PATCH /api/threads/{msg_id}/self-destruct with 0 removes timer"""
         response = auth_session.patch(
-            f"{BASE_URL}/api/threads/{TEST_THREAD_MSG_ID}/self-destruct",
+            f"{BASE_URL}/api/threads/{thread_message_id}/self-destruct",
             json={"duration_minutes": 0}
         )
         assert response.status_code == 200, f"Failed: {response.text}"
@@ -183,7 +192,7 @@ class TestThreadSelfDestruct:
         print("✓ PATCH /api/threads/{msg_id}/self-destruct with 0 removes timer")
         
         # Verify it's removed
-        get_response = auth_session.get(f"{BASE_URL}/api/messages/{TEST_THREAD_MSG_ID}/thread")
+        get_response = auth_session.get(f"{BASE_URL}/api/messages/{thread_message_id}/thread")
         assert get_response.status_code == 200
         assert get_response.json().get("self_destruct_at") is None
         print("✓ Timer verified as removed")

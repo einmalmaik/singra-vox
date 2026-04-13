@@ -22,11 +22,13 @@ import os
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from app.core.config import ROOT_DIR  # noqa: F401
+
 # Read once at import time so every module sees the same client.
 _mongo_url: str = os.environ["MONGO_URL"]
 _db_name: str = os.environ["DB_NAME"]
 
-_client: AsyncIOMotorClient = AsyncIOMotorClient(_mongo_url)
+_client = AsyncIOMotorClient(_mongo_url)
 
 #: The active Motor database.  Import this symbol everywhere.
 db = _client[_db_name]

@@ -32,7 +32,7 @@
 """
 from __future__ import annotations
 
-from typing import Tuple, Optional, List
+from typing import Tuple, List
 import html as html_mod
 
 

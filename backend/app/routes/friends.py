@@ -75,6 +75,7 @@ from pydantic import BaseModel
 
 from app.core.database import db
 from app.core.utils import now_utc, new_id
+from app.services.svid_linking import resolve_linked_svid_account
 
 router = APIRouter(prefix="/api/id", tags=["friends"])
 
@@ -91,10 +92,7 @@ async def _require_svid_account(request: Request) -> dict:
     if not user:
         raise HTTPException(401, "Nicht authentifiziert")
 
-    # SVID Account-ID aus dem User laden
-    svid_account = await db.svid_accounts.find_one(
-        {"linked_user_id": user["id"]}, {"_id": 0}
-    )
+    svid_account = await resolve_linked_svid_account(db, local_user=user)
     if not svid_account:
         raise HTTPException(403, "Kein Singra-ID Account verknüpft. "
                             "Registriere dich zuerst unter /svid/register")

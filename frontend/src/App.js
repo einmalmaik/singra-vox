@@ -24,6 +24,7 @@ import OnboardingPage from "@/pages/OnboardingPage";
 import InvitePage from "@/pages/InvitePage";
 import MainLayout from "@/pages/MainLayout";
 import SvidRegisterPage from "@/pages/SvidRegisterPage";
+import SvidSetupPage from "@/pages/SvidSetupPage";
 import DesktopInviteBridge from "@/components/invites/DesktopInviteBridge";
 import { UpdateNotification } from "@/components/desktop/UpdateNotification";
 import "@/App.css";
@@ -96,6 +97,7 @@ function AppRoutes() {
       <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />} />
       <Route path="/reset-password" element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />} />
       <Route path="/register-svid" element={user ? <Navigate to="/" replace /> : <SvidRegisterPage />} />
+      <Route path="/setup-svid" element={<ProtectedRoute><SvidSetupPage /></ProtectedRoute>} />
       <Route
         path="/register"
         element={

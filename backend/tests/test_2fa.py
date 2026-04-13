@@ -178,7 +178,7 @@ class Test2FAStatus:
             )
             assert response.status_code == 200
             data = response.json()
-            assert data["enabled"] == False
+            assert not data["enabled"]
             assert "singra_vault_url" in data
             assert data["singra_vault_url"] == SINGRA_VAULT_URL
             print("✓ New user has 2FA disabled, Singra Vault URL present")
@@ -306,7 +306,7 @@ class Test2FAConfirm:
             data = response.json()
             
             # Verify response
-            assert data["enabled"] == True
+            assert data["enabled"]
             assert "backup_codes" in data
             assert len(data["backup_codes"]) >= 8  # Should have at least 8 backup codes
             assert "singra_vault_url" in data
@@ -353,7 +353,7 @@ class Test2FALoginFlow:
             assert login_resp.status_code == 200
             data = login_resp.json()
             
-            assert data.get("requires_2fa") == True
+            assert data.get("requires_2fa")
             assert "user_id" in data
             assert "access_token" not in data  # No token until 2FA verified
             
@@ -389,7 +389,7 @@ class Test2FALoginFlow:
             })
             assert login_resp.status_code == 200
             login_data = login_resp.json()
-            assert login_data.get("requires_2fa") == True
+            assert login_data.get("requires_2fa")
             user_id = login_data["user_id"]
             
             # Step 2: Verify 2FA
@@ -453,7 +453,7 @@ class Test2FABackupCodes:
             verify_data = verify_resp.json()
             
             assert "access_token" in verify_data
-            assert verify_data.get("backup_code_used") == True
+            assert verify_data.get("backup_code_used")
             assert "backup_codes_remaining" in verify_data
             
             print(f"✓ Backup code login works, {verify_data['backup_codes_remaining']} codes remaining")
@@ -578,14 +578,14 @@ class Test2FADisable:
             )
             assert disable_resp.status_code == 200
             data = disable_resp.json()
-            assert data["enabled"] == False
+            assert not data["enabled"]
             
             # Verify 2FA is disabled
             status_resp = api_client.get(
                 f"{BASE_URL}/api/auth/2fa/status",
                 headers={"Authorization": f"Bearer {user_data['token']}"}
             )
-            assert status_resp.json()["enabled"] == False
+            assert not status_resp.json()["enabled"]
             
             # Login should no longer require 2FA
             login_resp = api_client.post(f"{BASE_URL}/api/auth/login", json={
@@ -594,7 +594,7 @@ class Test2FADisable:
             })
             assert login_resp.status_code == 200
             assert "access_token" in login_resp.json()
-            assert login_resp.json().get("requires_2fa") != True
+            assert not login_resp.json().get("requires_2fa")
             
             print("✓ 2FA disabled successfully, login no longer requires 2FA")
         finally:

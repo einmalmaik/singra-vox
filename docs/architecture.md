@@ -9,6 +9,105 @@ enthalten **niemals Klartext**.
 
 ---
 
+## Voice-/Stream-Modulgrenzen
+
+Der Voice- und Streaming-Stack folgt zwei einfachen Regeln:
+
+- `frontend/src/lib/voiceEngine.js` bleibt die stabile Fassade fuer die UI.
+- LiveKit bleibt die einzige Quelle der Wahrheit fuer Subscription-, Publication- und Track-State.
+
+Die interne Aufteilung ist bewusst nach Verantwortlichkeiten getrennt:
+
+- `frontend/src/lib/voice/VoiceSessionController.js`
+  Join, Disconnect, Reconnect, Room-Erstellung und E2EE-Bootstrap.
+- `frontend/src/lib/voice/LocalAudioController.js`
+  Mikrofon, Mute, Deafen, Input-Gain, PTT und Mic-Test.
+- `frontend/src/lib/voice/LocalVideoController.js`
+  Kamera-Lifecycle.
+- `frontend/src/lib/voice/ScreenShareController.js`
+  Browser- und Desktop-Screenshare, Qualitaetsprofile und Session-Rehydrate.
+- `frontend/src/lib/voice/RemoteAudioController.js`
+  Remote-Audio-Elemente und Output-Device-Anwendung.
+- `frontend/src/lib/voice/RemoteVideoController.js`
+  Video-TrackRefs, Proxy-Mapping und Stage-Attach.
+- `frontend/src/lib/voice/RemoteMediaController.js`
+  LiveKit-Room-Events, Participant-Sync und Speaking-State.
+
+Fuer Desktop-Screensharing gilt zusaetzlich:
+
+- `get_desktop_runtime_info` ist die einzige Truth-Source fuer Desktop-Capabilities im Frontend.
+- Desktop-UI darf native Capture- oder Audio-Faehigkeiten nicht implizit annehmen.
+- `desktop/src-tauri/src/screen_share/` ist die einzige oeffentliche Rust-Schnittstelle fuer Screen Share.
+
+## ChannelSidebar-Schichtung
+
+Die linke Channel-/Voice-Sidebar folgt jetzt ebenfalls einer klaren Schichtung:
+
+- `frontend/src/components/chat/ChannelSidebar.js`
+  Stabile Fassade fuer `MainLayout`; sie verdrahtet nur Controller und UI-Module.
+- `frontend/src/components/chat/sidebar/useChannelSidebarController.js`
+  Einziger Container fuer Sidebar-State, API-Calls, Voice-Engine-Binding, DnD-Handler und Dialog-Orchestrierung.
+- `frontend/src/components/chat/sidebar/*`
+  Presentational Components fuer Header, Channel-Tree, Voice-Dock, User-Bar und Dialoge.
+
+Wichtig:
+
+- Sidebar-UI-Komponenten duerfen keine direkten API- oder VoiceEngine-Aufrufe enthalten.
+- Voice-/Stream-Steuerung bleibt in den bestehenden Voice-Modulen; die Sidebar orchestriert nur UI-Zustand.
+- Test-IDs und sichtbares Verhalten bleiben stabil, damit bestehende UI-Regressionen erkennbar bleiben.
+
+## MainLayout-Schichtung
+
+Der Workspace-Entry-Point folgt jetzt derselben Aufteilung wie die Sidebar:
+
+- `frontend/src/pages/MainLayout.js`
+  Stabile Fassade fuer Routing und Context-Wiring; sie rendert nur noch den Shell-Controller.
+- `frontend/src/pages/main-layout/useMainLayoutController.js`
+  Einziger Page-Orchestrator fuer Workspace-Auswahl, Persistenz, Unread-Refresh, Socket-Binding und View-Props.
+- `frontend/src/pages/main-layout/hooks/useServerWorkspaceState.js`
+  Server-, Channel-, Member- und Timeline-State inklusive Snapshot- und Refresh-Aktionen.
+- `frontend/src/pages/main-layout/hooks/useDirectMessagesState.js`
+  Direktnachrichten-, Gruppen-DM-, Relay-DM- und Such-State inklusive DM-History.
+- `frontend/src/pages/main-layout/hooks/useMainLayoutSocket.js`
+  WebSocket-, Heartbeat- und Reconnect-Lifecycle ohne Render-Logik.
+- `frontend/src/pages/main-layout/hooks/useNotificationBootstrap.js`
+  Notification-Permission- und Push-Bootstrap ohne UI-Kopplung.
+- `frontend/src/pages/main-layout/*View.js`
+  Presentational Workspace-Views fuer Server- und DM-Ansicht.
+
+Wichtig:
+
+- Views duerfen keine direkten API-, Socket- oder Context-Zugriffe enthalten.
+- Page-lokale Spezialkomponenten wie der DM-Composer bleiben im `main-layout` Modul, solange sie nicht generisch genug fuer Shared-UI sind.
+- Neue Workspace-Features muessen in die passende Domain-Hook-Schicht, nicht zurueck in `MainLayout.js`.
+
+## ChatArea-Schichtung
+
+Die Chat-Oberflaeche folgt jetzt derselben Schichtung wie `ChannelSidebar` und `MainLayout`.
+
+- `frontend/src/components/chat/ChatArea.js`
+  Stabile Fassade fuer bestehende Aufrufer; sie verdrahtet nur Controller und Shell.
+- `frontend/src/components/chat/chat-area/useChatAreaController.js`
+  Einziger Orchestrator fuer Chat-State, API-Aufrufe, E2EE-Decryption, Mention-Logik, Reply-Reveal, Read-Marker und Attachments.
+- `frontend/src/components/chat/chat-area/chatAreaState.js`
+  Pure Helper fuer Timeline-Merge, Highlighting, Reply-Aufloesung und abgeleitete Anzeige-Daten.
+- `frontend/src/components/chat/chat-area/ChatAreaShell.js`
+  Aeusseres Layout fuer Header, Timeline, Composer sowie Thread- und Pin-Panels.
+- `frontend/src/components/chat/chat-area/ChatHeader.js`
+  Presentational Header fuer Topic-, Search-, Notification- und Pin-Bedienung.
+- `frontend/src/components/chat/chat-area/ChatTimeline.js`
+  Presentational Timeline fuer leere States, E2EE-Hinweise, History und Typing.
+- `frontend/src/components/chat/chat-area/ChatMessageItem.js`
+  Presentational Nachricht inklusive Reply-Preview, Reactions, Edit/Delete, Pin und Attachments.
+- `frontend/src/components/chat/chat-area/ChatComposer.js`
+  Presentational Composer fuer Eingabe, Mentions und Pending-Attachments.
+
+Wichtig:
+
+- Neue Chat-Features kommen zuerst in `useChatAreaController.js` oder `chatAreaState.js`, nicht direkt in `ChatArea.js`.
+- Views unter `chat-area/` bleiben API-, Context- und Socket-frei.
+- `ChatArea.js` bleibt klein, damit Aenderungen isoliert testbar und fuer Open-Source-Mitwirkende nachvollziehbar bleiben.
+
 ## Verzeichnis-Struktur
 
 ```
@@ -247,6 +346,29 @@ Alle Permission-Checks laufen ausnahmslos über `backend/app/permissions.py`.
 - **Cross-Instance Invites** (Einladungen zwischen Instanzen)
 - **Instance Switcher** (Unread-Counts über Instanzen hinweg)
 
+### Lokaler Upgrade-Pfad
+
+Instanz-User können ihr bestehendes lokales Konto direkt aus dem DM-/Friends-Bereich
+zu einer Singra-ID aufwerten, ohne Server-Mitgliedschaften, Einstellungen oder
+lokale Workspace-Daten zu verlieren.
+
+- `frontend/src/pages/SvidSetupPage.js`
+  Geschützter Setup-Screen im Registrierungsdesign für bereits angemeldete lokale Nutzer.
+- `backend/app/services/svid_linking.py`
+  Zentrale Verknüpfungslogik zwischen lokalem Instanzkonto und Singra-ID-Konto.
+- `backend/app/routes/auth.py`
+  `POST /api/auth/link-svid` verknüpft die aktive lokale Session explizit mit einer
+  verifizierten Singra-ID und deaktiviert auf Wunsch den lokalen Passwort-Login.
+
+Wichtig:
+
+- Die Zuordnung wird bewusst auf beiden Seiten gepflegt:
+  - `users.svid_account_id`
+  - `svid_accounts.linked_user_id`
+- Login und Friends-/Relay-Funktionen nutzen aktuell unterschiedliche Lookup-Pfade.
+  Die zentrale Linking-Schicht hält beide Referenzen synchron, damit keine
+  stillen Inkonsistenzen zwischen Auth und Cross-Instance-Features entstehen.
+
 ### Jeder kann seinen eigenen ID-Server hosten
 
 Der ID-Server ist in jeder Singra-Vox-Instanz eingebaut (`/api/id/*`).
@@ -261,6 +383,7 @@ Man braucht nur `SVID_ISSUER` und `SVID_JWT_SECRET` zu setzen.
 POST   /api/auth/register            Registrieren
 POST   /api/auth/verify-email        E-Mail-Code bestätigen
 POST   /api/auth/login               Einloggen
+POST   /api/auth/link-svid           Lokales Konto explizit mit Singra-ID verknüpfen
 GET    /api/auth/me                  Eigene Nutzerdaten
 POST   /api/auth/logout              Ausloggen
 ```
@@ -325,7 +448,26 @@ LiveKit ist ein Open-Source SFU (Selective Forwarding Unit) für WebRTC.
 - **E2EE Voice:** SFrame-Verschlüsselung (LiveKit-nativ, Key via ExternalE2EEKeyProvider)
 - **Key-Rotation:** Automatisch bei Teilnehmer-Wechsel
 
+Frontend-Viewer-Pfad:
+
+- **Quelle der Wahrheit:** LiveKit `publication + track`
+- **UI-Auswahl:** `videoTrackRefs.js` hält nur auswählbare Stream- und Kamera-Referenzen
+- **Native Desktop-Preview:** der Desktop-Screenshare publiziert über einen separaten Proxy-Teilnehmer; `ScreenShareProxyMap.js` mappt die Proxy-Identity wieder auf den owning user
+- **Preview-Rendering:** `VoiceMediaStage` attached den LiveKit-Track direkt an ein `<video>`-Element; es gibt keine zweite manuelle Receive-State-Maschine über LiveKit
+
 ---
+
+### Voice-Controller-Schnitt
+
+- `voiceEngine.js` bleibt die stabile Fassade fÃ¼r `new VoiceEngine()` und die bestehenden Event-Namen.
+- Die Implementierung liegt intern in `frontend/src/lib/voice/`:
+  - `VoiceSessionController.js`
+  - `LocalAudioController.js`
+  - `LocalVideoController.js`
+  - `ScreenShareController.js`
+  - `RemoteMediaController.js`
+  - `ScreenShareProxyMap.js`
+- Remote-Video wird direkt aus LiveKit `trackPublications` projiziert; es gibt keinen zweiten allgemeinen Video-Cache mehr.
 
 ## Design-Prinzipien
 

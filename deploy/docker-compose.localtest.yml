@@ -1,0 +1,8 @@
+services:
+  mongodb:
+    ports:
+      - "27017:27017"
+
+  backend:
+    ports:
+      - "8001:8001"

@@ -27,6 +27,8 @@ codex.md
 .github/copilot*
 *.agent.md
 AGENTS.md
+.qoder/
+.codex-logs/
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
@@ -64,6 +66,7 @@ package-lock.json
 # ── Rust / Tauri ──────────────────────────────────────────────────────────────
 desktop/src-tauri/target/
 desktop/node_modules/
+t/
 
 # ── Docker ───────────────────────────────────────────────────────────────────
 docker-compose.override.yml
@@ -154,3 +157,5 @@ yarn-error.log*
 # Environment files
 *.env
 *.env.*
+/test-results
+/backend/.venv-wsl

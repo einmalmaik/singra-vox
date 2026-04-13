@@ -7,68 +7,81 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-/**
- * VoiceMediaStage – Vollbild-Vorschau für Kamera- und Screen-Share-Tracks
- *
- * Kernaufgabe:
- *   Ein Dialog zeigt das <video>-Element eines bestimmten Teilnehmers (lokal oder remote).
- *   Der Track wird über `voiceEngine.attachParticipantMediaElement()` an das Element gehängt.
- *
- * Retry-Mechanismus:
- *   Wenn der Track zum Zeitpunkt des Öffnens noch nicht bereit ist (z.B. Screen-Share
- *   wurde gerade erst gestartet und die Publikation an LiveKit läuft noch), versucht
- *   die Komponente bis zu MAX_RETRIES mal im Abstand von RETRY_INTERVAL_MS erneut.
- *   Dadurch wird der Black-Screen-Bug zuverlässig verhindert.
- *
- * Sichtbarkeits-Optimierung:
- *   Wenn der Browser-Tab nicht sichtbar ist (`document.hidden`), wird das Video
- *   pausiert und ein Hinweistext angezeigt. Das spart CPU und verhindert
- *   Chromium-Throttling-Artefakte.
- */
-
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MonitorPlay, VideoCamera } from "@phosphor-icons/react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useRuntime } from "@/contexts/RuntimeContext";
+import {
+  getDesktopWindowFullscreen,
+  observeDesktopWindowFullscreen,
+  setDesktopWindowFullscreen,
+} from "@/lib/desktop";
+import { observeVideoReadiness } from "@/lib/videoReadiness";
 
-// ─── Konstanten ────────────────────────────────────────────────────────────────
-
-/** Maximale Anzahl von Attach-Versuchen bevor wir aufgeben */
-const MAX_RETRIES = 8;
-
-/** Millisekunden zwischen jedem Retry-Versuch */
 const RETRY_INTERVAL_MS = 500;
+const PLAYBACK_RECOVERY_RETRY_MS = 250;
+const FRAME_READY_GRACE_MS = 2_000;
+const VIEW_STATE_LOADING = "loading";
+const VIEW_STATE_READY = "ready";
+const VIEW_STATE_UNAVAILABLE = "unavailable";
 
-/** Maximale Wartezeit in ms bevor Loading aufgegeben wird. Danach wird
- *  ein Fehlerzustand angezeigt statt endlosem Spinner. */
-const LOADING_TIMEOUT_MS = 10_000;
+function getPlaybackRecoveryPolicy(isDesktopRuntime) {
+  if (isDesktopRuntime) {
+    return {
+      maxAttachRetries: 8,
+      maxPlaybackRecoveryAttempts: 1,
+      pendingPlaybackRecoveryAfterAttempts: 4,
+      pendingPlaybackRecoveryRepeatEveryAttempts: null,
+    };
+  }
 
-// ─── Komponente ────────────────────────────────────────────────────────────────
+  return {
+    maxAttachRetries: 12,
+    maxPlaybackRecoveryAttempts: 3,
+    pendingPlaybackRecoveryAfterAttempts: 4,
+    pendingPlaybackRecoveryRepeatEveryAttempts: 2,
+  };
+}
 
+/**
+ * The stage renders exactly one selected LiveKit-backed track ref.
+ *
+ * The only stage-specific media logic left here is:
+ * - attach/detach the currently selected track
+ * - wait for the first renderable frame
+ * - retry a bounded number of times when Chromium has not produced that frame yet
+ *
+ * Publication, subscription and track ownership stay in LiveKit/VoiceEngine.
+ */
 export default function VoiceMediaStage({
   open,
   onClose,
   voiceEngineRef,
-  participantId,
+  trackRefId,
+  selectedTrackAvailable,
   participantName,
   source,
-  mediaRevision,
 }) {
   const { t } = useTranslation();
   const { config } = useRuntime();
+  const playbackRecoveryPolicy = useMemo(
+    () => getPlaybackRecoveryPolicy(Boolean(config?.isDesktop)),
+    [config?.isDesktop],
+  );
   const videoRef = useRef(null);
+  const stageSurfaceRef = useRef(null);
+  const [videoElement, setVideoElement] = useState(null);
 
-  // Verfolgt ob der Browser-Tab aktuell sichtbar ist
   const [documentHidden, setDocumentHidden] = useState(() => document.hidden);
-
-  // Zeigt einen Lade-Indikator wenn der Track noch nicht bereit ist
-  const [videoLoading, setVideoLoading] = useState(true);
-
-  // Zeigt eine Fehlermeldung wenn der Track nicht geladen werden konnte
-  const [videoError, setVideoError] = useState(false);
-
-  // ── Sichtbarkeits-Tracking ────────────────────────────────────────────────
+  const [viewState, setViewState] = useState(VIEW_STATE_LOADING);
+  const [fullscreenActive, setFullscreenActive] = useState(false);
 
   useEffect(() => {
     const handleVisibilityChange = () => setDocumentHidden(document.hidden);
@@ -76,97 +89,279 @@ export default function VoiceMediaStage({
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-  // ── Loading-State zurücksetzen wenn sich der Track/Teilnehmer ändert ───────
-
   useEffect(() => {
-    if (open) {
-      setVideoLoading(true);
-      setVideoError(false);
+    if (config?.isDesktop) {
+      return undefined;
     }
-  }, [open, participantId, source]);
+    const handleFullscreenChange = () => {
+      const fullscreenElement = document.fullscreenElement;
+      setFullscreenActive(Boolean(
+        fullscreenElement
+        && stageSurfaceRef.current
+        && (
+          fullscreenElement === stageSurfaceRef.current
+          || stageSurfaceRef.current.contains(fullscreenElement)
+        )
+      ));
+    };
 
-  // ── Callback: Video hat Daten und spielt → Loading beenden ────────────────
-
-  const handleVideoPlaying = useCallback(() => {
-    setVideoLoading(false);
-  }, []);
-
-  const handleVideoLoadedData = useCallback(() => {
-    // loadeddata feuert bevor playing – wir warten lieber auf playing,
-    // setzen aber trotzdem Loading auf false falls playing nicht kommt
-    // (z.B. bei muted autoplay ohne explizites play-Event)
-    setVideoLoading(false);
-  }, []);
-
-  // ── Track-Attach mit Retry-Logik ─────────────────────────────────────────
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [config?.isDesktop]);
 
   useEffect(() => {
-    // Nicht attachen wenn Dialog zu, Tab unsichtbar oder Daten fehlen
-    if (documentHidden || !open || !voiceEngineRef?.current || !participantId || !source || !videoRef.current) {
+    if (!config?.isDesktop) {
       return undefined;
     }
 
-    const videoElement = videoRef.current;
-    let detachFn = null;
-    let retryCount = 0;
-    let retryTimer = null;
     let cancelled = false;
+    let detachObserver = null;
 
-    /**
-     * Versucht den Track an das Video-Element zu hängen.
-     * Wenn attachParticipantMediaElement() null zurückgibt (kein Track vorhanden),
-     * wird nach RETRY_INTERVAL_MS erneut versucht – bis zu MAX_RETRIES mal.
-     */
-    const tryAttach = () => {
-      if (cancelled) return;
-
-      detachFn = voiceEngineRef.current?.attachParticipantMediaElement(
-        participantId,
-        source,
-        videoElement,
-      );
-
-      if (!detachFn && retryCount < MAX_RETRIES) {
-        retryCount += 1;
-        retryTimer = setTimeout(tryAttach, RETRY_INTERVAL_MS);
-      } else if (detachFn) {
-        // Track erfolgreich angehängt – play() erzwingen für den Fall
-        // dass autoplay vom Browser blockiert wurde
-        void videoElement.play?.().catch(() => {});
-      } else {
-        // Alle Retries aufgebraucht, kein Track verfügbar
-        setVideoLoading(false);
-        setVideoError(true);
+    const bindDesktopFullscreen = async () => {
+      const initialFullscreen = await getDesktopWindowFullscreen();
+      if (!cancelled) {
+        setFullscreenActive(initialFullscreen);
       }
+      const nextDetachObserver = await observeDesktopWindowFullscreen((nextFullscreen) => {
+        if (!cancelled) {
+          setFullscreenActive(Boolean(nextFullscreen));
+        }
+      });
+      if (!cancelled) {
+        detachObserver = nextDetachObserver;
+      } else {
+        nextDetachObserver?.();
+      }
+    };
+
+    void bindDesktopFullscreen();
+
+    return () => {
+      cancelled = true;
+      detachObserver?.();
+    };
+  }, [config?.isDesktop]);
+
+  useEffect(() => {
+    if (open) {
+      setViewState(VIEW_STATE_LOADING);
+    }
+  }, [open, source, trackRefId]);
+
+  useEffect(() => {
+    if (!config?.isDesktop || open) {
+      return;
+    }
+    void setDesktopWindowFullscreen(false);
+  }, [config?.isDesktop, open]);
+
+  const toggleFullscreen = useCallback(async () => {
+    const stageSurface = stageSurfaceRef.current;
+
+    try {
+      if (config?.isDesktop) {
+        const nextFullscreen = !(await getDesktopWindowFullscreen());
+        await setDesktopWindowFullscreen(nextFullscreen);
+        return;
+      }
+
+      if (!stageSurface) {
+        return;
+      }
+
+      if (document.fullscreenElement === stageSurface) {
+        await document.exitFullscreen?.();
+        return;
+      }
+      await stageSurface.requestFullscreen?.();
+    } catch {
+      // Ignore fullscreen API failures on unsupported shells.
+    }
+  }, [config?.isDesktop]);
+
+  const handleVideoRef = useCallback((node) => {
+    videoRef.current = node;
+    setVideoElement(node);
+  }, []);
+
+  const trackAvailabilityKey = [
+    trackRefId || "none",
+    Number(Boolean(selectedTrackAvailable)),
+  ].join(":");
+
+  useEffect(() => {
+    if (!open) {
+      return undefined;
+    }
+
+    if (!trackRefId || !source) {
+      setViewState(VIEW_STATE_UNAVAILABLE);
+      return undefined;
+    }
+
+    if (documentHidden || !voiceEngineRef?.current || !videoElement) {
+      return undefined;
+    }
+
+    const engine = voiceEngineRef.current;
+    let detachFn = null;
+    let stopReadinessObserver = null;
+    let retryTimer = null;
+    let frameReadyTimer = null;
+    let cancelled = false;
+    let frameReady = false;
+    let attachAttempts = 0;
+    let playbackRecoveryAttempts = 0;
+
+    const requestPlaybackRecovery = (event) => {
+      if (playbackRecoveryAttempts >= playbackRecoveryPolicy.maxPlaybackRecoveryAttempts) {
+        return false;
+      }
+
+      const didRecoverPlayback = engine.recoverTrackRefPlayback?.(trackRefId);
+      if (!didRecoverPlayback) {
+        return false;
+      }
+
+      playbackRecoveryAttempts += 1;
+      engine.logger?.debug?.("stage requested playback recovery", {
+        event,
+        trackRefId,
+        source,
+        attachAttempts,
+        playbackRecoveryAttempts,
+      });
+      return true;
+    };
+
+    const cleanupAttachment = () => {
+      stopReadinessObserver?.();
+      stopReadinessObserver = null;
+      detachFn?.();
+      detachFn = null;
+      try {
+        videoElement.srcObject = null;
+      } catch {
+        // Ignore partial detach cleanup failures on fast retries.
+      }
+    };
+
+    const setUnavailable = () => {
+      cleanupAttachment();
+      setViewState(VIEW_STATE_UNAVAILABLE);
+      engine.logger?.warn?.("stage unavailable after bounded attach retries", {
+        event: "stage_unavailable",
+        trackRefId,
+        source,
+        attachAttempts,
+      });
+    };
+
+    const scheduleRetry = (delayMs = RETRY_INTERVAL_MS) => {
+      cleanupAttachment();
+      if (attachAttempts >= playbackRecoveryPolicy.maxAttachRetries) {
+        setUnavailable();
+        return;
+      }
+      attachAttempts += 1;
+      retryTimer = setTimeout(tryAttach, delayMs);
+    };
+
+    const tryAttach = () => {
+      if (cancelled) {
+        return;
+      }
+
+      setViewState(VIEW_STATE_LOADING);
+      frameReady = false;
+      clearTimeout(frameReadyTimer);
+      cleanupAttachment();
+
+      engine.logger?.debug?.("stage attach requested", {
+        event: "stage_attach_requested",
+        trackRefId,
+        source,
+        attachAttempts,
+      });
+
+      engine.ensureTrackRefPlayback?.(trackRefId);
+
+      detachFn = engine.attachTrackRefElement(trackRefId, videoElement);
+      if (!detachFn) {
+        const shouldAttemptPendingRecovery = attachAttempts >= playbackRecoveryPolicy.pendingPlaybackRecoveryAfterAttempts
+          && (
+            attachAttempts === playbackRecoveryPolicy.pendingPlaybackRecoveryAfterAttempts
+            || (
+              playbackRecoveryPolicy.pendingPlaybackRecoveryRepeatEveryAttempts
+              && (
+                (attachAttempts - playbackRecoveryPolicy.pendingPlaybackRecoveryAfterAttempts)
+                % playbackRecoveryPolicy.pendingPlaybackRecoveryRepeatEveryAttempts
+              ) === 0
+            )
+          );
+        const didRecoverPlayback = shouldAttemptPendingRecovery
+          && requestPlaybackRecovery("stage_playback_recovery_pending");
+        engine.logger?.debug?.("stage attach pending", {
+          event: "stage_attach_pending",
+          trackRefId,
+          source,
+          attachAttempts,
+          playbackRecoveryAttempts,
+          didRecoverPlayback: Boolean(didRecoverPlayback),
+        });
+        scheduleRetry(didRecoverPlayback ? PLAYBACK_RECOVERY_RETRY_MS : RETRY_INTERVAL_MS);
+        return;
+      }
+
+      stopReadinessObserver = observeVideoReadiness(videoElement, () => {
+        if (cancelled) {
+          return;
+        }
+        frameReady = true;
+        clearTimeout(frameReadyTimer);
+        engine.logger?.debug?.("stage first frame observed", {
+          event: "stage_first_frame",
+          trackRefId,
+          source,
+        });
+        setViewState(VIEW_STATE_READY);
+      });
+
+      const playResult = videoElement.play?.();
+      if (typeof playResult?.catch === "function") {
+        playResult.catch(() => {});
+      }
+      frameReadyTimer = setTimeout(() => {
+        if (cancelled || frameReady) {
+          return;
+        }
+
+        const didRecoverPlayback = requestPlaybackRecovery("stage_playback_recovery_frame");
+
+        engine.logger?.debug?.("stage attach retry after missing frame", {
+          event: "stage_attach_retry",
+          trackRefId,
+          source,
+          attachAttempts,
+          playbackRecoveryAttempts,
+          didRecoverPlayback: Boolean(didRecoverPlayback),
+        });
+        scheduleRetry(didRecoverPlayback ? PLAYBACK_RECOVERY_RETRY_MS : RETRY_INTERVAL_MS);
+      }, FRAME_READY_GRACE_MS);
     };
 
     tryAttach();
 
-    // Safety-Timeout: Falls der Track angehängt wurde aber loadeddata/
-    // playing nie feuern (z.B. captureStream ohne Frames), nach
-    // LOADING_TIMEOUT_MS den Loading-State auflösen und Error anzeigen.
-    const safetyTimer = setTimeout(() => {
-      if (!cancelled) {
-        setVideoLoading((prev) => {
-          if (prev) setVideoError(true);
-          return false;
-        });
-      }
-    }, LOADING_TIMEOUT_MS);
-
-    // Cleanup: Timer stoppen und Track sauber lösen
     return () => {
       cancelled = true;
-      clearTimeout(safetyTimer);
+      clearTimeout(frameReadyTimer);
       if (retryTimer) {
         clearTimeout(retryTimer);
       }
       videoElement?.pause?.();
-      detachFn?.();
+      cleanupAttachment();
     };
-  }, [documentHidden, mediaRevision, open, participantId, source, voiceEngineRef]);
-
-  // ── Rendering ─────────────────────────────────────────────────────────────
+  }, [documentHidden, open, playbackRecoveryPolicy, source, trackAvailabilityKey, trackRefId, videoElement, voiceEngineRef]);
 
   const isScreenShare = source === "screen_share";
   const title = isScreenShare
@@ -181,56 +376,65 @@ export default function VoiceMediaStage({
             {isScreenShare ? <MonitorPlay size={18} /> : <VideoCamera size={18} />}
             {title}
           </DialogTitle>
+          <DialogDescription className="text-zinc-400">
+            {isScreenShare
+              ? t("mediaStage.screenShareTitle", { name: participantName || t("common.unknown") })
+              : t("mediaStage.cameraTitle", { name: participantName || t("common.unknown") })}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80 relative">
+          <div ref={stageSurfaceRef} className="relative overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80">
+            <div className="absolute right-4 top-4 z-20">
+              <button
+                type="button"
+                onClick={() => void toggleFullscreen()}
+                className="rounded-xl border border-white/10 bg-black/55 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-black/75"
+                data-testid="media-stage-fullscreen"
+              >
+                {fullscreenActive
+                  ? t("mediaStage.exitFullscreen", { defaultValue: "Vollbild verlassen" })
+                  : t("mediaStage.enterFullscreen", { defaultValue: "Vollbild" })}
+              </button>
+            </div>
             {documentHidden ? (
               <div className="flex h-[70vh] w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_35%),linear-gradient(180deg,#05070b,#09090b)] px-6 text-center text-sm text-zinc-400">
                 {t("mediaStage.previewPaused")}
               </div>
             ) : (
               <>
-                {/* Lade-Indikator über dem Video – verschwindet sobald Daten ankommen */}
-                {videoLoading && !videoError && (
+                {viewState === VIEW_STATE_LOADING && (
                   <div
                     className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
                     data-testid="media-stage-loading"
                   >
                     <div className="flex flex-col items-center gap-3">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-                      <p className="text-sm text-zinc-400">{t("mediaStage.loading", { defaultValue: "Stream wird geladen..." })}</p>
+                      <p className="text-sm text-zinc-400">
+                        {t("mediaStage.loading", { defaultValue: "Stream wird geladen..." })}
+                      </p>
                     </div>
                   </div>
                 )}
-                {/* Fehler-Anzeige wenn Track nicht geladen werden konnte */}
-                {videoError && (
+                {viewState === VIEW_STATE_UNAVAILABLE && (
                   <div
                     className="absolute inset-0 z-10 flex items-center justify-center bg-black/80"
-                    data-testid="media-stage-error"
+                    data-testid="media-stage-unavailable"
                   >
-                    <div className="flex flex-col items-center gap-3 max-w-sm text-center">
+                    <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                       <MonitorPlay size={32} className="text-zinc-500" />
                       <p className="text-sm text-zinc-400">
-                        {t("mediaStage.loadFailed", { defaultValue: "Stream konnte nicht geladen werden. Die Quelle ist m\u00F6glicherweise nicht mehr verf\u00FCgbar." })}
+                        {t("mediaStage.unavailable", {
+                          defaultValue: "Stream ist derzeit nicht verfügbar.",
+                        })}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => { setVideoError(false); setVideoLoading(true); }}
-                        className="rounded-xl bg-white/10 px-4 py-2 text-xs font-medium text-white hover:bg-white/15 transition-colors"
-                        data-testid="media-stage-retry"
-                      >
-                        {t("common.retry", { defaultValue: "Erneut versuchen" })}
-                      </button>
                     </div>
                   </div>
                 )}
                 <video
-                  ref={videoRef}
+                  ref={handleVideoRef}
                   autoPlay
                   playsInline
                   controls={false}
-                  onPlaying={handleVideoPlaying}
-                  onLoadedData={handleVideoLoadedData}
                   className="h-[70vh] w-full bg-black object-contain"
                   data-testid="media-stage-video"
                 />
@@ -240,9 +444,7 @@ export default function VoiceMediaStage({
           <p className="text-xs text-zinc-500">
             {documentHidden
               ? t("mediaStage.previewPausedHint")
-              : (config?.isDesktop
-                ? t("mediaStage.desktopHint")
-                : t("mediaStage.webHint"))}
+              : (config?.isDesktop ? t("mediaStage.desktopHint") : t("mediaStage.webHint"))}
           </p>
         </div>
       </DialogContent>

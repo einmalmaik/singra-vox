@@ -378,8 +378,8 @@ class TestOwnerBypassMutedRole:
         role_id = r.json()["id"]
 
         # Assign to admin
-        r2 = requests.put(f"{BASE_URL}/api/servers/{SERVER_ID}/members/{ADMIN_ID}",
-                          json={"roles": [role_id]}, headers=h(admin_token))
+        requests.put(f"{BASE_URL}/api/servers/{SERVER_ID}/members/{ADMIN_ID}",
+                     json={"roles": [role_id]}, headers=h(admin_token))
         # May need manage_members - admin is owner so it should work
         # Actually admin calling update_member on themselves - needs manage_members... but owner can do all
         # Let's check
@@ -619,7 +619,7 @@ class TestEdgeCases:
             results.append(r.status_code)
         non_403 = [s for s in results if s != 403]
         assert not non_403, f"Permission bypass detected! Non-403 responses: {non_403}"
-        print(f"PASS T28: all 20 rapid requests returned 403")
+        print("PASS T28: all 20 rapid requests returned 403")
 
     def test_29_null_permission_value_treated_as_false(self, admin_token):
         """Test 29: PATCH role with null permission value → treated as false"""
@@ -682,7 +682,7 @@ class TestBodyInjectionAttacks:
         # Should succeed registration but without admin privileges
         assert r.status_code in (200, 201), f"Register failed: {r.text}"
         data = r.json()
-        assert data.get("is_admin") is not True, f"is_admin injection succeeded!"
+        assert data.get("is_admin") is not True, "is_admin injection succeeded!"
         print("PASS: admin injection in register ignored")
 
 

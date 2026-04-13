@@ -58,7 +58,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
 import jwt as pyjwt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.identity.config import (
     SVID_JWT_SECRET,
@@ -260,12 +260,12 @@ async def svid_register(inp: SvidRegisterInput):
                 "expires_at": verify_state["expires_at"],
             }
         except Exception as exc:
-            logger.warning("SVID verification email failed (%s) – auto-verifying", exc)
-            await _db.svid_accounts.update_one(
-                {"email": email},
-                {"$set": {"email_verified": True, "email_verified_at": _now()}},
+            logger.warning(
+                "SVID verification email failed for %s (%s) - registration remains unverified",
+                email,
+                exc,
             )
-            return {"ok": True, "verification_required": False, "email": email, "expires_at": None}
+            raise HTTPException(503, "Verification email could not be sent")
 
     existing_username = await _db.svid_accounts.find_one({"username": username}, {"_id": 0})
     if existing_username:
@@ -306,12 +306,12 @@ async def svid_register(inp: SvidRegisterInput):
             "expires_at": verify_state["expires_at"],
         }
     except Exception as exc:
-        logger.warning("SVID verification email failed (%s) – auto-verifying", exc)
-        await _db.svid_accounts.update_one(
-            {"id": account_id},
-            {"$set": {"email_verified": True, "email_verified_at": _now()}},
+        logger.warning(
+            "SVID verification email failed for %s (%s) - registration remains unverified",
+            email,
+            exc,
         )
-        return {"ok": True, "verification_required": False, "email": email, "expires_at": None}
+        raise HTTPException(503, "Verification email could not be sent")
 
 
 @router.post("/verify-email")

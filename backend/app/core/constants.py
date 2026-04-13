@@ -13,6 +13,8 @@ Single source of truth for magic strings and configuration defaults.
 
 import os
 
+from app.core.config import ROOT_DIR  # noqa: F401
+
 # ── E2EE ──────────────────────────────────────────────────────────────────────
 #: HTTP request header carrying the active device ID for E2EE operations.
 E2EE_DEVICE_HEADER: str = "X-Singra-Device-Id"

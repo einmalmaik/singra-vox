@@ -14,6 +14,8 @@ Pure functions with no external dependencies.  Import from anywhere.
 import uuid
 from datetime import datetime, timezone
 
+from app.core.config import ADMIN_ROLE, OWNER_ROLE, USER_ROLE
+
 
 def now_utc() -> str:
     """Return the current UTC time as an ISO-8601 string."""
@@ -26,9 +28,17 @@ def new_id() -> str:
 
 
 def sanitize_user(user: dict) -> dict:
-    """Strip internal fields from a user document before sending to clients."""
-    return {
-        k: v
-        for k, v in user.items()
-        if k not in ("password_hash", "_id")
-    }
+    """Strip internal fields and normalize legacy auth fields for API output."""
+    safe_user = dict(user or {})
+    safe_user.pop("password_hash", None)
+    safe_user.pop("_id", None)
+    legacy_role = safe_user.get("role")
+    if not safe_user.get("instance_role"):
+        safe_user["instance_role"] = (
+            OWNER_ROLE
+            if legacy_role == OWNER_ROLE
+            else ADMIN_ROLE if legacy_role == ADMIN_ROLE else USER_ROLE
+        )
+    if "email_verified" not in safe_user:
+        safe_user["email_verified"] = True
+    return safe_user

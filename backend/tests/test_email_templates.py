@@ -115,8 +115,8 @@ class TestVerificationEmail:
         assert "mauntingstudios" in html
         print("✓ Verification email HTML contains 'mauntingstudios'")
 
-    def test_html_contains_fox_logo_svg(self):
-        """Verify HTML contains fox logo SVG."""
+    def test_html_contains_inline_fox_logo(self):
+        """Verify HTML contains the inline fox logo asset."""
         from app.email_templates import render_verification_email
         _, _, html = render_verification_email(
             app_name="Singra Vox",
@@ -125,8 +125,8 @@ class TestVerificationEmail:
             expires_minutes=15,
         )
         # Check for SVG elements that are part of the fox logo
-        assert "svg" in html.lower()
-        assert "polygon" in html.lower() or "path" in html.lower()
+        assert "data:image/png;base64" in html
+        assert "<img" in html.lower()
         print("✓ Verification email HTML contains fox logo SVG")
 
     def test_code_displayed_in_large_font(self):

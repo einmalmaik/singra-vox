@@ -26,36 +26,17 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.auth_service import load_current_user
 from app.core.database import db
 from app.core.utils import now_utc, new_id
-from app.core.constants import E2EE_DEVICE_HEADER
 from app.core.encryption import (
     encryption_enabled,
     encrypt_group_content,
     decrypt_group_content,
 )
+from app.dependencies import current_user, require_verified_device
 from app.pagination import clamp_page_limit
 
 router = APIRouter(prefix="/api", tags=["groups"])
-
-
-async def _current_user(request: Request) -> dict:
-    user, _ = await load_current_user(db, request)
-    user.pop("password_hash", None)
-    return user
-
-
-async def _require_verified_device(request: Request, user: dict) -> dict:
-    device_id = (request.headers.get(E2EE_DEVICE_HEADER) or "").strip() or None
-    if not device_id:
-        raise HTTPException(400, "E2EE device header required")
-    device = await db.e2ee_devices.find_one(
-        {"user_id": user["id"], "device_id": device_id}, {"_id": 0}
-    )
-    if not device or device.get("revoked_at") or not device.get("verified_at"):
-        raise HTTPException(403, "E2EE device is not trusted")
-    return device
 
 
 # ── Input models ──────────────────────────────────────────────────────────────
@@ -81,7 +62,7 @@ class GroupMessageInput(BaseModel):
 @router.post("/groups")
 async def create_group(inp: GroupCreateInput, request: Request) -> dict:
     """Create a new group conversation."""
-    user = await _current_user(request)
+    user = await current_user(request)
     members = list(set([user["id"]] + inp.member_ids))
 
     group = {
@@ -106,7 +87,7 @@ async def create_group(inp: GroupCreateInput, request: Request) -> dict:
 @router.get("/groups")
 async def list_groups(request: Request) -> list:
     """List all group conversations the current user belongs to."""
-    user = await _current_user(request)
+    user = await current_user(request)
     groups = await db.group_conversations.find(
         {"members": user["id"]}, {"_id": 0}
     ).to_list(50)
@@ -129,7 +110,7 @@ async def list_group_messages(
     group_id: str, request: Request, before: str | None = None, limit: int = 50
 ) -> dict:
     """Paginate messages in a group conversation (newest-first)."""
-    user = await _current_user(request)
+    user = await current_user(request)
     group = await db.group_conversations.find_one(
         {"id": group_id, "members": user["id"]}, {"_id": 0}
     )
@@ -164,7 +145,7 @@ async def list_group_messages(
 @router.post("/groups/{group_id}/messages")
 async def send_group_message(group_id: str, inp: GroupMessageInput, request: Request) -> dict:
     """Send a message to a group conversation."""
-    user = await _current_user(request)
+    user = await current_user(request)
     group = await db.group_conversations.find_one(
         {"id": group_id, "members": user["id"]}, {"_id": 0}
     )
@@ -172,7 +153,7 @@ async def send_group_message(group_id: str, inp: GroupMessageInput, request: Req
         raise HTTPException(404, "Group not found")
 
     if inp.is_encrypted:
-        device = await _require_verified_device(request, user)
+        device = await require_verified_device(request, user)
         if not inp.encrypted_content or not inp.nonce or not inp.sender_device_id:
             raise HTTPException(400, "Encrypted messages require a full E2EE payload")
         if inp.sender_device_id != device["device_id"]:
@@ -210,7 +191,7 @@ async def send_group_message(group_id: str, inp: GroupMessageInput, request: Req
 @router.put("/groups/{group_id}/members")
 async def update_group_members(group_id: str, request: Request) -> dict:
     """Add or remove a user from a group conversation."""
-    user = await _current_user(request)
+    user = await current_user(request)
     body = await request.json()
     group = await db.group_conversations.find_one(
         {"id": group_id, "members": user["id"]}, {"_id": 0}

@@ -8,13 +8,17 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
 mod native_capture;
+#[cfg(target_os = "windows")]
+mod native_audio_capture;
+mod native_livekit;
+mod screen_share;
 
 mod rich_presence;
 mod voice_overlay;
 
 use serde::Serialize;
+#[cfg(target_os = "windows")]
 use std::sync::{Arc, Mutex};
 use tauri::{process::restart, Emitter, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
@@ -79,6 +83,7 @@ struct DesktopRuntimeInfo {
     platform: String,
     ptt_mode: String,
     is_elevated: bool,
+    screen_share_capabilities: screen_share::session::ScreenShareCapabilities,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +95,7 @@ struct PttStatus {
     last_error: Option<String>,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopPttPayload {
@@ -131,7 +137,23 @@ fn get_desktop_runtime_info() -> DesktopRuntimeInfo {
         // frontend still shows the broader warning because an elevated game can
         // block lower-privileged apps from observing its keys.
         is_elevated: false,
+        screen_share_capabilities: screen_share::session::ScreenShareCapabilities::current(),
     }
+}
+
+#[tauri::command]
+fn debug_voice_log(level: String, message: String, payload: String) -> bool {
+    #[cfg(debug_assertions)]
+    {
+        eprintln!("[voice_frontend][{level}] {message} {payload}");
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (&level, &message, &payload);
+    }
+
+    true
 }
 
 #[cfg(target_os = "windows")]
@@ -771,9 +793,8 @@ fn main() {
     let builder = tauri::Builder::default()
         .manage(desktop_state);
 
-    // DesktopCaptureStore wird nur auf Windows/macOS kompiliert (crabgrab)
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
     let builder = builder.manage(native_capture::DesktopCaptureStore::default());
+    let builder = builder.manage(native_livekit::NativeScreenShareStore::default());
 
     builder
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -800,6 +821,7 @@ fn main() {
             get_secret,
             delete_secret,
             get_desktop_runtime_info,
+            debug_voice_log,
             configure_ptt_listener,
             clear_ptt_listener,
             open_url,
@@ -813,16 +835,12 @@ fn main() {
             voice_overlay::update_overlay_speakers,
             voice_overlay::update_overlay_settings,
             voice_overlay::is_fullscreen_game_active,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::list_capture_sources,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::start_desktop_capture,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::stop_desktop_capture,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::get_desktop_capture_frame,
-            #[cfg(any(target_os = "windows", target_os = "macos"))]
-            native_capture::get_desktop_capture_session,
+            screen_share::commands::list_capture_sources,
+            screen_share::commands::start_native_screen_share,
+            screen_share::commands::stop_native_screen_share,
+            screen_share::commands::update_native_screen_share_key,
+            screen_share::commands::update_native_screen_share_audio_volume,
+            screen_share::commands::get_native_screen_share_session,
         ])
         .run(tauri::generate_context!())
         .expect("error running Singra Vox desktop");

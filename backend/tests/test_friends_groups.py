@@ -11,16 +11,29 @@ import os
 import pytest
 import requests
 
+from pymongo import MongoClient
+
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
+MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+DB_NAME = os.environ.get("DB_NAME", "singravox")
 
 # Test credentials
 TEST_EMAIL = "admin@mauntingstudios.de"
-TEST_PASSWORD = "TestAdmin123!"
+TEST_PASSWORD = "Admin1234!"
+
+
+def clear_rate_limits():
+    client = MongoClient(MONGO_URL)
+    try:
+        client[DB_NAME].rate_limits.delete_many({})
+    finally:
+        client.close()
 
 
 @pytest.fixture(scope="module")
 def auth_token():
     """Get authentication token for testing."""
+    clear_rate_limits()
     response = requests.post(
         f"{BASE_URL}/api/auth/login",
         json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
@@ -60,7 +73,7 @@ class TestFriendsAPI:
         assert response.status_code == 403
         data = response.json()
         assert "detail" in data
-        print(f"✓ GET /api/id/friends/requests returns 403 without SVID")
+        print("✓ GET /api/id/friends/requests returns 403 without SVID")
 
     def test_send_friend_request_without_svid_returns_403(self, api_client):
         """POST /api/id/friends/request returns 403 if no SVID account."""
@@ -69,7 +82,7 @@ class TestFriendsAPI:
             json={"recipient_username": "testuser"},
         )
         assert response.status_code == 403
-        print(f"✓ POST /api/id/friends/request returns 403 without SVID")
+        print("✓ POST /api/id/friends/request returns 403 without SVID")
 
 
 class TestRelayMessagesAPI:
@@ -84,7 +97,7 @@ class TestRelayMessagesAPI:
         assert response.status_code == 403
         data = response.json()
         assert "detail" in data
-        print(f"✓ POST /api/id/relay/messages returns 403 without SVID")
+        print("✓ POST /api/id/relay/messages returns 403 without SVID")
 
 
 class TestGroupDMAPI:
@@ -111,7 +124,6 @@ class TestGroupDMAPI:
         assert "members" in data
         assert "created_at" in data
         print(f"✓ POST /api/groups creates group: {data['id']}")
-        return data["id"]
 
     def test_get_group_messages(self, api_client):
         """GET /api/groups/{id}/messages returns messages."""
@@ -136,6 +148,7 @@ class TestAuthEndpoints:
 
     def test_login_success(self):
         """POST /api/auth/login with valid credentials."""
+        clear_rate_limits()
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
@@ -153,7 +166,7 @@ class TestAuthEndpoints:
             json={"email": "wrong@example.com", "password": "wrongpass"},
         )
         assert response.status_code in [401, 400]
-        print(f"✓ Login rejected for invalid credentials")
+        print("✓ Login rejected for invalid credentials")
 
     def test_get_me_authenticated(self, api_client):
         """GET /api/auth/me returns current user."""

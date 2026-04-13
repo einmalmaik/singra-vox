@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:dev": "node scripts/run-tauri.js dev",
+    "tauri:build": "node scripts/run-tauri.js build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"

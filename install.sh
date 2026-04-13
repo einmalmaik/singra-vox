@@ -8,7 +8,7 @@
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 # =============================================================================
-#   Singra Vox – Self-Hosted Installer & Manager
+#   Singra Vox â€“ Self-Hosted Installer & Manager
 #   Works on any Linux VPS (Hetzner, Netcup, Contabo, Ionos, etc.)
 #
 #   Usage:
@@ -29,33 +29,33 @@ COMPOSE_BIN=""
 VERSION_FILE="$REPO_DIR/.singravox-version"
 IDENTITY_ENV="$DATA_DIR/.env.identity"
 
-# ── Colors ────────────────────────────────────────────────────────────────────
+# â”€â”€ Colors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 CYAN=$'\033[0;36m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
 
-info()    { echo -e "${CYAN}  →${RESET} $*" >&2; }
-success() { echo -e "${GREEN}  ✓${RESET} $*" >&2; }
+info()    { echo -e "${CYAN}  â†’${RESET} $*" >&2; }
+success() { echo -e "${GREEN}  âœ“${RESET} $*" >&2; }
 warn()    { echo -e "${YELLOW}  !${RESET} $*" >&2; }
-error()   { echo -e "${RED}  ✗${RESET} $*" >&2; }
+error()   { echo -e "${RED}  âœ—${RESET} $*" >&2; }
 header()  { echo -e "\n${BOLD}${CYAN}$*${RESET}" >&2; }
-divider() { echo -e "${CYAN}────────────────────────────────────────────${RESET}" >&2; }
+divider() { echo -e "${CYAN}â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€${RESET}" >&2; }
 
 banner() {
   echo "" >&2
   echo -e "${BOLD}${CYAN}" >&2
-  echo "   ███████╗██╗███╗   ██╗ ██████╗ ██████╗  █████╗     ██╗   ██╗ ██████╗ ██╗  ██╗" >&2
-  echo "   ██╔════╝██║████╗  ██║██╔════╝ ██╔══██╗██╔══██╗    ██║   ██║██╔═══██╗╚██╗██╔╝" >&2
-  echo "   ███████╗██║██╔██╗ ██║██║  ███╗██████╔╝███████║    ██║   ██║██║   ██║ ╚███╔╝ " >&2
-  echo "   ╚════██║██║██║╚██╗██║██║   ██║██╔══██╗██╔══██║    ╚██╗ ██╔╝██║   ██║ ██╔██╗ " >&2
-  echo "   ███████║██║██║ ╚████║╚██████╔╝██║  ██║██║  ██║     ╚████╔╝ ╚██████╔╝██╔╝ ██╗" >&2
-  echo "   ╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝      ╚═══╝   ╚═════╝ ╚═╝  ╚═╝" >&2
+  echo "   â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—     â–ˆâ–ˆâ•—   â–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ•—  â–ˆâ–ˆâ•—" >&2
+  echo "   â–ˆâ–ˆâ•”â•â•â•â•â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â•â•â• â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—    â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â•â–ˆâ–ˆâ•—â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•" >&2
+  echo "   â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘    â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ•”â• " >&2
+  echo "   â•šâ•â•â•â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•—â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘    â•šâ–ˆâ–ˆâ•— â–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘ â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— " >&2
+  echo "   â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘     â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•”â• â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•”â• â–ˆâ–ˆâ•—" >&2
+  echo "   â•šâ•â•â•â•â•â•â•â•šâ•â•â•šâ•â•  â•šâ•â•â•â• â•šâ•â•â•â•â•â• â•šâ•â•  â•šâ•â•â•šâ•â•  â•šâ•â•      â•šâ•â•â•â•   â•šâ•â•â•â•â•â• â•šâ•â•  â•šâ•â•" >&2
   echo -e "${RESET}" >&2
-  echo -e "${BOLD}   Self-Hosted Encrypted Chat — Easy Install${RESET}" >&2
+  echo -e "${BOLD}   Self-Hosted Encrypted Chat â€” Easy Install${RESET}" >&2
   divider
   echo "" >&2
 }
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ask() {
   local label="$1" default="${2:-}" result=""
   if [[ -n "$default" ]]; then
@@ -93,7 +93,7 @@ get_public_ip() {
   echo "$ip"
 }
 
-# ── Port-Verfügbarkeit prüfen ─────────────────────────────────────────────────
+# â”€â”€ Port-VerfÃ¼gbarkeit prÃ¼fen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 is_port_free() {
   local port="$1"
   # Try ss first, then netstat, then a direct connection test
@@ -111,10 +111,10 @@ find_free_port() {
   local start_port="$1"
   local port="$start_port"
   while ! is_port_free "$port"; do
-    warn "Port $port ist bereits belegt, versuche $((port + 1))…" >&2
+    warn "Port $port ist bereits belegt, versuche $((port + 1))â€¦" >&2
     (( port++ ))
     if (( port > start_port + 20 )); then
-      error "Kein freier Port im Bereich $start_port–$port gefunden." >&2
+      error "Kein freier Port im Bereich $start_portâ€“$port gefunden." >&2
       echo "$start_port"
       return
     fi
@@ -125,7 +125,7 @@ find_free_port() {
   echo "$port"
 }
 
-# ── UFW Portfreigabe ──────────────────────────────────────────────────────────
+# â”€â”€ UFW Portfreigabe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 configure_firewall() {
   local ports=("$@")
 
@@ -140,12 +140,12 @@ configure_firewall() {
 
   echo "" >&2
   header "Firewall (UFW)" >&2
-  info "UFW ist aktiv. Folgende Ports werden für Singra Vox benötigt:" >&2
+  info "UFW ist aktiv. Folgende Ports werden fÃ¼r Singra Vox benÃ¶tigt:" >&2
   echo "" >&2
   for entry in "${ports[@]}"; do
     local port_num="${entry%%:*}"
     local desc="${entry#*:}"
-    echo -e "  ${BOLD}${port_num}${RESET}  — ${desc}" >&2
+    echo -e "  ${BOLD}${port_num}${RESET}  â€” ${desc}" >&2
   done
   echo "" >&2
 
@@ -181,7 +181,7 @@ configure_firewall() {
 
     # Verify: check that the ports are now in UFW rules
     echo "" >&2
-    info "Überprüfe Firewall-Regeln…" >&2
+    info "ÃœberprÃ¼fe Firewall-Regelnâ€¦" >&2
     local verify_ok=true
     for entry in "${ports[@]}"; do
       local port_num="${entry%%:*}"
@@ -197,19 +197,19 @@ configure_firewall() {
     if [[ "$verify_ok" == "false" ]]; then
       echo "" >&2
       warn "Einige Ports konnten nicht freigegeben werden." >&2
-      echo -e "  ${DIM}Mögliche Ursache: Script läuft nicht als root.${RESET}" >&2
-      echo -e "  ${DIM}Lösung: Script mit sudo ausführen: ${BOLD}sudo bash install.sh${RESET}" >&2
+      echo -e "  ${DIM}MÃ¶gliche Ursache: Script lÃ¤uft nicht als root.${RESET}" >&2
+      echo -e "  ${DIM}LÃ¶sung: Script mit sudo ausfÃ¼hren: ${BOLD}sudo bash install.sh${RESET}" >&2
       echo "" >&2
       printf "  ${BOLD}%s${RESET} (j/n) [j]: " "Trotzdem fortfahren?" >&2
       read -r skip_confirm
       skip_confirm="${skip_confirm:-j}"
       if [[ ! "${skip_confirm,,}" =~ ^(j|y|ja|yes)$ ]]; then
-        error "Installation abgebrochen. Bitte mit sudo ausführen." >&2
+        error "Installation abgebrochen. Bitte mit sudo ausfÃ¼hren." >&2
         exit 1
       fi
     fi
   else
-    warn "Ports nicht freigegeben. Bitte manuell öffnen:" >&2
+    warn "Ports nicht freigegeben. Bitte manuell Ã¶ffnen:" >&2
     for entry in "${ports[@]}"; do
       local port_num="${entry%%:*}"
       local desc="${entry#*:}"
@@ -218,7 +218,7 @@ configure_firewall() {
   fi
 }
 
-# ── Webserver-Erkennung ───────────────────────────────────────────────────────
+# â”€â”€ Webserver-Erkennung â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 detect_existing_webserver() {
   local proc80=""
   if command -v ss &>/dev/null; then
@@ -254,7 +254,7 @@ configure_nginx_reverse_proxy() {
 
   if [[ ! -w "$(dirname "$conf_file")" ]]; then
     warn "Keine Schreibrechte auf $(dirname "$conf_file")."
-    warn "Bitte mit sudo ausführen oder manuell konfigurieren."
+    warn "Bitte mit sudo ausfÃ¼hren oder manuell konfigurieren."
     return 1
   fi
 
@@ -266,7 +266,7 @@ configure_nginx_reverse_proxy() {
   info "Schreibe Nginx-Konfiguration: ${conf_file}"
 
   cat > "$conf_file" <<NGPROXY_EOF
-# Singra Vox – Automatisch generiert von install.sh ($(date +%F))
+# Singra Vox â€“ Automatisch generiert von install.sh ($(date +%F))
 # Wird bei erneutem install.sh ueberschrieben.
 
 server {
@@ -313,7 +313,7 @@ NGPROXY_EOF
 
   [[ "$conf_dir" == "sites" ]] && ln -sf "$conf_file" /etc/nginx/sites-enabled/singravox.conf 2>/dev/null || true
 
-  info "Teste Nginx-Konfiguration…"
+  info "Teste Nginx-Konfigurationâ€¦"
   if nginx -t 2>/dev/null; then
     success "Nginx-Konfiguration ist gueltig"
   else
@@ -359,7 +359,7 @@ configure_apache_reverse_proxy() {
   info "Schreibe Apache-Konfiguration: ${conf_file}"
 
   cat > "$conf_file" <<APPROXY_EOF
-# Singra Vox – Automatisch generiert von install.sh ($(date +%F))
+# Singra Vox â€“ Automatisch generiert von install.sh ($(date +%F))
 
 <VirtualHost *:80>
     ServerName ${domain}
@@ -436,7 +436,7 @@ CDPROXY_EOF
   systemctl reload caddy 2>/dev/null || caddy reload --config "$caddyfile" 2>/dev/null || {
     warn "Caddy konnte nicht neu geladen werden."
   }
-  success "Caddy konfiguriert — SSL wird automatisch eingerichtet!"
+  success "Caddy konfiguriert â€” SSL wird automatisch eingerichtet!"
   return 0
 }
 
@@ -496,7 +496,7 @@ offer_certbot_ssl() {
     *)      plugin="--webroot -w /var/www/html" ;;
   esac
 
-  info "Starte Certbot…"
+  info "Starte Certbotâ€¦"
   if certbot $plugin -d "$domain" -d "$rtc_domain" --non-interactive --agree-tos --register-unsafely-without-email 2>&1 | while IFS= read -r l; do echo "  $l" >&2; done; then
     success "SSL-Zertifikat eingerichtet!"
   else
@@ -525,7 +525,7 @@ configure_external_proxy() {
     echo -e "  Soll die Proxy-Konfiguration fuer" >&2
     echo -e "  ${BOLD}${domain}${RESET} und ${BOLD}${rtc_domain}${RESET}" >&2
     echo -e "  automatisch in ${ws_label} eingetragen werden?" >&2
-    echo -e "  ${DIM}(Bestehende Konfiguration wird NICHT veraendert – nur eine neue Datei angelegt)${RESET}" >&2
+    echo -e "  ${DIM}(Bestehende Konfiguration wird NICHT veraendert â€“ nur eine neue Datei angelegt)${RESET}" >&2
     echo "" >&2
     printf "  ${BOLD}%s${RESET} (j/n) [j]: " "Automatisch konfigurieren?" >&2
     read -r auto_yn
@@ -543,7 +543,7 @@ configure_external_proxy() {
         offer_certbot_ssl "$domain" "$rtc_domain" "$webserver"
         return 0
       fi
-      warn "Automatische Konfiguration fehlgeschlagen. Zeige manuelle Anleitung…"
+      warn "Automatische Konfiguration fehlgeschlagen. Zeige manuelle Anleitungâ€¦"
     fi
   fi
 
@@ -554,22 +554,22 @@ configure_external_proxy() {
 
 spinner() {
   local pid=$1 msg="$2" i=0
-  local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  local frames=('â ‹' 'â ™' 'â ¹' 'â ¸' 'â ¼' 'â ´' 'â ¦' 'â §' 'â ‡' 'â ')
   while kill -0 "$pid" 2>/dev/null; do
     printf "\r  ${CYAN}%s${RESET}  %s  " "${frames[$((i % 10))]}" "$msg"
     sleep 0.08; (( i++ ))
   done
-  printf "\r  ${GREEN}✓${RESET}  %-50s\n" "$msg"
+  printf "\r  ${GREEN}âœ“${RESET}  %-50s\n" "$msg"
 }
 
 wait_for_api() {
   local url="$1" max_seconds=120 elapsed=0
-  info "Warte auf API ($url)…"
+  info "Warte auf API ($url)â€¦"
   while ! curl -s --max-time 3 "$url" >/dev/null 2>&1; do
     sleep 3; elapsed=$(( elapsed + 3 ))
     if (( elapsed >= max_seconds )); then
       error "API antwortet nicht nach ${max_seconds}s."
-      error "Logs prüfen:  $COMPOSE_BIN logs backend"
+      error "Logs prÃ¼fen:  $COMPOSE_BIN logs backend"
       return 1
     fi
     printf "."
@@ -589,10 +589,10 @@ detect_compose() {
   return 0
 }
 
-# ── Docker ────────────────────────────────────────────────────────────────────
+# â”€â”€ Docker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ensure_docker() {
   if ! command -v docker &>/dev/null; then
-    warn "Docker nicht gefunden. Installiere Docker…"
+    warn "Docker nicht gefunden. Installiere Dockerâ€¦"
     curl -fsSL https://get.docker.com | sh
     sudo usermod -aG docker "$USER" 2>/dev/null || true
     success "Docker installiert"
@@ -605,7 +605,7 @@ ensure_docker() {
   elif command -v docker-compose &>/dev/null; then
     COMPOSE_BIN="docker-compose"
   else
-    warn "Docker Compose Plugin nicht gefunden. Installiere…"
+    warn "Docker Compose Plugin nicht gefunden. Installiereâ€¦"
     PLUGIN_DIR="$HOME/.docker/cli-plugins"
     mkdir -p "$PLUGIN_DIR"
     ARCH="$(uname -m)"; [[ "$ARCH" == "x86_64" ]] && ARCH="x86_64" || ARCH="aarch64"
@@ -617,7 +617,7 @@ ensure_docker() {
   fi
 }
 
-# ── VAPID Keys ────────────────────────────────────────────────────────────────
+# â”€â”€ VAPID Keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 generate_vapid() {
   python3 -c "
 import base64, os
@@ -631,27 +631,27 @@ print(b64(priv) + ' ' + b64(pub))
 " 2>/dev/null || echo "placeholder_private placeholder_public"
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #   --status : Health Check & Diagnostics
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 run_status() {
   banner
-  header "Singra Vox – System-Status"
+  header "Singra Vox â€“ System-Status"
   echo ""
 
   local ok=0 warn_count=0 fail=0
 
-  # ── Installation vorhanden?
+  # â”€â”€ Installation vorhanden?
   if [[ -d "$DATA_DIR" ]]; then
     success "Installation gefunden: $DATA_DIR"
     (( ok++ ))
   else
     error "Keine Installation gefunden in $DATA_DIR"
-    echo -e "  ${DIM}Tipp: bash install.sh ausführen${RESET}"
+    echo -e "  ${DIM}Tipp: bash install.sh ausfÃ¼hren${RESET}"
     exit 1
   fi
 
-  # ── .env vorhanden?
+  # â”€â”€ .env vorhanden?
   if [[ -f "$DATA_DIR/.env" ]]; then
     success ".env Konfiguration vorhanden"
     (( ok++ ))
@@ -660,7 +660,7 @@ run_status() {
     (( fail++ ))
   fi
 
-  # ── Docker / Compose?
+  # â”€â”€ Docker / Compose?
   if command -v docker &>/dev/null; then
     success "Docker: $(docker --version | cut -d' ' -f3 | tr -d ',')"
     (( ok++ ))
@@ -670,14 +670,14 @@ run_status() {
   fi
 
   if detect_compose; then
-    success "Docker Compose verfügbar"
+    success "Docker Compose verfÃ¼gbar"
     (( ok++ ))
   else
     error "Docker Compose nicht gefunden"
     (( fail++ ))
   fi
 
-  # ── Container-Status
+  # â”€â”€ Container-Status
   echo ""
   header "Container-Status"
   if detect_compose && [[ -f "$DATA_DIR/docker-compose.yml" ]]; then
@@ -705,13 +705,13 @@ run_status() {
     (( warn_count++ ))
   fi
 
-  # ── Konfiguration prüfen
+  # â”€â”€ Konfiguration prÃ¼fen
   echo ""
   header "Konfigurations-Check"
   if [[ -f "$DATA_DIR/.env" ]]; then
     local missing_vars=()
 
-    # Pflicht-Variablen prüfen
+    # Pflicht-Variablen prÃ¼fen
     for var in DB_NAME JWT_SECRET FRONTEND_URL; do
       local val
       val=$(grep "^${var}=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
@@ -730,7 +730,7 @@ run_status() {
       warn "INSTANCE_ENCRYPTION_SECRET zu kurz (${#enc_secret} Zeichen, min. 32)"
       (( warn_count++ ))
     else
-      warn "INSTANCE_ENCRYPTION_SECRET fehlt – Daten werden unverschlüsselt gespeichert!"
+      warn "INSTANCE_ENCRYPTION_SECRET fehlt â€“ Daten werden unverschlÃ¼sselt gespeichert!"
       (( warn_count++ ))
     fi
 
@@ -751,7 +751,7 @@ run_status() {
       success "SMTP konfiguriert: $smtp_host"
       (( ok++ ))
     else
-      warn "SMTP nicht konfiguriert – E-Mail-Verifizierung deaktiviert"
+      warn "SMTP nicht konfiguriert â€“ E-Mail-Verifizierung deaktiviert"
       (( warn_count++ ))
     fi
 
@@ -773,7 +773,7 @@ run_status() {
     fi
   fi
 
-  # ── API Health Check
+  # â”€â”€ API Health Check
   echo ""
   header "API Health Check"
   local frontend_url
@@ -801,7 +801,7 @@ run_status() {
     fi
   fi
 
-  # ── Disk Space
+  # â”€â”€ Disk Space
   echo ""
   header "Speicherplatz"
   local disk_avail
@@ -813,7 +813,7 @@ run_status() {
       success "Speicherplatz: $disk_avail frei (${disk_percent}% belegt)"
       (( ok++ ))
     elif [[ "$disk_percent" -lt 95 ]]; then
-      warn "Speicherplatz: $disk_avail frei (${disk_percent}% belegt) – Bitte aufräumen"
+      warn "Speicherplatz: $disk_avail frei (${disk_percent}% belegt) â€“ Bitte aufrÃ¤umen"
       (( warn_count++ ))
     else
       error "Speicherplatz kritisch: $disk_avail frei (${disk_percent}% belegt)"
@@ -821,7 +821,7 @@ run_status() {
     fi
   fi
 
-  # ── Auto-Update Status
+  # â”€â”€ Auto-Update Status
   echo ""
   header "Auto-Update"
   if crontab -l 2>/dev/null | grep -q "singravox.*install.sh.*--update"; then
@@ -835,17 +835,17 @@ run_status() {
     echo -e "  ${DIM}Aktivieren: bash install.sh --auto-update-on${RESET}"
   fi
 
-  # ── Summary
+  # â”€â”€ Summary
   echo ""
   divider
   echo ""
-  echo -e "  ${GREEN}✓ $ok OK${RESET}   ${YELLOW}! $warn_count Warnung(en)${RESET}   ${RED}✗ $fail Fehler${RESET}"
+  echo -e "  ${GREEN}âœ“ $ok OK${RESET}   ${YELLOW}! $warn_count Warnung(en)${RESET}   ${RED}âœ— $fail Fehler${RESET}"
   echo ""
 
   if [[ "$fail" -gt 0 ]]; then
     echo -e "  ${BOLD}Empfehlung:${RESET} bash install.sh --repair"
   elif [[ "$warn_count" -gt 0 ]]; then
-    echo -e "  ${BOLD}Hinweis:${RESET} Einige Warnungen gefunden. Prüfe die Details oben."
+    echo -e "  ${BOLD}Hinweis:${RESET} Einige Warnungen gefunden. PrÃ¼fe die Details oben."
   else
     echo -e "  ${BOLD}${GREEN}Alles in Ordnung!${RESET}"
   fi
@@ -853,42 +853,42 @@ run_status() {
   divider
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #   --repair : Detect and fix broken configuration
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 run_repair() {
   banner
-  header "Singra Vox – Reparatur-Modus"
+  header "Singra Vox â€“ Reparatur-Modus"
   echo ""
-  echo "  Prüfe bestehende Installation und behebe Probleme automatisch…"
+  echo "  PrÃ¼fe bestehende Installation und behebe Probleme automatischâ€¦"
   echo ""
 
   local fixed=0 skipped=0
 
-  # ── Prüfe ob Installation existiert
+  # â”€â”€ PrÃ¼fe ob Installation existiert
   if [[ ! -d "$DATA_DIR" ]]; then
     error "Keine Installation gefunden in $DATA_DIR"
     echo -e "  ${DIM}Bitte zuerst installieren: bash install.sh${RESET}"
     exit 1
   fi
 
-  # ── Docker prüfen
-  header "1/7 Docker prüfen"
+  # â”€â”€ Docker prÃ¼fen
+  header "1/7 Docker prÃ¼fen"
   ensure_docker
 
-  # ── .env prüfen & reparieren
-  header "2/7 Konfiguration prüfen"
+  # â”€â”€ .env prÃ¼fen & reparieren
+  header "2/7 Konfiguration prÃ¼fen"
   if [[ ! -f "$DATA_DIR/.env" ]]; then
     error ".env fehlt. Kann nicht automatisch erstellt werden."
     echo -e "  ${DIM}Bitte neu installieren: bash install.sh${RESET}"
     exit 1
   fi
 
-  # JWT_SECRET prüfen
+  # JWT_SECRET prÃ¼fen
   local jwt_val
   jwt_val=$(grep "^JWT_SECRET=" "$DATA_DIR/.env" | cut -d'=' -f2-)
   if [[ -z "$jwt_val" || ${#jwt_val} -lt 16 ]]; then
-    warn "JWT_SECRET fehlt oder zu kurz. Generiere neuen…"
+    warn "JWT_SECRET fehlt oder zu kurz. Generiere neuenâ€¦"
     local new_jwt; new_jwt=$(gen_secret)
     if grep -q "^JWT_SECRET=" "$DATA_DIR/.env"; then
       sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$new_jwt|" "$DATA_DIR/.env"
@@ -902,15 +902,15 @@ run_repair() {
     (( skipped++ ))
   fi
 
-  # INSTANCE_ENCRYPTION_SECRET prüfen
+  # INSTANCE_ENCRYPTION_SECRET prÃ¼fen
   local enc_val
   enc_val=$(grep "^INSTANCE_ENCRYPTION_SECRET=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
   if [[ -z "$enc_val" ]]; then
-    warn "INSTANCE_ENCRYPTION_SECRET fehlt. Generiere…"
+    warn "INSTANCE_ENCRYPTION_SECRET fehlt. Generiereâ€¦"
     local new_enc; new_enc=$(gen_secret)
     echo "INSTANCE_ENCRYPTION_SECRET=$new_enc" >> "$DATA_DIR/.env"
     success "INSTANCE_ENCRYPTION_SECRET generiert"
-    warn "WICHTIG: Diesen Schlüssel SICHER aufbewahren! Ohne ihn sind alle Daten verloren."
+    warn "WICHTIG: Diesen SchlÃ¼ssel SICHER aufbewahren! Ohne ihn sind alle Daten verloren."
     echo -e "  ${BOLD}$new_enc${RESET}"
     (( fixed++ ))
   else
@@ -918,7 +918,7 @@ run_repair() {
     (( skipped++ ))
   fi
 
-  # DB_NAME prüfen
+  # DB_NAME prÃ¼fen
   local db_val
   db_val=$(grep "^DB_NAME=" "$DATA_DIR/.env" | cut -d'=' -f2-)
   if [[ -z "$db_val" ]]; then
@@ -930,7 +930,7 @@ run_repair() {
     (( skipped++ ))
   fi
 
-  # SVID_ISSUER prüfen – Default auf voxid.mauntingstudios.de
+  # SVID_ISSUER prÃ¼fen â€“ Default auf voxid.mauntingstudios.de
   local svid_val
   svid_val=$(grep "^SVID_ISSUER=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
   if [[ -z "$svid_val" ]]; then
@@ -946,8 +946,8 @@ run_repair() {
     (( skipped++ ))
   fi
 
-  # ── Docker Compose Datei prüfen
-  header "3/7 Docker Compose prüfen"
+  # â”€â”€ Docker Compose Datei prÃ¼fen
+  header "3/7 Docker Compose prÃ¼fen"
   if [[ -f "$DATA_DIR/docker-compose.yml" ]]; then
     success "docker-compose.yml vorhanden"
     (( skipped++ ))
@@ -957,25 +957,25 @@ run_repair() {
     (( fixed++ ))
   fi
 
-  # ── LiveKit Config prüfen
-  header "4/7 LiveKit-Konfiguration prüfen"
+  # â”€â”€ LiveKit Config prÃ¼fen
+  header "4/7 LiveKit-Konfiguration prÃ¼fen"
   local lk_key lk_secret
   lk_key=$(grep "^LIVEKIT_API_KEY=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
   lk_secret=$(grep "^LIVEKIT_API_SECRET=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
   if [[ -n "$lk_key" && -n "$lk_secret" ]]; then
-    # Prüfe ob livekit.yaml existiert und konsistent ist
+    # PrÃ¼fe ob livekit.yaml existiert und konsistent ist
     if [[ -f "$DATA_DIR/livekit.yaml" ]]; then
       if grep -q "$lk_key" "$DATA_DIR/livekit.yaml"; then
         success "LiveKit-Konfiguration konsistent"
         (( skipped++ ))
       else
-        warn "livekit.yaml passt nicht zu .env – regeneriere…"
+        warn "livekit.yaml passt nicht zu .env â€“ regeneriereâ€¦"
         write_livekit_config "$lk_key" "$lk_secret"
         success "livekit.yaml aktualisiert"
         (( fixed++ ))
       fi
     else
-      info "livekit.yaml fehlt – erstelle…"
+      info "livekit.yaml fehlt â€“ erstelleâ€¦"
       write_livekit_config "$lk_key" "$lk_secret"
       success "livekit.yaml erstellt"
       (( fixed++ ))
@@ -985,8 +985,8 @@ run_repair() {
     (( skipped++ ))
   fi
 
-  # ── Berechtigungen prüfen
-  header "5/7 Dateiberechtigungen prüfen"
+  # â”€â”€ Berechtigungen prÃ¼fen
+  header "5/7 Dateiberechtigungen prÃ¼fen"
   if [[ -f "$DATA_DIR/.env" ]]; then
     local env_perms
     env_perms=$(stat -c '%a' "$DATA_DIR/.env" 2>/dev/null)
@@ -995,19 +995,19 @@ run_repair() {
       (( skipped++ ))
     else
       chmod 600 "$DATA_DIR/.env"
-      success ".env Berechtigungen korrigiert: $env_perms → 600"
+      success ".env Berechtigungen korrigiert: $env_perms â†’ 600"
       (( fixed++ ))
     fi
   fi
 
-  # ── Container starten falls gestoppt
-  header "6/7 Container prüfen"
+  # â”€â”€ Container starten falls gestoppt
+  header "6/7 Container prÃ¼fen"
   if [[ -f "$DATA_DIR/docker-compose.yml" ]]; then
     cd "$DATA_DIR"
     local running
     running=$($COMPOSE_BIN ps --status running -q 2>/dev/null | wc -l)
     if [[ "$running" -eq 0 ]]; then
-      warn "Keine Container laufen. Starte…"
+      warn "Keine Container laufen. Starteâ€¦"
       $COMPOSE_BIN up -d 2>&1 | tail -5
       success "Container gestartet"
       (( fixed++ ))
@@ -1015,13 +1015,13 @@ run_repair() {
       success "$running Container laufen"
       (( skipped++ ))
 
-      # Prüfe ob wichtige Container fehlen
+      # PrÃ¼fe ob wichtige Container fehlen
       local expected_services=("mongodb" "backend" "frontend")
       for svc in "${expected_services[@]}"; do
         if $COMPOSE_BIN ps "$svc" 2>/dev/null | grep -q "running\|Up"; then
-          success "$svc läuft"
+          success "$svc lÃ¤uft"
         else
-          warn "$svc nicht gestartet – versuche Neustart…"
+          warn "$svc nicht gestartet â€“ versuche Neustartâ€¦"
           $COMPOSE_BIN up -d "$svc" 2>&1 | tail -3
           (( fixed++ ))
         fi
@@ -1029,60 +1029,60 @@ run_repair() {
     fi
   fi
 
-  # ── Source-Dateien aktuell?
-  header "7/7 Build-Kontext prüfen"
+  # â”€â”€ Source-Dateien aktuell?
+  header "7/7 Build-Kontext prÃ¼fen"
   if [[ -d "$DATA_DIR/backend_src" ]]; then
     success "Backend Source vorhanden"
     (( skipped++ ))
   else
-    warn "Backend Source fehlt – kopiere…"
+    warn "Backend Source fehlt â€“ kopiereâ€¦"
     prepare_build_context
     (( fixed++ ))
   fi
 
-  # ── Ergebnis
+  # â”€â”€ Ergebnis
   echo ""
   divider
   echo ""
   if [[ "$fixed" -gt 0 ]]; then
-    echo -e "  ${GREEN}✓ $fixed Problem(e) behoben${RESET}, $skipped bereits OK"
+    echo -e "  ${GREEN}âœ“ $fixed Problem(e) behoben${RESET}, $skipped bereits OK"
     echo ""
-    echo -e "  ${BOLD}Empfehlung:${RESET} Container neu starten für volle Wirkung:"
+    echo -e "  ${BOLD}Empfehlung:${RESET} Container neu starten fÃ¼r volle Wirkung:"
     echo -e "  ${DIM}cd $DATA_DIR && $COMPOSE_BIN restart${RESET}"
   else
-    echo -e "  ${GREEN}${BOLD}Alles in Ordnung!${RESET} Keine Reparaturen nötig."
+    echo -e "  ${GREEN}${BOLD}Alles in Ordnung!${RESET} Keine Reparaturen nÃ¶tig."
   fi
   echo ""
   divider
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #   --identity : Set up Singra Vox ID (optional)
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 run_identity_setup() {
   banner
-  header "Singra Vox ID – Identity Server einrichten"
+  header "Singra Vox ID â€“ Identity Server einrichten"
   echo ""
-  echo "  Singra Vox ID ermöglicht EIN Konto über ALLE Instanzen hinweg."
-  echo "  Ähnlich wie 'Login mit Google' – aber komplett selbst gehostet."
+  echo "  Singra Vox ID ermÃ¶glicht EIN Konto Ã¼ber ALLE Instanzen hinweg."
+  echo "  Ã„hnlich wie 'Login mit Google' â€“ aber komplett selbst gehostet."
   echo ""
   echo -e "  ${BOLD}Zwei Optionen:${RESET}"
   echo ""
-  echo -e "  ${BOLD}1) Integriert${RESET} – Teil deiner bestehenden Singra Vox Instanz"
-  echo "     → Einfachste Option: SVID läuft auf dem gleichen Server"
-  echo "     → Nutzer können sich mit Singra Vox ID auf DEINER Instanz registrieren"
-  echo "     → Andere Instanzen können deine als ID-Server nutzen"
+  echo -e "  ${BOLD}1) Integriert${RESET} â€“ Teil deiner bestehenden Singra Vox Instanz"
+  echo "     â†’ Einfachste Option: SVID lÃ¤uft auf dem gleichen Server"
+  echo "     â†’ Nutzer kÃ¶nnen sich mit Singra Vox ID auf DEINER Instanz registrieren"
+  echo "     â†’ Andere Instanzen kÃ¶nnen deine als ID-Server nutzen"
   echo ""
-  echo -e "  ${BOLD}2) Standalone${RESET} – Eigener Server nur für Identity"
-  echo "     → Empfohlen für: Mehrere Instanzen, zentraler ID-Server"
-  echo "     → Braucht eigene Domain (z.B. id.deine-domain.de)"
-  echo "     → Minimale Ressourcen (512 MB RAM)"
+  echo -e "  ${BOLD}2) Standalone${RESET} â€“ Eigener Server nur fÃ¼r Identity"
+  echo "     â†’ Empfohlen fÃ¼r: Mehrere Instanzen, zentraler ID-Server"
+  echo "     â†’ Braucht eigene Domain (z.B. id.deine-domain.de)"
+  echo "     â†’ Minimale Ressourcen (512 MB RAM)"
   echo ""
 
-  local choice; choice=$(ask "Option wählen" "1")
+  local choice; choice=$(ask "Option wÃ¤hlen" "1")
 
   if [[ "$choice" == "1" ]]; then
-    # ── Integrierter Modus
+    # â”€â”€ Integrierter Modus
     echo ""
     header "Integrierter Identity Server"
 
@@ -1099,12 +1099,12 @@ run_identity_setup() {
     if [[ -n "$current_issuer" ]]; then
       success "SVID bereits konfiguriert: $current_issuer"
       if ! ask_yes_no "Neu konfigurieren?" "n"; then
-        echo ""; info "Keine Änderungen vorgenommen."; return
+        echo ""; info "Keine Ã„nderungen vorgenommen."; return
       fi
     fi
 
     local svid_url
-    svid_url=$(ask "Öffentliche URL deiner Instanz (wird der SVID Issuer)" "$current_frontend")
+    svid_url=$(ask "Ã–ffentliche URL deiner Instanz (wird der SVID Issuer)" "$current_frontend")
 
     local svid_secret
     svid_secret=$(gen_secret)
@@ -1117,7 +1117,7 @@ run_identity_setup() {
     fi
 
     if grep -q "^SVID_JWT_SECRET=" "$DATA_DIR/.env"; then
-      # Nur überschreiben wenn leer
+      # Nur Ã¼berschreiben wenn leer
       local existing_svid_secret
       existing_svid_secret=$(grep "^SVID_JWT_SECRET=" "$DATA_DIR/.env" | cut -d'=' -f2-)
       if [[ -z "$existing_svid_secret" ]]; then
@@ -1134,21 +1134,21 @@ run_identity_setup() {
     success "Singra Vox ID konfiguriert!"
     echo ""
     echo -e "  ${BOLD}SVID Issuer:${RESET}      $svid_url"
-    echo -e "  ${BOLD}SVID JWT Secret:${RESET}  ${svid_secret:0:8}…"
+    echo -e "  ${BOLD}SVID JWT Secret:${RESET}  ${svid_secret:0:8}â€¦"
     echo ""
-    echo -e "  ${BOLD}Nächster Schritt:${RESET}"
-    echo "  Backend neu starten, damit die Änderungen wirksam werden:"
+    echo -e "  ${BOLD}NÃ¤chster Schritt:${RESET}"
+    echo "  Backend neu starten, damit die Ã„nderungen wirksam werden:"
     echo -e "  ${DIM}cd $DATA_DIR && $COMPOSE_BIN restart backend${RESET}"
     echo ""
-    echo "  Danach können Nutzer sich unter /svid-register mit Singra Vox ID"
-    echo "  registrieren, und andere Instanzen können deine als ID-Server nutzen."
+    echo "  Danach kÃ¶nnen Nutzer sich unter /svid-register mit Singra Vox ID"
+    echo "  registrieren, und andere Instanzen kÃ¶nnen deine als ID-Server nutzen."
 
   elif [[ "$choice" == "2" ]]; then
-    # ── Standalone Modus
+    # â”€â”€ Standalone Modus
     echo ""
     header "Standalone Identity Server"
     echo ""
-    echo "  Für einen dedizierten Identity Server auf einem eigenen Server"
+    echo "  FÃ¼r einen dedizierten Identity Server auf einem eigenen Server"
     echo "  folge der Anleitung in: docs/deploy-identity-server.md"
     echo ""
     echo -e "  ${BOLD}Kurzfassung:${RESET}"
@@ -1164,7 +1164,7 @@ run_identity_setup() {
     echo "     DB_NAME=singravox_id"
     echo "     SVID_ISSUER=https://id.deine-domain.de"
     echo "     SVID_JWT_SECRET=$(gen_secret)"
-    echo "     (+ SMTP-Konfiguration für E-Mail-Verifizierung)"
+    echo "     (+ SMTP-Konfiguration fÃ¼r E-Mail-Verifizierung)"
     echo ""
     echo "  3. Starten:"
     echo "     uvicorn identity_server:app --host 0.0.0.0 --port 8002 --workers 2"
@@ -1173,7 +1173,7 @@ run_identity_setup() {
     echo ""
     echo "  5. Auf jeder Instanz in .env eintragen:"
     echo "     SVID_ISSUER=https://id.deine-domain.de"
-    echo "     SVID_JWT_SECRET=<gleicher-schlüssel-wie-id-server>"
+    echo "     SVID_JWT_SECRET=<gleicher-schlÃ¼ssel-wie-id-server>"
     echo ""
 
     if [[ -f "$DATA_DIR/.env" ]] && ask_yes_no "Soll ich die SVID_ISSUER URL jetzt in deine Instanz eintragen?" "j"; then
@@ -1203,19 +1203,19 @@ run_identity_setup() {
   divider
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #   --auto-update-on / --auto-update-off
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 run_auto_update_on() {
   banner
   header "Auto-Update aktivieren"
   echo ""
-  echo "  Das Auto-Update prüft täglich um 04:00 Uhr auf neue Versionen"
+  echo "  Das Auto-Update prÃ¼ft tÃ¤glich um 04:00 Uhr auf neue Versionen"
   echo "  und aktualisiert automatisch. Deine Konfiguration bleibt erhalten."
   echo ""
 
   local schedule
-  schedule=$(ask "Cron-Zeitplan (Standard: täglich 04:00)" "0 4 * * *")
+  schedule=$(ask "Cron-Zeitplan (Standard: tÃ¤glich 04:00)" "0 4 * * *")
 
   # Sicherstellen dass kein alter Eintrag existiert
   local tmpfile
@@ -1250,7 +1250,7 @@ run_auto_update_off() {
   divider
 }
 
-# ── Write config files ────────────────────────────────────────────────────────
+# â”€â”€ Write config files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 write_env() {
   local mode="$1"
   local frontend_url="$2"  cors_origins="$3"
@@ -1306,10 +1306,10 @@ EOF
 
   # INSTANCE_ENCRYPTION_SECRET Warnung
   echo ""
-  warn "WICHTIG: Verschlüsselungsschlüssel sicher aufbewahren!"
+  warn "WICHTIG: VerschlÃ¼sselungsschlÃ¼ssel sicher aufbewahren!"
   echo -e "  ${BOLD}INSTANCE_ENCRYPTION_SECRET:${RESET}"
   echo -e "  ${DIM}$encryption_secret${RESET}"
-  echo -e "  ${RED}Ohne diesen Schlüssel sind alle Daten unwiderruflich verloren!${RESET}"
+  echo -e "  ${RED}Ohne diesen SchlÃ¼ssel sind alle Daten unwiderruflich verloren!${RESET}"
   echo ""
 }
 
@@ -1694,9 +1694,9 @@ server {
 NGINX_EOF
 }
 
-# ── Copy source files for Docker build ───────────────────────────────────────
+# â”€â”€ Copy source files for Docker build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 prepare_build_context() {
-  info "Kopiere Quellcode nach $DATA_DIR…"
+  info "Kopiere Quellcode nach $DATA_DIRâ€¦"
 
   mkdir -p "$DATA_DIR/backend_src" "$DATA_DIR/frontend_src"
 
@@ -1744,7 +1744,7 @@ DOCKERFILE_EOF
   success "Build-Kontext vorbereitet"
 }
 
-# ── Bootstrap admin account ───────────────────────────────────────────────────
+# â”€â”€ Bootstrap admin account â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bootstrap_admin() {
   local api_url="$1"
   local instance_name="$2"
@@ -1754,7 +1754,7 @@ bootstrap_admin() {
   local admin_display="$6"
   local allow_signup="$7"
 
-  info "Erstelle Admin-Account…"
+  info "Erstelle Admin-Accountâ€¦"
 
   local response http_code body
   response=$(curl -s -w "\n%{http_code}" -X POST "$api_url/api/setup/bootstrap" \
@@ -1787,25 +1787,25 @@ print(json.dumps({
   fi
 }
 
-# ── SMTP Configuration ────────────────────────────────────────────────────────
+# â”€â”€ SMTP Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 configure_smtp() {
   echo "" >&2
   header "E-Mail Konfiguration" >&2
-  echo "  Singra Vox benötigt E-Mail für Registrierungsbestätigung." >&2
+  echo "  Singra Vox benÃ¶tigt E-Mail fÃ¼r RegistrierungsbestÃ¤tigung." >&2
   echo "" >&2
-  echo -e "  ${BOLD}1)${RESET} Eingebaut (Mailpit) — Alle E-Mails im Browser sichtbar" >&2
-  echo "     Empfohlen für Tests und private Server" >&2
+  echo -e "  ${BOLD}1)${RESET} Eingebaut (Mailpit) â€” Alle E-Mails im Browser sichtbar" >&2
+  echo "     Empfohlen fÃ¼r Tests und private Server" >&2
   echo "" >&2
-  echo -e "  ${BOLD}2)${RESET} Resend — API-basiert, einfach einzurichten" >&2
-  echo "     Kostenlos bis 3.000 E-Mails/Monat, nur API-Key nötig" >&2
+  echo -e "  ${BOLD}2)${RESET} Resend â€” API-basiert, einfach einzurichten" >&2
+  echo "     Kostenlos bis 3.000 E-Mails/Monat, nur API-Key nÃ¶tig" >&2
   echo "" >&2
-  echo -e "  ${BOLD}3)${RESET} Gmail — Google App-Passwort" >&2
+  echo -e "  ${BOLD}3)${RESET} Gmail â€” Google App-Passwort" >&2
   echo "     Voraussetzung: 2FA aktiv + App-Passwort erstellt" >&2
   echo "" >&2
-  echo -e "  ${BOLD}4)${RESET} Mailgun — Transaktionale E-Mails" >&2
+  echo -e "  ${BOLD}4)${RESET} Mailgun â€” Transaktionale E-Mails" >&2
   echo "     Domain-Verifizierung erforderlich" >&2
   echo "" >&2
-  echo -e "  ${BOLD}5)${RESET} Manuell — Eigene SMTP-Zugangsdaten eingeben" >&2
+  echo -e "  ${BOLD}5)${RESET} Manuell â€” Eigene SMTP-Zugangsdaten eingeben" >&2
   echo "" >&2
 
   local choice
@@ -1818,7 +1818,7 @@ configure_smtp() {
   while true; do
     case "$choice" in
       2)
-        # ── Resend ──────────────────────────────────────────────────────────
+        # â”€â”€ Resend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         echo "" >&2
         echo -e "  ${DIM}Resend API-Key findest du unter: https://resend.com/api-keys${RESET}" >&2
         printf "  ${BOLD}%s${RESET}: " "Resend API-Key (re_...)" >&2
@@ -1829,9 +1829,9 @@ configure_smtp() {
         smtp_user="resend"; smtp_tls="true"; smtp_ssl="false"
         ;;
       3)
-        # ── Gmail ───────────────────────────────────────────────────────────
+        # â”€â”€ Gmail â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         echo "" >&2
-        echo -e "  ${DIM}App-Passwort erstellen: Google-Konto → Sicherheit → 2FA → App-Passwörter${RESET}" >&2
+        echo -e "  ${DIM}App-Passwort erstellen: Google-Konto â†’ Sicherheit â†’ 2FA â†’ App-PasswÃ¶rter${RESET}" >&2
         printf "  ${BOLD}%s${RESET}: " "Gmail-Adresse" >&2
         read -r smtp_user
         printf "  ${BOLD}%s${RESET}: " "App-Passwort (16 Zeichen ohne Leerzeichen)" >&2
@@ -1840,7 +1840,7 @@ configure_smtp() {
         smtp_from="$smtp_user"; smtp_tls="true"; smtp_ssl="false"
         ;;
       4)
-        # ── Mailgun ─────────────────────────────────────────────────────────
+        # â”€â”€ Mailgun â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         echo "" >&2
         printf "  ${BOLD}%s${RESET} [%s]: " "Mailgun Region" "EU" >&2
         read -r mg_region; mg_region="${mg_region:-EU}"
@@ -1858,7 +1858,7 @@ configure_smtp() {
         smtp_port="587"; smtp_tls="true"; smtp_ssl="false"
         ;;
       5)
-        # ── Manuell ─────────────────────────────────────────────────────────
+        # â”€â”€ Manuell â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         echo "" >&2
         printf "  ${BOLD}%s${RESET}: " "SMTP Server" >&2
         read -r smtp_host
@@ -1874,15 +1874,15 @@ configure_smtp() {
         if [[ "$smtp_port" == "465" ]]; then smtp_ssl="true"; smtp_tls="false"; fi
         ;;
       *)
-        # ── Mailpit (Default) ───────────────────────────────────────────────
+        # â”€â”€ Mailpit (Default) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         echo "mailpit|1025|||no-reply@singravox.local|false|false"
         return
         ;;
     esac
 
-    # ── SMTP-Verbindungstest ──────────────────────────────────────────────
+    # â”€â”€ SMTP-Verbindungstest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     echo "" >&2
-    info "Teste SMTP-Verbindung zu ${smtp_host}:${smtp_port}…" >&2
+    info "Teste SMTP-Verbindung zu ${smtp_host}:${smtp_port}â€¦" >&2
     local test_result
     test_result=$(python3 -c "
 import smtplib, sys
@@ -1916,7 +1916,7 @@ except Exception as e:
       read -r retry
       retry="${retry:-j}"
       if [[ ! "${retry,,}" =~ ^(j|y|ja|yes)$ ]]; then
-        warn "Fahre ohne gültige SMTP-Konfiguration fort. E-Mails werden nicht funktionieren." >&2
+        warn "Fahre ohne gÃ¼ltige SMTP-Konfiguration fort. E-Mails werden nicht funktionieren." >&2
         break
       fi
       echo "" >&2
@@ -1926,7 +1926,7 @@ except Exception as e:
   echo "$smtp_host|$smtp_port|$smtp_user|$smtp_pass|$smtp_from|$smtp_tls|$smtp_ssl"
 }
 
-# ── Update Mode ───────────────────────────────────────────────────────────────
+# â”€â”€ Update Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 run_update() {
   banner
   header "Singra Vox aktualisieren"
@@ -1943,7 +1943,7 @@ run_update() {
   fi
 
   info "Bestehende Installation gefunden: $DATA_DIR"
-  info "Konfiguration (.env) wird beibehalten – alle Einstellungen bleiben erhalten."
+  info "Konfiguration (.env) wird beibehalten â€“ alle Einstellungen bleiben erhalten."
   echo ""
 
   if ! detect_compose; then
@@ -1960,7 +1960,7 @@ run_update() {
 
   # Pull latest source (if git repo)
   if [[ -d "$REPO_DIR/.git" ]]; then
-    info "Lade neuesten Code von GitHub…"
+    info "Lade neuesten Code von GitHubâ€¦"
     cd "$REPO_DIR"
     local current_hash new_hash
     current_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
@@ -1971,7 +1971,7 @@ run_update() {
     if [[ "$current_hash" == "$new_hash" ]]; then
       info "Bereits auf dem neuesten Stand ($current_hash)"
     else
-      success "Code aktualisiert: ${current_hash:0:8} → ${new_hash:0:8}"
+      success "Code aktualisiert: ${current_hash:0:8} â†’ ${new_hash:0:8}"
     fi
   fi
 
@@ -1979,24 +1979,24 @@ run_update() {
   local enc_val
   enc_val=$(grep "^INSTANCE_ENCRYPTION_SECRET=" "$DATA_DIR/.env" 2>/dev/null | cut -d'=' -f2-)
   if [[ -z "$enc_val" ]]; then
-    warn "INSTANCE_ENCRYPTION_SECRET fehlt – generiere neuen Schlüssel…"
+    warn "INSTANCE_ENCRYPTION_SECRET fehlt â€“ generiere neuen SchlÃ¼sselâ€¦"
     local new_enc; new_enc=$(gen_secret)
     echo "INSTANCE_ENCRYPTION_SECRET=$new_enc" >> "$DATA_DIR/.env"
     success "INSTANCE_ENCRYPTION_SECRET generiert"
-    warn "WICHTIG: Schlüssel sicher aufbewahren: $new_enc"
+    warn "WICHTIG: SchlÃ¼ssel sicher aufbewahren: $new_enc"
   fi
 
   # Re-prepare build context with updated source
   prepare_build_context
 
   # Rebuild images
-  info "Baue neue Docker-Images…"
+  info "Baue neue Docker-Imagesâ€¦"
   cd "$DATA_DIR"
   $COMPOSE_BIN build --quiet 2>&1 | tail -3 || true
   success "Images gebaut"
 
   # Rolling restart (backend first, then frontend)
-  info "Starte Dienste neu…"
+  info "Starte Dienste neuâ€¦"
   $COMPOSE_BIN up -d --no-deps backend 2>&1 | tail -3 || true
   sleep 3
   $COMPOSE_BIN up -d --no-deps frontend 2>&1 | tail -3 || true
@@ -2021,11 +2021,11 @@ run_update() {
   divider
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 #   Main Install
-# ═══════════════════════════════════════════════════════════════════════════════
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 main() {
-  # ── Flag-Erkennung ─────────────────────────────────────────────────────────
+  # â”€â”€ Flag-Erkennung â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for arg in "$@"; do
     case "$arg" in
       --update|update)        run_update; return ;;
@@ -2044,7 +2044,7 @@ main() {
         echo "    (ohne)              Neu-Installation oder Re-Installation"
         echo "    --update            Update auf neueste Version"
         echo "    --status            System-Status & Diagnose"
-        echo "    --repair            Konfiguration prüfen & reparieren"
+        echo "    --repair            Konfiguration prÃ¼fen & reparieren"
         echo "    --identity          Singra Vox ID einrichten (optional)"
         echo "    --auto-update-on    Automatische Updates aktivieren"
         echo "    --auto-update-off   Automatische Updates deaktivieren"
@@ -2057,12 +2057,12 @@ main() {
 
   banner
 
-  # ── Bestehende Installation erkennen
+  # â”€â”€ Bestehende Installation erkennen
   if [[ -d "$DATA_DIR" && -f "$DATA_DIR/.env" && -f "$DATA_DIR/docker-compose.yml" ]]; then
     echo ""
     warn "Bestehende Installation erkannt in $DATA_DIR"
     echo ""
-    echo -e "  ${BOLD}1)${RESET} Neu installieren (Konfiguration wird überschrieben!)"
+    echo -e "  ${BOLD}1)${RESET} Neu installieren (Konfiguration wird Ã¼berschrieben!)"
     echo -e "  ${BOLD}2)${RESET} Reparieren (Konfiguration bleibt erhalten)"
     echo -e "  ${BOLD}3)${RESET} Update (Konfiguration bleibt erhalten, neuster Code)"
     echo -e "  ${BOLD}4)${RESET} Abbrechen"
@@ -2072,49 +2072,49 @@ main() {
       2) run_repair; return ;;
       3) run_update; return ;;
       4) info "Abgebrochen."; return ;;
-      1) warn "Fahre mit Neuinstallation fort…" ;;
+      1) warn "Fahre mit Neuinstallation fortâ€¦" ;;
     esac
   fi
 
-  # ── OS Check ────────────────────────────────────────────────────────────────
+  # â”€â”€ OS Check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if [[ "$(uname -s)" != "Linux" ]]; then
-    error "Dieser Installer unterstützt nur Linux."
+    error "Dieser Installer unterstÃ¼tzt nur Linux."
     exit 1
   fi
 
   if [[ "$EUID" -ne 0 ]] && ! groups | grep -q docker 2>/dev/null; then
-    warn "Nicht root und nicht in der Docker-Gruppe. Einige Befehle könnten sudo benötigen."
+    warn "Nicht root und nicht in der Docker-Gruppe. Einige Befehle kÃ¶nnten sudo benÃ¶tigen."
   fi
 
-  # ── Storage Mode (Lite vs Full) ──────────────────────────────────────────
+  # â”€â”€ Storage Mode (Lite vs Full) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   header "Speicher-Modus (E2EE Datei-Uploads)"
   local total_ram_mb; total_ram_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)
   echo ""
-  echo -e "  ${BOLD}1) Lite-Modus${RESET}  — Lokales Dateisystem (kein MinIO, ~50 MB RAM)"
-  echo "     Ideal für: VPS mit 1-2 GB RAM, kleine Instanzen"
+  echo -e "  ${BOLD}1) Lite-Modus${RESET}  â€” Lokales Dateisystem (kein MinIO, ~50 MB RAM)"
+  echo "     Ideal fÃ¼r: VPS mit 1-2 GB RAM, kleine Instanzen"
   echo ""
-  echo -e "  ${BOLD}2) Voll-Modus${RESET}  — MinIO S3-kompatibler Storage (~200 MB RAM)"
-  echo "     Ideal für: Server mit 4+ GB RAM, große Instanzen, S3-Backups"
+  echo -e "  ${BOLD}2) Voll-Modus${RESET}  â€” MinIO S3-kompatibler Storage (~200 MB RAM)"
+  echo "     Ideal fÃ¼r: Server mit 4+ GB RAM, groÃŸe Instanzen, S3-Backups"
   echo ""
   if [[ $total_ram_mb -lt 3000 ]]; then
-    warn "Erkannter RAM: ${total_ram_mb} MB → Lite-Modus empfohlen"
+    warn "Erkannter RAM: ${total_ram_mb} MB â†’ Lite-Modus empfohlen"
     local storage_default="1"
   else
     info "Erkannter RAM: ${total_ram_mb} MB"
     local storage_default="2"
   fi
-  local storage_mode; storage_mode=$(ask "Wähle 1 oder 2" "$storage_default")
+  local storage_mode; storage_mode=$(ask "WÃ¤hle 1 oder 2" "$storage_default")
 
-  # ── Worker-Anzahl (CPU-basiert) ────────────────────────────────────────────
+  # â”€â”€ Worker-Anzahl (CPU-basiert) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   local cpu_cores; cpu_cores=$(nproc 2>/dev/null || echo 1)
   local workers=1
   if [[ $cpu_cores -ge 4 ]]; then
     workers=2
   fi
-  info "CPU-Kerne: ${cpu_cores} → Backend-Workers: ${workers}"
+  info "CPU-Kerne: ${cpu_cores} â†’ Backend-Workers: ${workers}"
 
-  # ── Mode Selection ───────────────────────────────────────────────────────────
+  # â”€â”€ Mode Selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   header "Installations-Modus"
 
@@ -2132,45 +2132,45 @@ main() {
   fi
 
   echo ""
-  echo -e "  ${BOLD}1) Schnellstart${RESET}  — HTTP, über IP oder Domain erreichbar"
-  echo "     Ideal für: Tests, privates Netzwerk"
+  echo -e "  ${BOLD}1) Schnellstart${RESET}  â€” HTTP, Ã¼ber IP oder Domain erreichbar"
+  echo "     Ideal fÃ¼r: Tests, privates Netzwerk"
   echo ""
-  echo -e "  ${BOLD}2) Produktiv${RESET}     — HTTPS mit eigenem SSL (Caddy, Let's Encrypt)"
+  echo -e "  ${BOLD}2) Produktiv${RESET}     â€” HTTPS mit eigenem SSL (Caddy, Let's Encrypt)"
   echo "     Voraussetzung: Port 80+443 frei, Domain zeigt auf diesen Server"
   echo ""
-  echo -e "  ${BOLD}3) Reverse Proxy${RESET} — Hinter bestehendem Webserver (Nginx/Apache/Caddy)"
-  echo "     Ideal für: Server mit bestehendem Webserver, geteilte Umgebungen"
+  echo -e "  ${BOLD}3) Reverse Proxy${RESET} â€” Hinter bestehendem Webserver (Nginx/Apache/Caddy)"
+  echo "     Ideal fÃ¼r: Server mit bestehendem Webserver, geteilte Umgebungen"
   echo ""
-  local mode; mode=$(ask "Wähle 1, 2 oder 3" "$recommended_mode")
+  local mode; mode=$(ask "WÃ¤hle 1, 2 oder 3" "$recommended_mode")
 
-  # ── Instance Name ─────────────────────────────────────────────────────────
+  # â”€â”€ Instance Name â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   header "Server-Name"
   echo -e "  ${DIM}Der Name, der in der App und bei Einladungen angezeigt wird.${RESET}"
   local instance_name; instance_name=$(ask "Name deiner Singra-Vox-Instanz" "Mein Singra Vox")
 
-  # ── Mode-specific config ──────────────────────────────────────────────────
+  # â”€â”€ Mode-specific config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   local frontend_url cors_origins cookie_secure
   local livekit_internal livekit_public
   local domain rtc_domain http_port api_url compose_flag
   local detected_webserver="" lk_signal_port=""
 
   if [[ "$mode" == "2" ]]; then
-    # ── Produktiv-Modus: Domain + SSL ──────────────────────────────────────
+    # â”€â”€ Produktiv-Modus: Domain + SSL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     local public_ip; public_ip=$(get_public_ip)
     echo ""
     header "Domain-Konfiguration"
     echo "" >&2
-    info "Erkannte öffentliche IP dieses Servers: ${BOLD}${public_ip}${RESET}" >&2
+    info "Erkannte Ã¶ffentliche IP dieses Servers: ${BOLD}${public_ip}${RESET}" >&2
     echo "" >&2
-    echo -e "  ${BOLD}Haupt-Domain${RESET} — Über diese URL öffnen Nutzer die App im Browser." >&2
-    echo -e "  ${DIM}Beispiel: chat.deinserver.de — muss per A-Record auf ${public_ip} zeigen.${RESET}" >&2
+    echo -e "  ${BOLD}Haupt-Domain${RESET} â€” Ãœber diese URL Ã¶ffnen Nutzer die App im Browser." >&2
+    echo -e "  ${DIM}Beispiel: chat.deinserver.de â€” muss per A-Record auf ${public_ip} zeigen.${RESET}" >&2
     echo "" >&2
-    echo -e "  ${BOLD}Voice-Domain${RESET} — Separater Endpunkt für Sprach- & Videoanrufe (LiveKit/WebRTC)." >&2
+    echo -e "  ${BOLD}Voice-Domain${RESET} â€” Separater Endpunkt fÃ¼r Sprach- & Videoanrufe (LiveKit/WebRTC)." >&2
     echo -e "  ${DIM}Muss eine eigene Subdomain sein (z.B. rtc.deinserver.de), weil${RESET}" >&2
-    echo -e "  ${DIM}LiveKit eigene Ports (7881/TCP + 7882/UDP) für Medienstreams braucht.${RESET}" >&2
+    echo -e "  ${DIM}LiveKit eigene Ports (7881/TCP + 7882/UDP) fÃ¼r Medienstreams braucht.${RESET}" >&2
     echo "" >&2
-    echo -e "  ${YELLOW}Beide Domains müssen per DNS (A-Record) auf ${public_ip} zeigen.${RESET}" >&2
+    echo -e "  ${YELLOW}Beide Domains mÃ¼ssen per DNS (A-Record) auf ${public_ip} zeigen.${RESET}" >&2
     echo "" >&2
     domain=$(ask "Haupt-Domain (z.B. chat.example.com)" "")
     if [[ -z "$domain" ]]; then error "Domain darf nicht leer sein."; exit 1; fi
@@ -2185,7 +2185,7 @@ main() {
     compose_flag="production"
     http_port="443"
 
-    # Ports prüfen und ggf. UFW konfigurieren
+    # Ports prÃ¼fen und ggf. UFW konfigurieren
     local firewall_ports=(
       "80:HTTP (Caddy / Let's Encrypt)"
       "443:HTTPS (App & API)"
@@ -2195,14 +2195,14 @@ main() {
     configure_firewall "${firewall_ports[@]}"
 
   elif [[ "$mode" == "3" ]]; then
-    # ── Reverse-Proxy-Modus: Hinter bestehendem Webserver ──────────────────
+    # â”€â”€ Reverse-Proxy-Modus: Hinter bestehendem Webserver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     local public_ip; public_ip=$(get_public_ip)
     echo ""
     header "Domain-Konfiguration"
     echo ""
-    info "Erkannte öffentliche IP: ${BOLD}${public_ip}${RESET}"
+    info "Erkannte Ã¶ffentliche IP: ${BOLD}${public_ip}${RESET}"
     echo ""
-    echo -e "  Dein bestehender Webserver übernimmt SSL und leitet Traffic weiter."
+    echo -e "  Dein bestehender Webserver Ã¼bernimmt SSL und leitet Traffic weiter."
     echo -e "  Singra Vox bindet sich nur auf ${BOLD}127.0.0.1${RESET} (lokal erreichbar)."
     echo ""
     domain=$(ask "Haupt-Domain (z.B. chat.example.com)" "")
@@ -2220,7 +2220,7 @@ main() {
     esac
 
     local default_local_port; default_local_port=$(find_free_port 8443)
-    http_port=$(ask "Lokaler Port für Singra Vox" "$default_local_port")
+    http_port=$(ask "Lokaler Port fÃ¼r Singra Vox" "$default_local_port")
     http_port=$(find_free_port "$http_port")
 
     lk_signal_port=$(find_free_port 7880)
@@ -2233,7 +2233,7 @@ main() {
     api_url="http://127.0.0.1:$http_port"
     compose_flag="reverse_proxy"
 
-    # Nur WebRTC-Ports brauchen Firewall (App läuft lokal)
+    # Nur WebRTC-Ports brauchen Firewall (App lÃ¤uft lokal)
     local firewall_ports=(
       "7881/tcp:LiveKit Signaling (WebRTC)"
       "7882/udp:LiveKit Media (WebRTC)"
@@ -2241,14 +2241,14 @@ main() {
     configure_firewall "${firewall_ports[@]}"
 
   else
-    # ── Schnellstart-Modus: IP + HTTP ──────────────────────────────────────
+    # â”€â”€ Schnellstart-Modus: IP + HTTP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     local public_ip; public_ip=$(get_public_ip)
     echo ""
     header "Netzwerk-Konfiguration"
     echo "" >&2
-    info "Erkannte öffentliche IP: ${BOLD}${public_ip}${RESET}" >&2
+    info "Erkannte Ã¶ffentliche IP: ${BOLD}${public_ip}${RESET}" >&2
     echo "" >&2
-    echo -e "  Du kannst die App direkt über die IP-Adresse erreichen," >&2
+    echo -e "  Du kannst die App direkt Ã¼ber die IP-Adresse erreichen," >&2
     echo -e "  oder eine Domain eingeben, die auf diesen Server zeigt." >&2
     echo "" >&2
     local public_host; public_host=$(ask "IP-Adresse oder Domain" "$public_ip")
@@ -2270,10 +2270,10 @@ main() {
     api_url="http://localhost:$http_port"
     compose_flag="quickstart"
 
-    # LiveKit-Port prüfen
+    # LiveKit-Port prÃ¼fen
     local lk_port; lk_port=$(find_free_port 7880)
 
-    # Ports prüfen und ggf. UFW konfigurieren
+    # Ports prÃ¼fen und ggf. UFW konfigurieren
     local firewall_ports=(
       "${http_port}:HTTP (Singra Vox App)"
       "${lk_port}:LiveKit Signaling"
@@ -2282,16 +2282,16 @@ main() {
     configure_firewall "${firewall_ports[@]}"
   fi
 
-  # ── SMTP ─────────────────────────────────────────────────────────────────
+  # â”€â”€ SMTP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   local smtp_config; smtp_config=$(configure_smtp)
   IFS='|' read -r smtp_host smtp_port smtp_user smtp_pass smtp_from smtp_tls smtp_ssl <<< "$smtp_config"
   local smtp_builtin=false
   [[ "$smtp_host" == "mailpit" ]] && smtp_builtin=true
 
-  # ── Generate secrets ──────────────────────────────────────────────────────
+  # â”€â”€ Generate secrets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
-  header "Konfiguration wird erstellt…"
-  info "Generiere Schlüssel…"
+  header "Konfiguration wird erstelltâ€¦"
+  info "Generiere SchlÃ¼sselâ€¦"
 
   local livekit_key="lk$(openssl rand -hex 6)"
   local livekit_secret; livekit_secret="$(gen_secret)"
@@ -2301,13 +2301,13 @@ main() {
   local vapid_private; vapid_private="$(echo "$vapid_keys" | cut -d' ' -f1)"
   local vapid_public;  vapid_public="$(echo "$vapid_keys" | cut -d' ' -f2)"
 
-  # ── Ensure Docker ─────────────────────────────────────────────────────────
+  # â”€â”€ Ensure Docker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   header "System-Vorbereitung"
   ensure_docker
   mkdir -p "$DATA_DIR"
 
-  # ── Write configs ─────────────────────────────────────────────────────────
+  # â”€â”€ Write configs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   write_env \
     "$compose_flag" "$frontend_url" "$cors_origins" "$cookie_secure" \
     "$livekit_internal" "$livekit_public" "$livekit_key" "$livekit_secret" \
@@ -2342,34 +2342,34 @@ main() {
 
   success "Konfiguration erstellt in $DATA_DIR"
 
-  # ── Reverse-Proxy: Bestehenden Webserver automatisch konfigurieren ──────
+  # â”€â”€ Reverse-Proxy: Bestehenden Webserver automatisch konfigurieren â”€â”€â”€â”€â”€â”€
   if [[ "$compose_flag" == "reverse_proxy" ]]; then
     configure_external_proxy "$detected_webserver" "$domain" "$http_port" "$rtc_domain" "$lk_signal_port"
   fi
 
-  # ── Build / Pull images ───────────────────────────────────────────────────
+  # â”€â”€ Build / Pull images â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   header "Docker Images"
   prepare_build_context
 
-  info "Baue Images (das kann 2-5 Minuten dauern)…"
+  info "Baue Images (das kann 2-5 Minuten dauern)â€¦"
   cd "$DATA_DIR"
   $COMPOSE_BIN build --quiet 2>&1 | tail -5 || true
   success "Images fertig"
 
-  # ── Start services ─────────────────────────────────────────────────────────
+  # â”€â”€ Start services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   header "Dienste starten"
 
   # Stop any existing Singra Vox containers that might block ports
   cd "$DATA_DIR"
   if $COMPOSE_BIN ps --quiet 2>/dev/null | grep -q .; then
-    info "Stoppe laufende Singra-Vox-Dienste…"
+    info "Stoppe laufende Singra-Vox-Diensteâ€¦"
     $COMPOSE_BIN down --remove-orphans 2>/dev/null || true
     sleep 2
   fi
 
-  info "Starte alle Dienste…"
+  info "Starte alle Diensteâ€¦"
   if ! $COMPOSE_BIN up -d 2>&1; then
     # Check if a specific port is blocked
     local failed_port=""
@@ -2391,7 +2391,7 @@ main() {
     if [[ -n "$failed_port" ]]; then
       echo "" >&2
       warn "Singra Vox konnte nicht starten, weil Port(s) blockiert sind." >&2
-      echo -e "  ${DIM}Mögliche Lösung:${RESET}" >&2
+      echo -e "  ${DIM}MÃ¶gliche LÃ¶sung:${RESET}" >&2
       echo "    sudo systemctl stop caddy nginx apache2 2>/dev/null  # Webserver stoppen" >&2
       echo "    docker stop \$(docker ps -q --filter 'publish=$failed_port')  # Container stoppen" >&2
       echo "" >&2
@@ -2399,52 +2399,52 @@ main() {
       echo "    cd $DATA_DIR && $COMPOSE_BIN up -d" >&2
       exit 1
     fi
-    error "Dienste konnten nicht gestartet werden. Prüfe: $COMPOSE_BIN logs"
+    error "Dienste konnten nicht gestartet werden. PrÃ¼fe: $COMPOSE_BIN logs"
     exit 1
   fi
   success "Dienste gestartet"
 
-  # ── Wait for API ─────────────────────────────────────────────────────────
+  # â”€â”€ Wait for API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   sleep 5
   wait_for_api "$api_url/api/setup/status"
 
-  # ── Admin setup via Web UI ────────────────────────────────────────────────
+  # â”€â”€ Admin setup via Web UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
-  info "Admin-Account wird beim ersten Öffnen der App über den Setup-Wizard erstellt."
+  info "Admin-Account wird beim ersten Ã–ffnen der App Ã¼ber den Setup-Wizard erstellt."
 
-  # ── Save version info ────────────────────────────────────────────────────
+  # â”€â”€ Save version info â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if [[ -d "$REPO_DIR/.git" ]]; then
     git -C "$REPO_DIR" rev-parse HEAD > "$VERSION_FILE" 2>/dev/null || true
   fi
 
-  # ── Optional: Singra Vox ID? ─────────────────────────────────────────────
+  # â”€â”€ Optional: Singra Vox ID? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
-  if ask_yes_no "Möchtest du Singra Vox ID (Identity Server) einrichten?" "n"; then
+  if ask_yes_no "MÃ¶chtest du Singra Vox ID (Identity Server) einrichten?" "n"; then
     run_identity_setup
   else
-    info "Singra Vox ID übersprungen. Jederzeit nachholen: bash install.sh --identity"
+    info "Singra Vox ID Ã¼bersprungen. Jederzeit nachholen: bash install.sh --identity"
   fi
 
-  # ── Optional: Auto-Update? ──────────────────────────────────────────────
+  # â”€â”€ Optional: Auto-Update? â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
-  if ask_yes_no "Automatische Updates aktivieren? (täglich um 04:00)" "j"; then
+  if ask_yes_no "Automatische Updates aktivieren? (tÃ¤glich um 04:00)" "j"; then
     local tmpfile
     tmpfile=$(mktemp)
     crontab -l 2>/dev/null | grep -v "singravox.*install.sh.*--update" > "$tmpfile" || true
     echo "0 4 * * * cd $REPO_DIR && bash install.sh --update >> /var/log/singravox-update.log 2>&1 # singravox-auto-update" >> "$tmpfile"
     crontab "$tmpfile"
     rm -f "$tmpfile"
-    success "Auto-Update aktiviert (täglich 04:00)"
+    success "Auto-Update aktiviert (tÃ¤glich 04:00)"
   fi
 
-  # ── Done! ─────────────────────────────────────────────────────────────────
+  # â”€â”€ Done! â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   echo ""
   divider
   echo ""
-  echo -e "${BOLD}${GREEN}  Singra Vox läuft!${RESET}"
+  echo -e "${BOLD}${GREEN}  Singra Vox lÃ¤uft!${RESET}"
   echo ""
-  echo -e "  ${BOLD}App öffnen:${RESET}      $frontend_url"
+  echo -e "  ${BOLD}App Ã¶ffnen:${RESET}      $frontend_url"
   echo -e "  ${BOLD}Voice (LiveKit):${RESET} $livekit_public"
 
   if [[ "$compose_flag" == "reverse_proxy" ]]; then
@@ -2460,13 +2460,13 @@ main() {
     if [[ "$compose_flag" == "quickstart" ]]; then
       echo -e "  ${BOLD}Mail-Postfach:${RESET}   http://${public_host:-localhost}:8025"
     fi
-    warn "SMTP: Eingebautes Mailpit aktiv. E-Mails sind NICHT nach außen sichtbar."
-    warn "Für echte E-Mails: .env in $DATA_DIR bearbeiten und SMTP_HOST ändern."
+    warn "SMTP: Eingebautes Mailpit aktiv. E-Mails sind NICHT nach auÃŸen sichtbar."
+    warn "FÃ¼r echte E-Mails: .env in $DATA_DIR bearbeiten und SMTP_HOST Ã¤ndern."
   fi
 
   echo ""
-  echo -e "  ${BOLD}Nächste Schritte:${RESET}"
-  echo "  1. App im Browser öffnen: $frontend_url"
+  echo -e "  ${BOLD}NÃ¤chste Schritte:${RESET}"
+  echo "  1. App im Browser Ã¶ffnen: $frontend_url"
   echo "  2. Setup-Wizard durchlaufen (Admin-Account & Instanz einrichten)"
   echo "  3. Ersten Server erstellen und Freunde einladen"
   echo ""

@@ -11,6 +11,7 @@ import api from "@/lib/api";
 import { ExternalE2EEKeyProvider } from "livekit-client";
 import { loadLocalE2EEIdentity } from "@/lib/e2ee/deviceStorage";
 import { openMessageKey, randomBase64, sealMessageKey } from "@/lib/e2ee/crypto";
+import { assertEncryptedVoiceSupport } from "./mediaSupport";
 
 function base64ToArrayBuffer(value) {
   const binary = atob(value);
@@ -51,17 +52,35 @@ async function buildDeviceEnvelopes(recipients, mediaKeyB64) {
 async function resolveLocalIdentity(config) {
   const identity = await loadLocalE2EEIdentity(config);
   if (!identity?.deviceId || !identity?.devicePrivateKey || !identity?.devicePublicKey) {
-    throw new Error("A verified desktop device is required for encrypted voice");
+    throw new Error("A verified E2EE device is required for encrypted voice");
   }
   return identity;
 }
 
 export async function createEncryptedMediaController(config, channelId) {
+  assertEncryptedVoiceSupport(config);
   const keyProvider = new ExternalE2EEKeyProvider();
   const worker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
 
   let currentKeyVersion = null;
   let currentParticipants = [];
+  let currentMediaKeyB64 = null;
+  const keyListeners = new Set();
+
+  const emitKeyUpdate = () => {
+    const nextState = {
+      keyVersion: currentKeyVersion,
+      participantUserIds: [...currentParticipants],
+      sharedMediaKeyB64: currentMediaKeyB64,
+    };
+    keyListeners.forEach((listener) => {
+      try {
+        listener(nextState);
+      } catch {
+        // Ignore listener errors so the media controller remains authoritative.
+      }
+    });
+  };
 
   const applyCurrentPackage = async (identity, keyPackage) => {
     if (!keyPackage) {
@@ -81,8 +100,10 @@ export async function createEncryptedMediaController(config, channelId) {
       identity.devicePrivateKey,
     );
     await keyProvider.setKey(base64ToArrayBuffer(messageKey));
+    currentMediaKeyB64 = messageKey;
     currentKeyVersion = keyPackage.key_version || null;
     currentParticipants = normalizeParticipantIds(keyPackage.participant_user_ids || []);
+    emitKeyUpdate();
     return true;
   };
 
@@ -103,8 +124,10 @@ export async function createEncryptedMediaController(config, channelId) {
     });
 
     await keyProvider.setKey(base64ToArrayBuffer(mediaKeyB64));
+    currentMediaKeyB64 = mediaKeyB64;
     currentKeyVersion = keyVersion;
     currentParticipants = [...participantUserIds];
+    emitKeyUpdate();
     return {
       rotated: true,
       keyVersion,
@@ -140,6 +163,29 @@ export async function createEncryptedMediaController(config, channelId) {
       return {
         keyVersion: currentKeyVersion,
         participantUserIds: [...currentParticipants],
+      };
+    },
+    getNativeBridgeState() {
+      return {
+        keyVersion: currentKeyVersion,
+        participantUserIds: [...currentParticipants],
+        sharedMediaKeyB64: currentMediaKeyB64,
+      };
+    },
+    subscribeNativeKey(listener) {
+      if (typeof listener !== "function") {
+        return () => {};
+      }
+      keyListeners.add(listener);
+      if (currentMediaKeyB64) {
+        listener({
+          keyVersion: currentKeyVersion,
+          participantUserIds: [...currentParticipants],
+          sharedMediaKeyB64: currentMediaKeyB64,
+        });
+      }
+      return () => {
+        keyListeners.delete(listener);
       };
     },
   };

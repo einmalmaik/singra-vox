@@ -49,6 +49,16 @@ async function getDeepLinkPlugin() {
   }
 }
 
+async function getDesktopWindowApi() {
+  if (!isDesktopApp()) return null;
+  try {
+    const mod = await import("@tauri-apps/api/window");
+    return mod.getCurrentWindow?.() || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getDesktopSecret(key) {
   const invoke = await getInvoke();
   if (!invoke) return null;
@@ -114,6 +124,28 @@ export async function getDesktopRuntimeInfo() {
     return await invoke("get_desktop_runtime_info");
   } catch {
     return null;
+  }
+}
+
+export async function sendDesktopVoiceLog(level, message, payload = {}) {
+  if (!isDesktopApp() || process.env.NODE_ENV !== "development") {
+    return false;
+  }
+
+  const invoke = await getInvoke();
+  if (!invoke) {
+    return false;
+  }
+
+  try {
+    await invoke("debug_voice_log", {
+      level,
+      message,
+      payload: JSON.stringify(payload || {}),
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -188,68 +220,101 @@ export async function listDesktopCaptureSources() {
   return invoke("list_capture_sources");
 }
 
-export async function startDesktopCapture({
-  sourceId,
-  requestedWidth,
-  requestedHeight,
-  requestedFrameRate,
-}) {
+export async function getNativeScreenShareSession() {
   const invoke = await getInvoke();
   if (!invoke) return null;
-  return invoke("start_desktop_capture", {
-    sourceId,
-    requestedWidth,
-    requestedHeight,
-    requestedFrameRate,
+  return invoke("get_native_screen_share_session");
+}
+
+export async function startNativeScreenShare(input) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("start_native_screen_share", { input });
+}
+
+export async function stopNativeScreenShare() {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("stop_native_screen_share");
+}
+
+export async function updateNativeScreenShareKey(sharedMediaKeyB64, keyIndex = 0) {
+  const invoke = await getInvoke();
+  if (!invoke) return null;
+  return invoke("update_native_screen_share_key", {
+    sharedMediaKeyB64,
+    keyIndex,
   });
 }
 
-export async function stopDesktopCapture() {
+export async function updateNativeScreenShareAudioVolume(volume) {
   const invoke = await getInvoke();
   if (!invoke) return null;
-  return invoke("stop_desktop_capture");
+  return invoke("update_native_screen_share_audio_volume", { volume });
 }
 
-export async function getDesktopCaptureFrame(lastFrameId = null) {
-  const invoke = await getInvoke();
-  if (!invoke) return null;
-  const response = await invoke("get_desktop_capture_frame", {
-    lastFrameId,
-  });
-  if (!response) {
+export async function getDesktopWindowFullscreen() {
+  const appWindow = await getDesktopWindowApi();
+  if (!appWindow?.isFullscreen) {
+    return false;
+  }
+  try {
+    return Boolean(await appWindow.isFullscreen());
+  } catch {
+    return false;
+  }
+}
+
+export async function setDesktopWindowFullscreen(enabled) {
+  const appWindow = await getDesktopWindowApi();
+  if (!appWindow?.setFullscreen) {
+    return false;
+  }
+  try {
+    await appWindow.setFullscreen(Boolean(enabled));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function observeDesktopWindowFullscreen(handler) {
+  const appWindow = await getDesktopWindowApi();
+  if (!appWindow?.isFullscreen) {
     return null;
   }
 
-  const bytes = response instanceof Uint8Array
-    ? response
-    : response instanceof ArrayBuffer
-      ? new Uint8Array(response)
-      : Array.isArray(response)
-        ? Uint8Array.from(response)
-        : null;
-
-  if (!bytes || bytes.byteLength < 16) {
-    return null;
-  }
-
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const frameId = Number(view.getBigUint64(0, true));
-  const width = view.getUint32(8, true);
-  const height = view.getUint32(12, true);
-
-  return {
-    frameId,
-    width,
-    height,
-    pixelFormat: "rgba8",
-    data: bytes.subarray(16),
+  let active = true;
+  const emitFullscreenState = async () => {
+    if (!active || typeof handler !== "function") {
+      return;
+    }
+    try {
+      handler(Boolean(await appWindow.isFullscreen()));
+    } catch {
+      // Ignore transient window-state races during fullscreen transitions.
+    }
   };
-}
 
-export async function getDesktopCaptureSession() {
-  const invoke = await getInvoke();
-  if (!invoke) return null;
-  return invoke("get_desktop_capture_session");
+  let unlistenResize = null;
+  let unlistenFocus = null;
+  try {
+    unlistenResize = appWindow.onResized ? await appWindow.onResized(emitFullscreenState) : null;
+  } catch {
+    unlistenResize = null;
+  }
+  try {
+    unlistenFocus = appWindow.onFocusChanged ? await appWindow.onFocusChanged(emitFullscreenState) : null;
+  } catch {
+    unlistenFocus = null;
+  }
+  await emitFullscreenState();
+
+  return () => {
+    active = false;
+    unlistenResize?.();
+    unlistenFocus?.();
+  };
 }
 
 export async function openExternalUrl(url) {

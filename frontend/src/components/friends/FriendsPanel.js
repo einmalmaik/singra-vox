@@ -15,6 +15,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import {
   ChatCircleDots,
   MagnifyingGlass,
@@ -39,6 +40,7 @@ const TABS = [
 
 export default function FriendsPanel({ onStartRelayDm }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("friends");
   const [friends, setFriends] = useState([]);
   const [requests, setRequests] = useState({ incoming: [], outgoing: [] });
@@ -148,12 +150,12 @@ export default function FriendsPanel({ onStartRelayDm }) {
           </p>
         </div>
         <Button
-          onClick={() => window.open("/svid/register", "_blank")}
+          onClick={() => navigate("/setup-svid")}
           className="rounded-xl bg-cyan-400 text-zinc-950 hover:bg-cyan-300 text-sm"
           data-testid="friends-register-svid-btn"
         >
           <UserPlus size={14} className="mr-2" />
-          Singra-ID erstellen
+          Singra-ID einrichten
         </Button>
       </div>
     );

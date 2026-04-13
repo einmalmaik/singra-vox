@@ -38,6 +38,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from app.identity.routes import mount_identity_routes
+
 # Load environment from .env in the same directory or backend/.env
 for env_path in [Path(__file__).parent / ".env", Path(__file__).parent / "backend" / ".env"]:
     if env_path.exists():
@@ -73,7 +75,6 @@ app.add_middleware(
 )
 
 # ── Mount Identity Routes ────────────────────────────────────────────────────
-from app.identity.routes import mount_identity_routes
 mount_identity_routes(app, db)
 
 

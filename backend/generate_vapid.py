@@ -7,13 +7,11 @@
 # it under the terms of the GNU Affero General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
+import base64
+import importlib.util
 import sys
-try:
-    from pywebpush import webpush
-    import os
-    import secrets
-    import base64
-except ImportError:
+
+if importlib.util.find_spec("pywebpush") is None:
     print("Error: pywebpush not installed. Run 'pip install pywebpush' first.")
     sys.exit(1)
 
