@@ -142,17 +142,18 @@ jobs:
                   .replace("\\r", "\n")
               )
 
-          key_material = normalized
-          lines = [line.strip() for line in key_material.split("\n") if line.strip()]
+          key_blob = normalized
+          lines = [line.strip() for line in key_blob.split("\n") if line.strip()]
           if len(lines) == 1:
               try:
                   decoded = base64.b64decode(lines[0]).decode("utf-8").strip()
                   decoded_lines = [line.strip() for line in decoded.split("\n") if line.strip()]
                   if len(decoded_lines) >= 2:
-                      key_material = decoded
                       lines = decoded_lines
               except (binascii.Error, UnicodeDecodeError):
                   pass
+          else:
+              key_blob = base64.b64encode(normalized.encode("utf-8")).decode("ascii")
 
           if len(lines) < 2 or "secret key" not in lines[0].lower():
               print(
@@ -163,7 +164,7 @@ jobs:
               sys.exit(1)
 
           key_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "tauri-signing.key"
-          key_path.write_text(key_material + "\n", encoding="utf-8", newline="\n")
+          key_path.write_text(key_blob.strip() + "\n", encoding="utf-8", newline="\n")
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
               # Tauri build expects TAURI_SIGNING_PRIVATE_KEY and accepts either
