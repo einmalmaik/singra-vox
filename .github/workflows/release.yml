@@ -166,7 +166,9 @@ jobs:
           key_path.write_text(key_material + "\n", encoding="utf-8", newline="\n")
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              env_file.write(f"TAURI_SIGNING_PRIVATE_KEY_PATH={key_path}\n")
+              # Tauri build expects TAURI_SIGNING_PRIVATE_KEY and accepts either
+              # the raw private key content or a filesystem path to the key file.
+              env_file.write(f"TAURI_SIGNING_PRIVATE_KEY={key_path}\n")
               password = os.environ.get("RAW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "")
               if password:
                   env_file.write("TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF\n")
@@ -181,7 +183,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PATH }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
