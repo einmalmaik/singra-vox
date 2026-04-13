@@ -157,3 +157,5 @@ yarn-error.log*
 # Environment files
 *.env
 *.env.*
+/test-results
+/backend/.venv-wsl
