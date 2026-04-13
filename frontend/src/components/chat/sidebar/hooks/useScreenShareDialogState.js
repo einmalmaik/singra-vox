@@ -33,7 +33,6 @@ export function useScreenShareDialogState({
   const [screenShareAudio, setScreenShareAudio] = useState(false);
   const [screenShareAudioVolume, setScreenShareAudioVolume] = useState(100);
   const [screenShareSurface, setScreenShareSurface] = useState("monitor");
-  const [captureSourceType, setCaptureSourceType] = useState("display");
   const screenSharePresetOptions = useMemo(
     () => getScreenSharePresetOptions({ isDesktop: useNativeScreenShare }),
     [useNativeScreenShare],
@@ -46,12 +45,13 @@ export function useScreenShareDialogState({
   const {
     captureSourcesStatus,
     captureSources,
+    captureSourceType,
     selectedCaptureSourceId,
     filteredCaptureSources,
+    setCaptureSourceType,
     setSelectedCaptureSourceId,
   } = useDesktopCaptureSources({
     enabled: Boolean(open && useNativeScreenShare),
-    sourceType: captureSourceType,
     onError: handleCaptureSourcesLoadError,
   });
 

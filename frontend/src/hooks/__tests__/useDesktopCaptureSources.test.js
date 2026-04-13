@@ -83,9 +83,10 @@ describe("useDesktopCaptureSources helpers", () => {
     ]);
   });
 
-  it("returns a usable capture source setter for the screen share dialog", async () => {
+  it("re-filters capture sources when the selected source type changes", async () => {
     listDesktopCaptureSources.mockResolvedValueOnce([
       { id: "display-1", kind: "display", label: "Display 1" },
+      { id: "window-1", kind: "window", label: "Window 1" },
     ]);
     getNativeScreenShareSession.mockResolvedValueOnce(null);
 
@@ -114,11 +115,23 @@ describe("useDesktopCaptureSources helpers", () => {
       });
 
       const latestValue = snapshots.at(-1);
+      expect(latestValue?.captureSourceType).toBe("display");
+      expect(latestValue?.filteredCaptureSources.map((source) => source.id)).toEqual(["display-1"]);
       expect(typeof latestValue?.setSelectedCaptureSourceId).toBe("function");
+      expect(typeof latestValue?.setCaptureSourceType).toBe("function");
 
       await act(async () => {
-        latestValue.setSelectedCaptureSourceId("display-1");
+        latestValue.setCaptureSourceType("window");
       });
+
+      expect(snapshots.at(-1)?.captureSourceType).toBe("window");
+      expect(snapshots.at(-1)?.filteredCaptureSources.map((source) => source.id)).toEqual(["window-1"]);
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(snapshots.at(-1)?.selectedCaptureSourceId).toBe("window-1");
     } finally {
       await act(async () => {
         root.unmount();
