@@ -53,6 +53,8 @@ Im GitHub Repository unter **Settings → Secrets → Actions**:
 Wichtig:
 - `TAURI_SIGNING_PRIVATE_KEY` muss der **exakte rohe Inhalt** der generierten `.key`-Datei sein; nicht die `.pub` und nicht ein manuell veränderter Ausschnitt.
 - Das Release-Workflow akzeptiert den rohen Inhalt der generierten `.key`-Datei und normalisiert zusätzlich echte Zeilenumbrüche sowie als `\n` eingefügte Secrets.
+- Der aktuell verwendete lokale Release-Key liegt auf dem Maintainer-System unter `%USERPROFILE%\.tauri\singravox-updater-2026-04.key`, das Passwort dazu unter `%USERPROFILE%\.tauri\singravox-updater-2026-04.password`.
+- Diese beiden Dateien müssen zusätzlich außerhalb des Repos verschlüsselt gesichert werden. Sie dürfen nie committed werden, weil ohne sie keine weiteren Auto-Update-Releases mit derselben Vertrauenskette signiert werden können.
 
 Optional für macOS Notarisierung:
 | Secret | Wert |
