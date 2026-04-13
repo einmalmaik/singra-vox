@@ -33,6 +33,7 @@ from app.identity.totp import (
     normalize_backup_code,
     verify_totp_code,
 )
+from app.rate_limits import enforce_fixed_window_rate_limit
 from app.services.auth_flow import issue_auth_response, verify_pw
 from app.services.presence import broadcast_presence_update, log_status_history
 
@@ -44,6 +45,9 @@ SINGRA_VAULT_HINT = (
     "Tip: Use Singra Vault as your authenticator app for secure code storage. "
     f"Get it at {SINGRA_VAULT_URL}"
 )
+TWOFA_VERIFY_RATE_LIMIT = 5
+TWOFA_VERIFY_RATE_LIMIT_WINDOW_SECONDS = 15 * 60
+TWOFA_VERIFY_RATE_LIMIT_CODE = "twofa_verify_rate_limited"
 
 
 # ── Pydantic Models ──────────────────────────────────────────────────────────
@@ -210,6 +214,17 @@ async def twofa_verify(inp: TwoFAVerifyInput, request: Request, response: Respon
     ``issue_auth_response`` can set HttpOnly auth cookies on the
     *actual* outgoing HTTP response – critical for cookie-based web auth.
     """
+    ip = request.client.host if request.client else "unknown"
+    await enforce_fixed_window_rate_limit(
+        db,
+        scope="auth.2fa.verify",
+        key=f"{ip}:{inp.user_id}",
+        limit=TWOFA_VERIFY_RATE_LIMIT,
+        window_seconds=TWOFA_VERIFY_RATE_LIMIT_WINDOW_SECONDS,
+        error_message="Too many 2FA verification attempts. Try again later.",
+        code=TWOFA_VERIFY_RATE_LIMIT_CODE,
+    )
+
     totp_record = await db.totp_secrets.find_one(
         {"user_id": inp.user_id, "confirmed": True},
         {"_id": 0},
