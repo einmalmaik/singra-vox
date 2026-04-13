@@ -21,6 +21,31 @@ import { buildScreenSharePublishOptions, DEFAULT_SCREEN_SHARE_PRESET_ID } from "
 import { buildVoiceRoomName, clampVolume } from "./voiceShared";
 
 export const screenShareMethods = {
+  _attachNativeScreenShareKeySync() {
+    const activeShare = this.nativeScreenShare;
+    activeShare?.keySubscriptionCleanup?.();
+
+    if (!activeShare) {
+      return null;
+    }
+
+    activeShare.keySubscriptionCleanup = null;
+    if (!this.mediaE2EEController?.subscribeNativeKey) {
+      return null;
+    }
+
+    activeShare.keySubscriptionCleanup = this.mediaE2EEController.subscribeNativeKey?.((nextState) => {
+      if (!nextState?.sharedMediaKeyB64) {
+        return;
+      }
+      void Promise.resolve(updateNativeScreenShareKey?.(nextState.sharedMediaKeyB64, 0)).catch((error) => {
+        this.logger.warn("native E2EE key sync failed", { event: "native_screen_share_key_sync" }, error);
+      });
+    }) || null;
+
+    return activeShare.keySubscriptionCleanup;
+  },
+
   async toggleScreenShare(options = {}) {
     if (!this.room) {
       return false;
@@ -256,12 +281,12 @@ export const screenShareMethods = {
       return null;
     }
 
-    const previousCleanup = this.nativeScreenShare?.keySubscriptionCleanup || null;
     this.nativeScreenShare = {
       ...activeSession,
-      keySubscriptionCleanup: previousCleanup,
+      keySubscriptionCleanup: null,
       audioRequested: Boolean(activeSession.hasAudio),
     };
+    this._attachNativeScreenShareKeySync();
 
     this._emitRemoteMediaUpdate();
     this._emit("screen_share_change", {
@@ -302,7 +327,6 @@ export const screenShareMethods = {
     sourceKind,
     sourceLabel,
   }) {
-    let nativeKeySubscription = null;
     let sharedMediaKeyB64 = null;
     let session = null;
 
@@ -312,16 +336,6 @@ export const screenShareMethods = {
         "native-screen-share-start",
       );
       sharedMediaKeyB64 = this.mediaE2EEController.getNativeBridgeState?.()?.sharedMediaKeyB64 || null;
-      if (sharedMediaKeyB64) {
-        nativeKeySubscription = this.mediaE2EEController.subscribeNativeKey?.((nextState) => {
-          if (!nextState?.sharedMediaKeyB64) {
-            return;
-          }
-          void updateNativeScreenShareKey(nextState.sharedMediaKeyB64, 0).catch((error) => {
-            this.logger.warn("native E2EE key sync failed", { event: "native_screen_share_key_sync" }, error);
-          });
-        }) || null;
-      }
     }
 
     const tokenResponse = await api.post("/voice/native-screen-share-token", {
@@ -356,10 +370,10 @@ export const screenShareMethods = {
         qualityPreset,
         hasAudio: Boolean(session?.hasAudio),
         audioRequested: Boolean(session?.hasAudio || audio),
-        keySubscriptionCleanup: nativeKeySubscription,
+        keySubscriptionCleanup: null,
       };
+      this._attachNativeScreenShareKeySync();
     } catch (error) {
-      nativeKeySubscription?.();
       throw error;
     }
 

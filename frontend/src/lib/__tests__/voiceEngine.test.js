@@ -93,6 +93,7 @@ import {
   getNativeScreenShareSession,
   startNativeScreenShare,
   stopNativeScreenShare,
+  updateNativeScreenShareKey,
   updateNativeScreenShareAudioVolume,
 } from "@/lib/desktop";
 import { createLocalScreenTracks, Room } from "livekit-client";
@@ -1023,5 +1024,67 @@ describe("VoiceEngine native cleanup", () => {
         frameRate: 30,
       },
     }));
+  });
+
+  it("re-subscribes native screen-share key sync after reconnect rehydration", async () => {
+    const engine = new VoiceEngine();
+    const staleCleanup = jest.fn();
+    const freshCleanup = jest.fn();
+    let nativeKeyListener = null;
+
+    engine.userId = "user-1";
+    engine.serverId = "server-1";
+    engine.channelId = "channel-1";
+    engine.runtimeConfig = { isDesktop: true };
+    engine.room = { name: "server-server-1-channel-channel-1" };
+    engine.nativeScreenShare = {
+      participantIdentity: "screen-share:channel-1:user-1",
+      keySubscriptionCleanup: staleCleanup,
+    };
+    engine.mediaE2EEController = {
+      subscribeNativeKey: jest.fn((listener) => {
+        nativeKeyListener = listener;
+        listener({
+          keyVersion: "key-v1",
+          participantUserIds: ["user-1", "user-2"],
+          sharedMediaKeyB64: "shared-key-v1",
+        });
+        return freshCleanup;
+      }),
+    };
+
+    engine.forceCleanupForUnload("room_disconnected", { disconnectRoom: false });
+    expect(staleCleanup).toHaveBeenCalledTimes(1);
+    expect(engine.nativeScreenShare).toBeNull();
+
+    getNativeScreenShareSession.mockResolvedValue({
+      provider: "tauri-native-livekit",
+      roomName: "server-server-1-channel-channel-1",
+      participantIdentity: "screen-share:channel-1:user-1",
+      sourceId: "display:0",
+      sourceKind: "display",
+      sourceLabel: "Display 2560x1440",
+      requestedWidth: 1280,
+      requestedHeight: 720,
+      requestedFrameRate: 30,
+      hasAudio: true,
+    });
+
+    await engine._rehydrateNativeScreenShareSession();
+
+    expect(engine.mediaE2EEController.subscribeNativeKey).toHaveBeenCalledTimes(1);
+    expect(updateNativeScreenShareKey).toHaveBeenCalledWith("shared-key-v1", 0);
+    expect(engine.nativeScreenShare).toEqual(expect.objectContaining({
+      participantIdentity: "screen-share:channel-1:user-1",
+      keySubscriptionCleanup: freshCleanup,
+    }));
+
+    nativeKeyListener?.({
+      keyVersion: "key-v2",
+      participantUserIds: ["user-1", "user-2", "user-3"],
+      sharedMediaKeyB64: "shared-key-v2",
+    });
+
+    expect(updateNativeScreenShareKey).toHaveBeenLastCalledWith("shared-key-v2", 0);
   });
 });
