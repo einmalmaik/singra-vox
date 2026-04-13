@@ -163,20 +163,16 @@ jobs:
               )
               sys.exit(1)
 
-          key_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "tauri-signing.key"
-          key_path.write_text(key_blob.strip() + "\n", encoding="utf-8", newline="\n")
-
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              # Tauri build expects TAURI_SIGNING_PRIVATE_KEY and accepts either
-              # the raw private key content or a filesystem path to the key file.
-              env_file.write(f"TAURI_SIGNING_PRIVATE_KEY={key_path}\n")
+              env_file.write("TAURI_SIGNING_PRIVATE_KEY<<EOF\n")
+              env_file.write(key_blob.strip())
+              env_file.write("\nEOF\n")
               password = os.environ.get("RAW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "")
               if password:
                   env_file.write("TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF\n")
                   env_file.write(password)
                   env_file.write("\nEOF\n")
-
-          print(f"Tauri signing key prepared at {key_path}")
+          print("Tauri signing key prepared in GITHUB_ENV")
 
       # tauri-action erstellt den Release selbst und lädt alle Installer hoch
       # updaterJsonPreferNsis=true → NSIS-Bundle (.nsis.zip) für Windows-Updates bevorzugen
@@ -184,8 +180,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}
