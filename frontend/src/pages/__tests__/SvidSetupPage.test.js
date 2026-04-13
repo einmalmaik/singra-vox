@@ -32,6 +32,7 @@ const mockFlowState = {
     verifyCode: "",
     setVerifyCode: jest.fn(),
     verified: false,
+    finalizationPending: false,
   },
   status: {
     error: "",
@@ -42,6 +43,7 @@ const mockFlowState = {
     handleSubmit: jest.fn(),
     handleVerifyCode: jest.fn(),
     handleResendCode: jest.fn(),
+    retryPostVerification: jest.fn(),
     clearError: jest.fn(),
   },
 };
@@ -134,6 +136,7 @@ describe("SvidSetupPage", () => {
       verifyCode: "",
       setVerifyCode: jest.fn(),
       verified: false,
+      finalizationPending: false,
     };
     mockFlowState.status = {
       error: "",
@@ -144,6 +147,7 @@ describe("SvidSetupPage", () => {
       handleSubmit: jest.fn(),
       handleVerifyCode: jest.fn(),
       handleResendCode: jest.fn(),
+      retryPostVerification: jest.fn(),
       clearError: jest.fn(),
     };
   });
@@ -173,5 +177,24 @@ describe("SvidSetupPage", () => {
 
     expect(markup).toContain("svid-setup-success");
     expect(markup).toContain("Singra-ID ist eingerichtet");
+  });
+
+  it("renders a retry state after email verification succeeded but linking did not finish", () => {
+    mockFlowState.verification = {
+      ...mockFlowState.verification,
+      verificationSent: true,
+      finalizationPending: true,
+    };
+    mockFlowState.status = {
+      ...mockFlowState.status,
+      error: "Failed to sync avatar.",
+    };
+
+    const markup = renderToStaticMarkup(<SvidSetupPage />);
+
+    expect(markup).toContain("svid-setup-retry-linking");
+    expect(markup).toContain("Failed to sync avatar.");
+    expect(markup).toContain("Verknüpfung erneut versuchen");
+    expect(markup).not.toContain("svid-setup-verify-form");
   });
 });

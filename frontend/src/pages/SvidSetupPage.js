@@ -115,6 +115,51 @@ export default function SvidSetupPage() {
     );
   }
 
+  if (flow.verification.finalizationPending) {
+    return (
+      <AuthShell
+        eyebrow="SINGRA VOX ID"
+        title={t("svid.setupFinalizeTitle", { defaultValue: "Singra-ID bestätigt" })}
+        subtitle={t("svid.setupFinalizeSubtitle", {
+          defaultValue: "Deine E-Mail wurde bestätigt. Die Verknüpfung mit deinem bestehenden Konto muss noch abgeschlossen werden.",
+        })}
+        icon={Fingerprint}
+        sideTitle="Singra Vox ID"
+        sideCopy={t("svid.setupFinalizeSideCopy", {
+          defaultValue: "Der Bestätigungscode wurde bereits verbraucht. Du kannst die Kontoverknüpfung jetzt direkt erneut versuchen, ohne einen neuen Code anzufordern.",
+        })}
+      >
+        <div className="space-y-4" data-testid="svid-setup-retry-linking">
+          <LocalizedErrorBanner message={flow.status.error} className="text-red-200" />
+          <p className="text-sm text-zinc-400">
+            {t("svid.setupFinalizeHint", {
+              defaultValue: "Falls Avatar-Sync oder Linking kurzzeitig fehlgeschlagen sind, kannst du den Abschluss hier erneut starten.",
+            })}
+          </p>
+          <Button
+            type="button"
+            onClick={() => void flow.actions.retryPostVerification()}
+            disabled={flow.status.verifying}
+            data-testid="svid-setup-retry-linking-action"
+            className="h-12 w-full rounded-2xl bg-violet-500 font-semibold text-white shadow-[0_16px_40px_rgba(139,92,246,0.28)] transition hover:bg-violet-400 disabled:opacity-50"
+          >
+            {flow.status.verifying
+              ? t("svid.verifying")
+              : t("svid.setupFinalizeRetry", { defaultValue: "Verknüpfung erneut versuchen" })}
+          </Button>
+          <button
+            type="button"
+            onClick={goBackToWorkspace}
+            className="flex w-full items-center justify-center gap-1.5 pt-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+            data-testid="svid-setup-finalize-back"
+          >
+            <ArrowLeft size={12} /> {t("svid.backToLogin", { defaultValue: "ZurÃ¼ck" })}
+          </button>
+        </div>
+      </AuthShell>
+    );
+  }
+
   // Keep the local success state visible after linking. The auth context can
   // update `user.svid_account_id` before this page paints its completion view.
   if (user?.svid_account_id) {
