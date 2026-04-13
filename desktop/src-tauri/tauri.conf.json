@@ -30,6 +30,13 @@
         "active": true,
         "createUpdaterArtifacts": true,
         "targets": "all",
+        "publisher": "Maik Haedrich",
+        "homepage": "https://github.com/einmalmaik/singra-vox",
+        "copyright": "Copyright (C) 2026 Maik Haedrich",
+        "license": "AGPL-3.0-or-later",
+        "category": "SocialNetworking",
+        "shortDescription": "Privacy-first communication for self-hosted communities.",
+        "longDescription": "Singra Vox is an open source desktop client for self-hosted chat, LiveKit voice, screen sharing and encrypted channels.",
         "icon": [
             "icons/32x32.png",
             "icons/128x128.png",
@@ -53,9 +60,19 @@
         "windows": {
             "nsis": {
                 "displayLanguageSelector": true,
-                "installMode": "perMachine"
+                "headerImage": "windows/branding/nsis-header.bmp",
+                "sidebarImage": "windows/branding/nsis-sidebar.bmp",
+                "installerIcon": "icons/icon.ico",
+                "installMode": "perMachine",
+                "languages": [
+                    "English",
+                    "German"
+                ],
+                "startMenuFolder": "Singra Vox"
             },
             "wix": {
+                "bannerPath": "windows/branding/wix-banner.bmp",
+                "dialogImagePath": "windows/branding/wix-dialog.bmp",
                 "language": "de-DE"
             }
         }

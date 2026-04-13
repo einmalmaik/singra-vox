@@ -2,7 +2,11 @@
 name = "singravox-desktop"
 version = "0.2.0"
 edition = "2021"
-description = "Singra Vox Desktop Client"
+authors = ["Maik Haedrich"]
+description = "Privacy-first desktop client for self-hosted chat, voice, and encrypted channels"
+homepage = "https://github.com/einmalmaik/singra-vox"
+repository = "https://github.com/einmalmaik/singra-vox"
+license = "AGPL-3.0-or-later"
 
 [dependencies]
 tauri = { version = "2", features = [] }
