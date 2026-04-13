@@ -111,16 +111,58 @@ jobs:
           m = re.search(r'^version = "([^"]+)"', content, re.MULTILINE)
           print("Cargo.toml:", m.group(1) if m else "NOT FOUND")
 
+      - name: Tauri-Signing-Key normalisieren
+        shell: python3 {0}
+        env:
+          RAW_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          RAW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          import os
+          import pathlib
+          import sys
+
+          raw_key = os.environ.get("RAW_TAURI_SIGNING_PRIVATE_KEY", "").strip()
+          if not raw_key:
+              print("FEHLER: GitHub Secret TAURI_SIGNING_PRIVATE_KEY fehlt.")
+              sys.exit(1)
+
+          normalized = (
+              raw_key
+              .replace("\\r\\n", "\n")
+              .replace("\\n", "\n")
+              .replace("\r\n", "\n")
+              .replace("\r", "\n")
+              .strip()
+          )
+          lines = [line.strip() for line in normalized.split("\n") if line.strip()]
+          if len(lines) < 2:
+              print(
+                  "FEHLER: TAURI_SIGNING_PRIVATE_KEY ist nicht im erwarteten minisign-Format. "
+                  "Erwartet wird der komplette Inhalt der .key-Datei mit Kommentar- und Key-Zeile."
+              )
+              sys.exit(1)
+
+          key_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "tauri-signing.key"
+          key_path.write_text(normalized + "\n", encoding="utf-8", newline="\n")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"TAURI_SIGNING_PRIVATE_KEY={key_path}\n")
+              password = os.environ.get("RAW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "")
+              if password:
+                  env_file.write("TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF\n")
+                  env_file.write(password)
+                  env_file.write("\nEOF\n")
+
+          print(f"Tauri signing key prepared at {key_path}")
+
       # tauri-action erstellt den Release selbst und lädt alle Installer hoch
       # updaterJsonPreferNsis=true → NSIS-Bundle (.nsis.zip) für Windows-Updates bevorzugen
       - name: Tauri Desktop-App bauen & Release befüllen
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signing Key ohne Passwort – GitHub Secrets erlauben keine leeren Werte,
-          # daher wird TAURI_SIGNING_PRIVATE_KEY_PASSWORD NICHT gesetzt.
-          # tauri-action erkennt automatisch dass kein Passwort nötig ist.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
           tagName: ${{ github.ref_name }}

@@ -60,7 +60,7 @@ pub async fn create_overlay(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let _window = tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         &app,
         "overlay",
         tauri::WebviewUrl::App("/overlay".into()),
@@ -68,13 +68,21 @@ pub async fn create_overlay(app: tauri::AppHandle) -> Result<(), String> {
     .title("Singra Vox Overlay")
     .inner_size(320.0, 220.0)
     .decorations(false)
-    .transparent(true)
     .always_on_top(true)
     .resizable(false)
     .skip_taskbar(true)
-    .visible(false) // Erst sichtbar wenn aktiviert
-    .build()
-    .map_err(|e| format!("Overlay-Fenster konnte nicht erstellt werden: {e}"))?;
+    .visible(false); // Erst sichtbar wenn aktiviert
+
+    // Tauri exposes transparent windows on macOS only when the app enables the
+    // macOS private API feature. We intentionally keep the default feature set
+    // here, so macOS stays on the safe builder path instead of breaking desktop
+    // builds for every release.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    let _window = builder
+        .build()
+        .map_err(|e| format!("Overlay-Fenster konnte nicht erstellt werden: {e}"))?;
 
     Ok(())
 }
@@ -191,8 +199,7 @@ fn detect_fullscreen_windows() -> Result<FullscreenDetectionResult, String> {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{GetDC, GetDeviceCaps, ReleaseDC, HORZRES, VERTRES};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowTextW, GWL_STYLE,
-        WS_POPUP,
+        GetForegroundWindow, GetWindowLongW, GetWindowRect, GetWindowTextW, GWL_STYLE, WS_POPUP,
     };
 
     unsafe {
