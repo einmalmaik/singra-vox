@@ -51,8 +51,8 @@ Im GitHub Repository unter **Settings → Secrets → Actions**:
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Passwort das du beim Generieren gesetzt hast |
 
 Wichtig:
-- `TAURI_SIGNING_PRIVATE_KEY` muss der **komplette Inhalt** der `.key`-Datei sein, nicht nur die Base64-Zeile.
-- Das Release-Workflow normalisiert sowohl echte Zeilenumbrüche als auch als `\n` eingefügte Secrets.
+- `TAURI_SIGNING_PRIVATE_KEY` muss der **exakte rohe Inhalt** der generierten `.key`-Datei sein; nicht die `.pub` und nicht ein manuell veränderter Ausschnitt.
+- Das Release-Workflow akzeptiert den rohen Inhalt der generierten `.key`-Datei und normalisiert zusätzlich echte Zeilenumbrüche sowie als `\n` eingefügte Secrets.
 
 Optional für macOS Notarisierung:
 | Secret | Wert |

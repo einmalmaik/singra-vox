@@ -117,6 +117,8 @@ jobs:
           RAW_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           RAW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          import base64
+          import binascii
           import os
           import pathlib
           import sys
@@ -128,25 +130,43 @@ jobs:
 
           normalized = (
               raw_key
-              .replace("\\r\\n", "\n")
-              .replace("\\n", "\n")
               .replace("\r\n", "\n")
               .replace("\r", "\n")
               .strip()
           )
-          lines = [line.strip() for line in normalized.split("\n") if line.strip()]
-          if len(lines) < 2:
+          if "\\n" in normalized or "\\r" in normalized:
+              normalized = (
+                  normalized
+                  .replace("\\r\\n", "\n")
+                  .replace("\\n", "\n")
+                  .replace("\\r", "\n")
+              )
+
+          key_material = normalized
+          lines = [line.strip() for line in key_material.split("\n") if line.strip()]
+          if len(lines) == 1:
+              try:
+                  decoded = base64.b64decode(lines[0]).decode("utf-8").strip()
+                  decoded_lines = [line.strip() for line in decoded.split("\n") if line.strip()]
+                  if len(decoded_lines) >= 2:
+                      key_material = decoded
+                      lines = decoded_lines
+              except (binascii.Error, UnicodeDecodeError):
+                  pass
+
+          if len(lines) < 2 or "secret key" not in lines[0].lower():
               print(
                   "FEHLER: TAURI_SIGNING_PRIVATE_KEY ist nicht im erwarteten minisign-Format. "
-                  "Erwartet wird der komplette Inhalt der .key-Datei mit Kommentar- und Key-Zeile."
+                  "Erwartet wird entweder der rohe Inhalt der generierten .key-Datei oder "
+                  "dekodiertes minisign-Key-Material mit Kommentar- und Key-Zeile."
               )
               sys.exit(1)
 
           key_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "tauri-signing.key"
-          key_path.write_text(normalized + "\n", encoding="utf-8", newline="\n")
+          key_path.write_text(key_material + "\n", encoding="utf-8", newline="\n")
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              env_file.write(f"TAURI_SIGNING_PRIVATE_KEY={key_path}\n")
+              env_file.write(f"TAURI_SIGNING_PRIVATE_KEY_PATH={key_path}\n")
               password = os.environ.get("RAW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "")
               if password:
                   env_file.write("TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<EOF\n")
@@ -161,7 +181,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PATH }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
