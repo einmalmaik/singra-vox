@@ -14,6 +14,15 @@ import { isDesktopApp, listenTauri } from "@/lib/desktop";
 
 const UP_TO_DATE_DISPLAY_MS = 3000;
 const ERROR_DISPLAY_MS = 6000;
+const UPDATE_EVENT_HANDLER_MAP = [
+  ["update-checking", "onChecking"],
+  ["update-available", "onAvailable"],
+  ["update-not-available", "onNotAvailable"],
+  ["update-download-progress", "onDownloadProgress"],
+  ["update-install-started", "onInstallStarted"],
+  ["update-error", "onError"],
+];
+export const UPDATE_EVENT_NAMES = UPDATE_EVENT_HANDLER_MAP.map(([eventName]) => eventName);
 
 const PHASE_CONFIG = {
   checking: {
@@ -66,6 +75,28 @@ export function formatUpdateVersion(update) {
   return currentVersion ? `${currentVersion} → ${update.version}` : update.version;
 }
 
+export function registerUpdateListeners({ listen, handlers, isDisposed = () => false }) {
+  const unlisteners = [];
+  for (const [eventName, handlerName] of UPDATE_EVENT_HANDLER_MAP) {
+    const handler = handlers[handlerName];
+    void listen(eventName, handler)
+      .then((unlisten) => {
+        if (isDisposed()) {
+          unlisten?.();
+          return;
+        }
+        unlisteners.push(unlisten);
+      })
+      .catch((error) => {
+        console.warn(`[Updater] Failed to register ${eventName} listener:`, error);
+      });
+  }
+
+  return () => {
+    unlisteners.forEach((unlisten) => unlisten?.());
+  };
+}
+
 export function UpdateNotification() {
   const { t } = useTranslation();
   const [phase, setPhase] = useState("idle");
@@ -74,6 +105,11 @@ export function UpdateNotification() {
   const [errorMsg, setErrorMsg] = useState(null);
   const downloadedRef = useRef(0);
   const fadeTimerRef = useRef(null);
+  const translateRef = useRef(t);
+
+  useEffect(() => {
+    translateRef.current = t;
+  }, [t]);
 
   const fadeToIdle = useCallback((delayMs) => {
     if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
@@ -84,58 +120,57 @@ export function UpdateNotification() {
 
   useEffect(() => {
     if (!isDesktopApp()) return undefined;
+    let disposed = false;
 
-    const unlisteners = [];
-
-    (async () => {
-      unlisteners.push(await listenTauri("update-checking", (event) => {
-        setPhase("checking");
-        setUpdate((prev) => prev || { currentVersion: event.payload?.currentVersion });
-        setErrorMsg(null);
-        downloadedRef.current = 0;
-        setProgress(0);
-        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-      }));
-
-      unlisteners.push(await listenTauri("update-available", (event) => {
-        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-        setUpdate(event.payload);
-        setPhase("available");
-      }));
-
-      unlisteners.push(await listenTauri("update-not-available", () => {
-        setPhase("up-to-date");
-        fadeToIdle(UP_TO_DATE_DISPLAY_MS);
-      }));
-
-      unlisteners.push(await listenTauri("update-download-progress", (event) => {
-        const { chunkLength, contentLength } = event.payload;
-        if (contentLength) {
-          downloadedRef.current += chunkLength;
-          setProgress(Math.min(99, Math.round((downloadedRef.current / contentLength) * 100)));
-        }
-        setPhase("downloading");
-      }));
-
-      unlisteners.push(await listenTauri("update-install-started", () => {
-        setProgress(100);
-        setPhase("installing");
-      }));
-
-      unlisteners.push(await listenTauri("update-error", (event) => {
-        const message = event.payload?.error || t("updater.unknownError");
-        console.warn("[Updater] Fehler:", message);
-        setErrorMsg(message);
-        setPhase("error");
-        fadeToIdle(ERROR_DISPLAY_MS);
-      }));
-    })();
+    const cleanupListeners = registerUpdateListeners({
+      listen: listenTauri,
+      isDisposed: () => disposed,
+      handlers: {
+        onChecking: (event) => {
+          setPhase("checking");
+          setUpdate((prev) => prev || { currentVersion: event.payload?.currentVersion });
+          setErrorMsg(null);
+          downloadedRef.current = 0;
+          setProgress(0);
+          if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+        },
+        onAvailable: (event) => {
+          if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+          setUpdate(event.payload);
+          setPhase("available");
+        },
+        onNotAvailable: () => {
+          setPhase("up-to-date");
+          fadeToIdle(UP_TO_DATE_DISPLAY_MS);
+        },
+        onDownloadProgress: (event) => {
+          const { chunkLength, contentLength } = event.payload;
+          if (contentLength) {
+            downloadedRef.current += chunkLength;
+            setProgress(Math.min(99, Math.round((downloadedRef.current / contentLength) * 100)));
+          }
+          setPhase("downloading");
+        },
+        onInstallStarted: () => {
+          setProgress(100);
+          setPhase("installing");
+        },
+        onError: (event) => {
+          const message = event.payload?.error || translateRef.current("updater.unknownError");
+          console.warn("[Updater] Fehler:", message);
+          setErrorMsg(message);
+          setPhase("error");
+          fadeToIdle(ERROR_DISPLAY_MS);
+        },
+      },
+    });
 
     return () => {
+      disposed = true;
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-      unlisteners.forEach((unlisten) => unlisten?.());
+      cleanupListeners();
     };
-  }, [fadeToIdle, t]);
+  }, [fadeToIdle]);
 
   if (!isDesktopApp() || phase === "idle") return null;
 

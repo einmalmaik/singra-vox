@@ -14,7 +14,12 @@ jest.mock("@/lib/desktop", () => ({
 
 import de from "../../../i18n/locales/de/index.js";
 import en from "../../../i18n/locales/en/index.js";
-import { formatUpdateVersion, getUpdatePhaseLabel } from "../UpdateNotification";
+import {
+  formatUpdateVersion,
+  getUpdatePhaseLabel,
+  registerUpdateListeners,
+  UPDATE_EVENT_NAMES,
+} from "../UpdateNotification";
 
 function resolveKey(locale, key) {
   return key.split(".").reduce((value, part) => value?.[part], locale);
@@ -37,5 +42,48 @@ describe("UpdateNotification helpers", () => {
       current_version: "0.5.6",
       version: "0.5.7",
     })).toBe("0.5.6 \u2192 0.5.7");
+  });
+
+  it("cleans up listeners that resolve after the banner has already disposed", async () => {
+    const deferredListeners = new Map();
+    const listen = jest.fn((eventName) => new Promise((resolve) => {
+      const unlisten = jest.fn();
+      deferredListeners.set(eventName, { resolve, unlisten });
+    }));
+
+    let disposed = false;
+    const cleanup = registerUpdateListeners({
+      listen,
+      isDisposed: () => disposed,
+      handlers: {
+        onChecking: jest.fn(),
+        onAvailable: jest.fn(),
+        onNotAvailable: jest.fn(),
+        onDownloadProgress: jest.fn(),
+        onInstallStarted: jest.fn(),
+        onError: jest.fn(),
+      },
+    });
+
+    expect(listen).toHaveBeenCalledTimes(UPDATE_EVENT_NAMES.length);
+
+    const checkingListener = deferredListeners.get("update-checking");
+    checkingListener.resolve(checkingListener.unlisten);
+    await Promise.resolve();
+
+    disposed = true;
+    cleanup();
+    expect(checkingListener.unlisten).toHaveBeenCalledTimes(1);
+
+    for (const eventName of UPDATE_EVENT_NAMES.filter((name) => name !== "update-checking")) {
+      const deferred = deferredListeners.get(eventName);
+      deferred.resolve(deferred.unlisten);
+    }
+
+    await Promise.resolve();
+
+    for (const eventName of UPDATE_EVENT_NAMES.filter((name) => name !== "update-checking")) {
+      expect(deferredListeners.get(eventName).unlisten).toHaveBeenCalledTimes(1);
+    }
   });
 });

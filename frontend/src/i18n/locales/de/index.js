@@ -1,5 +1,3 @@
-import en from "../en";
-import mergeLocale from "../_shared/mergeLocale";
 import app from "./app";
 import common from "./common";
 import updater from "./updater";
@@ -60,4 +58,4 @@ const sections = {
   passwordInput,
 };
 
-export default mergeLocale(en, sections);
+export default sections;

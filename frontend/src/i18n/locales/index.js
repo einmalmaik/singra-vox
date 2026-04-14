@@ -1,3 +1,4 @@
+import mergeLocale from "./_shared/mergeLocale";
 import en from "./en";
 import de from "./de";
 import fr from "./fr";
@@ -11,7 +12,7 @@ import da from "./da";
 import no from "./no";
 import fi from "./fi";
 
-export const localeRegistry = {
+export const localeSectionRegistry = {
   en,
   de,
   fr,
@@ -25,6 +26,13 @@ export const localeRegistry = {
   no,
   fi,
 };
+
+export const localeRegistry = Object.fromEntries(
+  Object.entries(localeSectionRegistry).map(([code, sections]) => [
+    code,
+    code === "en" ? sections : mergeLocale(en, sections),
+  ]),
+);
 
 export const localeResources = Object.fromEntries(
   Object.entries(localeRegistry).map(([code, translation]) => [code, { translation }]),

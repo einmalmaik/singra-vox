@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
-import localeRegistry from "../locales/index.js";
+import { LOCALE_SECTIONS } from "../locales/_shared/sections.js";
+import { localeRegistry, localeSectionRegistry } from "../locales/index.js";
 
 const SRC_DIR = path.resolve(__dirname, "..", "..");
 const LOCALES_DIR = path.resolve(__dirname, "..", "locales");
@@ -26,6 +27,10 @@ function walkFiles(directory) {
   });
 }
 
+function normalizeNewlines(value) {
+  return value.replace(/\r\n/g, "\n");
+}
+
 describe("locale registry", () => {
   it("keeps every locale on the same key shape as english", () => {
     const englishPaths = collectLeafPaths(localeRegistry.en).sort();
@@ -34,6 +39,29 @@ describe("locale registry", () => {
       expect(collectLeafPaths(locale).sort()).toEqual(englishPaths);
       expect(locale).toBeDefined();
       expect(code).toMatch(/^[a-z]{2}$/);
+    }
+  });
+
+  it("keeps raw locale overrides explicit and free of empty placeholder sections", () => {
+    const emptyPlaceholderFiles = walkFiles(LOCALES_DIR).filter((file) => {
+      if (!file.endsWith(".js") || file.endsWith("index.js")) {
+        return false;
+      }
+
+      const raw = normalizeNewlines(fs.readFileSync(file, "utf8").trim());
+      return raw === "const section = {};\n\nexport default section;";
+    });
+
+    expect(emptyPlaceholderFiles).toEqual([]);
+
+    for (const [code, sections] of Object.entries(localeSectionRegistry)) {
+      expect(code).toMatch(/^[a-z]{2}$/);
+      expect(Object.keys(sections).length).toBeGreaterThan(0);
+
+      for (const [sectionName, value] of Object.entries(sections)) {
+        expect(LOCALE_SECTIONS).toContain(sectionName);
+        expect(collectLeafPaths(value).filter(Boolean).length).toBeGreaterThan(0);
+      }
     }
   });
 

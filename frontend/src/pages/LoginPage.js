@@ -25,9 +25,11 @@ import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 import { rememberPendingVerification } from "@/lib/pendingVerification";
 import { clearDesktopInstanceUrl } from "@/lib/runtimeConfig";
+import buildSvidLoginCopy from "@/pages/svid/loginCopy";
 
 export default function LoginPage() {
   const { t } = useTranslation();
+  const svidCopy = useMemo(() => buildSvidLoginCopy(t), [t]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -158,9 +160,9 @@ export default function LoginPage() {
     } catch (err) {
       const detail = err.response?.data?.detail;
       if (typeof detail === "object" && detail?.code === "email_verification_required") {
-        setSvidError(t("auth.svidVerifyEmailFirst"));
+        setSvidError(svidCopy.verifyEmailFirst);
       } else {
-        setSvidError(typeof detail === "string" ? detail : t("auth.svidLoginFailed"));
+        setSvidError(typeof detail === "string" ? detail : svidCopy.loginFailed);
       }
     } finally {
       setSvidLoading(false);
@@ -180,7 +182,7 @@ export default function LoginPage() {
       await loginWithSvid(res2fa.data.access_token);
       navigate("/");
     } catch (err) {
-      setSvidError(err.response?.data?.detail || t("auth.svidInvalid2fa"));
+      setSvidError(err.response?.data?.detail || svidCopy.invalid2fa);
     } finally {
       setSvidLoading(false);
     }
@@ -191,8 +193,8 @@ export default function LoginPage() {
     return (
       <AuthShell
         eyebrow={t("svid.twoFactorEyebrow")}
-        title={t("auth.enter2FACode")}
-        subtitle={t("auth.enter2FASubtitle")}
+        title={svidCopy.twoFactorTitle}
+        subtitle={svidCopy.twoFactorSubtitle}
         icon={Fingerprint}
         sideTitle={setupStatus?.instance_name || "Singra Vox"}
         sideCopy={t("svid.twoFactorSideCopy")}
@@ -201,7 +203,7 @@ export default function LoginPage() {
           <form onSubmit={handle2FASubmit} className="space-y-5">
             <LocalizedErrorBanner message={svidError} className="text-red-200" />
             <div className="space-y-2">
-              <Label htmlFor="totp" className="workspace-section-label">{t("auth.authenticatorCode")}</Label>
+              <Label htmlFor="totp" className="workspace-section-label">{svidCopy.authenticatorCode}</Label>
               <Input
                 id="totp"
                 type="text"
@@ -216,7 +218,7 @@ export default function LoginPage() {
                 data-testid="svid-2fa-input"
                 className="h-14 rounded-2xl border-white/10 bg-zinc-950/70 text-center text-2xl font-mono tracking-[0.3em] text-white placeholder:text-zinc-600 focus:border-cyan-400/50 focus:ring-cyan-400/40"
               />
-              <p className="text-xs text-zinc-500 mt-1">{t("auth.backupCodeHint")}</p>
+              <p className="text-xs text-zinc-500 mt-1">{svidCopy.backupCodeHint}</p>
             </div>
             <Button
               type="submit"
@@ -224,16 +226,14 @@ export default function LoginPage() {
               data-testid="svid-2fa-submit"
               className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300"
             >
-              {svidLoading
-                ? t("auth.verifyingButton")
-                : t("auth.verifyButton")}
+              {svidLoading ? svidCopy.verifying : svidCopy.verify}
             </Button>
             <button
               type="button"
               onClick={() => { setRequires2FA(false); setPendingToken(""); setTotpCode(""); }}
               className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors duration-150 pt-1"
             >
-              <ArrowLeft size={12} /> {t("auth.backToLogin")}
+              <ArrowLeft size={12} /> {svidCopy.backToLogin}
             </button>
           </form>
         </div>
@@ -304,7 +304,7 @@ export default function LoginPage() {
               onClick={() => { setShowSvidLogin(false); setSvidError(""); }}
               className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors duration-150 pt-1"
             >
-              <ArrowLeft size={12} /> {t("auth.backToInstanceLogin")}
+              <ArrowLeft size={12} /> {svidCopy.backToInstanceLogin}
             </button>
           </form>
         </div>
