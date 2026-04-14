@@ -4,6 +4,11 @@
 # keeps plain `cargo` and Tauri invocations reproducible from the repo root.
 target-dir = "t"
 
+[net]
+# LiveKit currently pulls libyuv through a git submodule. Git CLI fetches are
+# more resilient than libgit2 on GitHub's macOS runners for this dependency.
+git-fetch-with-cli = true
+
 [target.x86_64-pc-windows-msvc]
 # LiveKit's Windows WebRTC artifacts are built against the static MSVC runtime.
 # Matching that runtime here avoids linker conflicts in the native Tauri binary.

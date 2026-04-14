@@ -7,212 +7,157 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowsClockwise, ArrowDown, CheckCircle, WarningCircle } from "@phosphor-icons/react";
-import { isDesktopApp, listenTauri } from "@/lib/desktop";
+import { DesktopUpdateProvider, useDesktopUpdateState } from "./DesktopUpdateState";
+import {
+  PHASE_CONFIG,
+  UPDATE_EVENT_NAMES,
+  formatUpdateVersion,
+  getUpdatePhaseLabel,
+  registerUpdateListeners,
+} from "./updateHelpers";
 
-const UP_TO_DATE_DISPLAY_MS = 3000;
-const ERROR_DISPLAY_MS = 6000;
-const UPDATE_EVENT_HANDLER_MAP = [
-  ["update-checking", "onChecking"],
-  ["update-available", "onAvailable"],
-  ["update-not-available", "onNotAvailable"],
-  ["update-download-progress", "onDownloadProgress"],
-  ["update-install-started", "onInstallStarted"],
-  ["update-error", "onError"],
-];
-export const UPDATE_EVENT_NAMES = UPDATE_EVENT_HANDLER_MAP.map(([eventName]) => eventName);
-
-const PHASE_CONFIG = {
-  checking: {
-    icon: ArrowsClockwise,
-    iconClass: "text-cyan-400 animate-spin",
-    labelKey: "updater.checking",
-    bg: "bg-zinc-900/95 border-cyan-500/20",
-  },
-  available: {
-    icon: ArrowDown,
-    iconClass: "text-cyan-400 animate-bounce",
-    labelKey: "updater.available",
-    bg: "bg-zinc-900/95 border-cyan-500/30",
-  },
-  downloading: {
-    icon: ArrowsClockwise,
-    iconClass: "text-cyan-400 animate-spin",
-    labelKey: "updater.downloading",
-    bg: "bg-zinc-900/95 border-cyan-500/30",
-  },
-  installing: {
-    icon: ArrowsClockwise,
-    iconClass: "text-cyan-400 animate-spin",
-    labelKey: "updater.installing",
-    bg: "bg-zinc-900/95 border-cyan-500/40",
-  },
-  "up-to-date": {
-    icon: CheckCircle,
-    iconClass: "text-emerald-400",
-    labelKey: "updater.upToDate",
-    bg: "bg-zinc-900/95 border-emerald-500/20",
-  },
-  error: {
-    icon: WarningCircle,
-    iconClass: "text-amber-400",
-    labelKey: "updater.error",
-    bg: "bg-zinc-900/95 border-amber-500/20",
-  },
-};
-
-export function getUpdatePhaseLabel(phase, t) {
-  const config = PHASE_CONFIG[phase];
-  if (!config) return null;
-  return t(config.labelKey);
+function UpdateProgressBar({ progress, compact = false }) {
+  return (
+    <div className={`flex items-center gap-2 ${compact ? "mt-1.5" : "mt-4"}`}>
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-700/60">
+        <div
+          className="h-full rounded-full bg-cyan-400 transition-all duration-300 ease-out"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <span className="w-10 text-right text-xs tabular-nums text-zinc-400">{progress}%</span>
+    </div>
+  );
 }
 
-export function formatUpdateVersion(update) {
-  if (!update?.version) return null;
-  const currentVersion = update.currentVersion || update.current_version;
-  return currentVersion ? `${currentVersion} → ${update.version}` : update.version;
-}
+function VersionLabel({ update }) {
+  const { t } = useTranslation();
+  const versionLabel = formatUpdateVersion(update, t);
 
-export function registerUpdateListeners({ listen, handlers, isDisposed = () => false }) {
-  const unlisteners = [];
-  for (const [eventName, handlerName] of UPDATE_EVENT_HANDLER_MAP) {
-    const handler = handlers[handlerName];
-    void listen(eventName, handler)
-      .then((unlisten) => {
-        if (isDisposed()) {
-          unlisten?.();
-          return;
-        }
-        unlisteners.push(unlisten);
-      })
-      .catch((error) => {
-        console.warn(`[Updater] Failed to register ${eventName} listener:`, error);
-      });
+  if (!versionLabel) {
+    return null;
   }
 
-  return () => {
-    unlisteners.forEach((unlisten) => unlisten?.());
-  };
+  return (
+    <p className="truncate text-xs text-zinc-400">
+      {versionLabel}
+    </p>
+  );
+}
+
+export function DesktopStartupUpdateGate() {
+  const { t } = useTranslation();
+  const {
+    isDesktop,
+    phase,
+    progress,
+    update,
+    errorMsg,
+    showStartupGate,
+  } = useDesktopUpdateState();
+
+  if (!isDesktop || !showStartupGate) {
+    return null;
+  }
+
+  const config = PHASE_CONFIG[phase] || PHASE_CONFIG.checking;
+  const PhaseIcon = config.icon;
+  const resolvedMessage = phase === "error"
+    ? (errorMsg || t("updater.unknownError"))
+    : getUpdatePhaseLabel(phase, t);
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.16),transparent_35%),linear-gradient(180deg,#040508,#07080c_42%,#05060a_100%)]"
+      data-testid="desktop-update-startup-gate"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="mx-6 w-full max-w-md rounded-[32px] border border-white/10 bg-zinc-950/88 p-8 text-white shadow-[0_30px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+        <div className="mb-6 flex items-center gap-4">
+          <img
+            src="/favicon-192x192.png"
+            alt="Singra Vox"
+            className="h-14 w-14 rounded-2xl"
+            style={{ filter: "drop-shadow(0 0 24px rgba(34,211,238,0.22))" }}
+          />
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300/80">
+              Singra Vox
+            </p>
+            <h2 className="mt-1 text-2xl font-bold" style={{ fontFamily: "Manrope" }}>
+              {t("updater.startupTitle")}
+            </h2>
+          </div>
+        </div>
+
+        <p className="text-sm text-zinc-400">{t("updater.startupSubtitle")}</p>
+
+        <div className="mt-8 flex items-start gap-4 rounded-3xl border border-white/8 bg-white/[0.03] p-4">
+          <PhaseIcon size={22} weight="bold" className={config.iconClass} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-white">{resolvedMessage}</p>
+            <VersionLabel update={update} />
+            {phase === "downloading" && <UpdateProgressBar progress={progress} />}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function UpdateNotification() {
   const { t } = useTranslation();
-  const [phase, setPhase] = useState("idle");
-  const [update, setUpdate] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [errorMsg, setErrorMsg] = useState(null);
-  const downloadedRef = useRef(0);
-  const fadeTimerRef = useRef(null);
-  const translateRef = useRef(t);
+  const {
+    isDesktop,
+    phase,
+    progress,
+    update,
+    errorMsg,
+    showStartupGate,
+  } = useDesktopUpdateState();
 
-  useEffect(() => {
-    translateRef.current = t;
-  }, [t]);
-
-  const fadeToIdle = useCallback((delayMs) => {
-    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-    fadeTimerRef.current = setTimeout(() => {
-      setPhase("idle");
-    }, delayMs);
-  }, []);
-
-  useEffect(() => {
-    if (!isDesktopApp()) return undefined;
-    let disposed = false;
-
-    const cleanupListeners = registerUpdateListeners({
-      listen: listenTauri,
-      isDisposed: () => disposed,
-      handlers: {
-        onChecking: (event) => {
-          setPhase("checking");
-          setUpdate((prev) => prev || { currentVersion: event.payload?.currentVersion });
-          setErrorMsg(null);
-          downloadedRef.current = 0;
-          setProgress(0);
-          if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-        },
-        onAvailable: (event) => {
-          if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-          setUpdate(event.payload);
-          setPhase("available");
-        },
-        onNotAvailable: () => {
-          setPhase("up-to-date");
-          fadeToIdle(UP_TO_DATE_DISPLAY_MS);
-        },
-        onDownloadProgress: (event) => {
-          const { chunkLength, contentLength } = event.payload;
-          if (contentLength) {
-            downloadedRef.current += chunkLength;
-            setProgress(Math.min(99, Math.round((downloadedRef.current / contentLength) * 100)));
-          }
-          setPhase("downloading");
-        },
-        onInstallStarted: () => {
-          setProgress(100);
-          setPhase("installing");
-        },
-        onError: (event) => {
-          const message = event.payload?.error || translateRef.current("updater.unknownError");
-          console.warn("[Updater] Fehler:", message);
-          setErrorMsg(message);
-          setPhase("error");
-          fadeToIdle(ERROR_DISPLAY_MS);
-        },
-      },
-    });
-
-    return () => {
-      disposed = true;
-      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-      cleanupListeners();
-    };
-  }, [fadeToIdle]);
-
-  if (!isDesktopApp() || phase === "idle") return null;
+  if (!isDesktop || showStartupGate || phase === "idle") {
+    return null;
+  }
 
   const config = PHASE_CONFIG[phase];
-  if (!config) return null;
+  if (!config) {
+    return null;
+  }
 
   const PhaseIcon = config.icon;
+  const resolvedMessage = phase === "error"
+    ? (errorMsg || t("updater.unknownError"))
+    : getUpdatePhaseLabel(phase, t);
+  const versionUpdate = phase === "checking" || phase === "up-to-date" || phase === "error"
+    ? null
+    : update;
 
   return (
     <div
-      className={`fixed top-0 left-0 right-0 z-[100] border-b backdrop-blur-xl transition-all duration-300 ${config.bg}`}
+      className={`fixed left-0 right-0 top-0 z-[100] border-b backdrop-blur-xl transition-all duration-300 ${config.bg}`}
       data-testid="update-notification"
       role="status"
       aria-live="polite"
     >
       <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-2.5">
         <PhaseIcon size={18} weight="bold" className={config.iconClass} />
-
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-white">
-            {phase === "error" ? errorMsg : getUpdatePhaseLabel(phase, t)}
-          </p>
-
-          {phase !== "checking" && phase !== "up-to-date" && phase !== "error" && formatUpdateVersion(update) && (
-            <p className="truncate text-xs text-zinc-400">
-              {formatUpdateVersion(update)}
-            </p>
-          )}
-
-          {phase === "downloading" && (
-            <div className="mt-1.5 flex items-center gap-2">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-700/60">
-                <div
-                  className="h-full rounded-full bg-cyan-400 transition-all duration-300 ease-out"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <span className="w-8 text-right text-xs tabular-nums text-zinc-400">{progress}%</span>
-            </div>
-          )}
+          <p className="text-sm font-medium text-white">{resolvedMessage}</p>
+          <VersionLabel update={versionUpdate} />
+          {phase === "downloading" && <UpdateProgressBar progress={progress} compact />}
         </div>
       </div>
     </div>
   );
 }
+
+export {
+  DesktopUpdateProvider,
+  UPDATE_EVENT_NAMES,
+  formatUpdateVersion,
+  getUpdatePhaseLabel,
+  registerUpdateListeners,
+};

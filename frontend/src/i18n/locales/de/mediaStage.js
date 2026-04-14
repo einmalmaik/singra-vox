@@ -8,7 +8,7 @@ const section = {
   "previewPausedHint": "Der Stream läuft für andere Zuschauer weiter. Nur die lokale Vorschau wird im Hintergrund pausiert.",
   "enterFullscreen": "Vollbild",
   "exitFullscreen": "Vollbild verlassen",
-  "unavailable": "Der Stream ist derzeit nicht verfügbar."
+  "unavailable": "Dieser Stream ist derzeit nicht verfügbar."
 };
 
 export default section;

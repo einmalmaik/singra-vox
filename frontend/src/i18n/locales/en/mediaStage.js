@@ -8,7 +8,7 @@ const section = {
   "previewPausedHint": "The stream keeps running for other viewers. Only the local preview is paused in the background.",
   "enterFullscreen": "Fullscreen",
   "exitFullscreen": "Exit fullscreen",
-  "unavailable": "The stream is currently unavailable."
+  "unavailable": "This stream is currently unavailable."
 };
 
 export default section;

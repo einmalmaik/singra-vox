@@ -12,7 +12,6 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { DesktopTower, LinkSimple } from "@phosphor-icons/react";
 import { useRuntime } from "@/contexts/RuntimeContext";
-import { saveInstance } from "@/lib/instanceManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,12 +34,6 @@ export default function ConnectPage() {
 
     try {
       const { status } = await connectToInstance(instanceUrl);
-      // Instanz automatisch in gespeicherten Instanzen speichern
-      try {
-        const url = instanceUrl.trim().replace(/\/+$/, "");
-        const name = new URL(url).hostname;
-        saveInstance({ name, url });
-      } catch { /* URL ungültig – kein Absturz */ }
       navigate(status?.initialized ? "/login" : "/setup");
     } catch (err) {
       setError(formatAppError(t, err, { fallbackKey: "connect.couldNotReach" }));
@@ -59,10 +52,9 @@ export default function ConnectPage() {
       data-testid="connect-page"
     >
       <div className="w-full max-w-md">
-        {/* Header */}
-        <div className="flex items-center gap-4 mb-8">
+        <div className="mb-8 flex items-center gap-4">
           <div
-            className="flex items-center justify-center w-12 h-12 rounded-2xl"
+            className="flex h-12 w-12 items-center justify-center rounded-2xl"
             style={{
               background: "rgba(34,211,238,0.12)",
               border: "1px solid rgba(34,211,238,0.22)",
@@ -78,33 +70,30 @@ export default function ConnectPage() {
             >
               {t("connect.title")}
             </h1>
-            <p className="text-zinc-500 text-sm mt-0.5">{t("connect.subtitle")}</p>
+            <p className="mt-0.5 text-sm text-zinc-500">{t("connect.subtitle")}</p>
           </div>
         </div>
 
-        {/* Card */}
-        <div className="workspace-card p-6 space-y-4">
+        <div className="workspace-card space-y-4 p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <LocalizedErrorBanner
               message={error}
-              className="rounded-xl text-red-300 bg-red-950/30 border border-red-800/30 px-4 py-3 text-sm"
+              className="rounded-xl border border-red-800/30 bg-red-950/30 px-4 py-3 text-sm text-red-300"
               data-testid="connect-error"
             />
 
-            {/* URL Input */}
             <div className="space-y-1.5">
               <Label className="workspace-section-label">{t("connect.instanceUrl")}</Label>
               <Input
                 value={instanceUrl}
-                onChange={(e) => setInstanceUrl(e.target.value)}
+                onChange={(event) => setInstanceUrl(event.target.value)}
                 placeholder={t("connect.instanceUrlPlaceholder")}
                 required
                 data-testid="instance-url-input"
-                className="bg-zinc-900/70 border-white/10 focus:border-cyan-500/50 text-white placeholder:text-zinc-600 rounded-xl h-10"
+                className="h-10 rounded-xl border-white/10 bg-zinc-900/70 text-white placeholder:text-zinc-600 focus:border-cyan-500/50"
               />
             </div>
 
-            {/* Help Text */}
             <div
               className="flex items-start gap-2.5 rounded-xl px-4 py-3 text-xs text-zinc-400"
               style={{
@@ -112,16 +101,15 @@ export default function ConnectPage() {
                 border: "1px solid rgba(34,211,238,0.15)",
               }}
             >
-              <LinkSimple size={15} className="text-cyan-400 shrink-0 mt-0.5" />
+              <LinkSimple size={15} className="mt-0.5 shrink-0 text-cyan-400" />
               <span>{t("connect.helpText")}</span>
             </div>
 
-            {/* Submit */}
             <Button
               type="submit"
               disabled={loading}
               data-testid="connect-submit-button"
-              className="w-full font-semibold h-11 rounded-xl text-sm transition-all duration-200"
+              className="h-11 w-full rounded-xl text-sm font-semibold transition-all duration-200"
               style={{
                 background: loading
                   ? "rgba(34,211,238,0.3)"
@@ -138,7 +126,7 @@ export default function ConnectPage() {
       </div>
       <button
         onClick={() => openExternalUrl("https://github.com/einmalmaik/singra-vox")}
-        className="fixed bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400 bg-transparent border-0 cursor-pointer"
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 cursor-pointer border-0 bg-transparent text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
         data-testid="repo-footer-link"
       >
         Singra Vox &middot; Open Source on GitHub
