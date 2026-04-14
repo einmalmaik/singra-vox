@@ -364,14 +364,21 @@ export default function VoiceMediaStage({
   }, [documentHidden, open, playbackRecoveryPolicy, source, trackAvailabilityKey, trackRefId, videoElement, voiceEngineRef]);
 
   const isScreenShare = source === "screen_share";
+  const immersiveDesktopFullscreen = Boolean(config?.isDesktop && fullscreenActive);
   const title = isScreenShare
     ? t("mediaStage.screenShareTitle", { name: participantName || t("common.unknown") })
     : t("mediaStage.cameraTitle", { name: participantName || t("common.unknown") });
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => (!nextOpen ? onClose?.() : null)}>
-      <DialogContent className="workspace-panel-solid max-w-5xl text-white">
-        <DialogHeader>
+      <DialogContent
+        className={immersiveDesktopFullscreen
+          ? "left-0 top-0 h-screen w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none border-0 bg-black p-0 text-white shadow-none"
+          : "workspace-panel-solid max-w-5xl text-white"}
+        data-testid="media-stage-dialog"
+      >
+        {!immersiveDesktopFullscreen && (
+          <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg font-bold" style={{ fontFamily: "Manrope" }}>
             {isScreenShare ? <MonitorPlay size={18} /> : <VideoCamera size={18} />}
             {title}
@@ -381,10 +388,17 @@ export default function VoiceMediaStage({
               ? t("mediaStage.screenShareTitle", { name: participantName || t("common.unknown") })
               : t("mediaStage.cameraTitle", { name: participantName || t("common.unknown") })}
           </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div ref={stageSurfaceRef} className="relative overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80">
-            <div className="absolute right-4 top-4 z-20">
+          </DialogHeader>
+        )}
+        <div className={immersiveDesktopFullscreen ? "h-screen w-screen" : "space-y-3"}>
+          <div
+            ref={stageSurfaceRef}
+            className={immersiveDesktopFullscreen
+              ? "relative h-screen w-screen overflow-hidden bg-black"
+              : "relative overflow-hidden rounded-[28px] border border-white/10 bg-zinc-950/80"}
+            data-testid="media-stage-surface"
+          >
+            <div className="absolute right-16 top-4 z-20">
               <button
                 type="button"
                 onClick={() => void toggleFullscreen()}
@@ -392,12 +406,16 @@ export default function VoiceMediaStage({
                 data-testid="media-stage-fullscreen"
               >
                 {fullscreenActive
-                  ? t("mediaStage.exitFullscreen", { defaultValue: "Vollbild verlassen" })
-                  : t("mediaStage.enterFullscreen", { defaultValue: "Vollbild" })}
+                  ? t("mediaStage.exitFullscreen")
+                  : t("mediaStage.enterFullscreen")}
               </button>
             </div>
             {documentHidden ? (
-              <div className="flex h-[70vh] w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_35%),linear-gradient(180deg,#05070b,#09090b)] px-6 text-center text-sm text-zinc-400">
+              <div
+                className={immersiveDesktopFullscreen
+                  ? "flex h-screen w-screen items-center justify-center bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_35%),linear-gradient(180deg,#05070b,#09090b)] px-6 text-center text-sm text-zinc-400"
+                  : "flex h-[70vh] w-full items-center justify-center bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_35%),linear-gradient(180deg,#05070b,#09090b)] px-6 text-center text-sm text-zinc-400"}
+              >
                 {t("mediaStage.previewPaused")}
               </div>
             ) : (
@@ -409,9 +427,7 @@ export default function VoiceMediaStage({
                   >
                     <div className="flex flex-col items-center gap-3">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-                      <p className="text-sm text-zinc-400">
-                        {t("mediaStage.loading", { defaultValue: "Stream wird geladen..." })}
-                      </p>
+                      <p className="text-sm text-zinc-400">{t("mediaStage.loading")}</p>
                     </div>
                   </div>
                 )}
@@ -435,17 +451,21 @@ export default function VoiceMediaStage({
                   autoPlay
                   playsInline
                   controls={false}
-                  className="h-[70vh] w-full bg-black object-contain"
+                  className={immersiveDesktopFullscreen
+                    ? "h-screen w-screen bg-black object-contain"
+                    : "h-[70vh] w-full bg-black object-contain"}
                   data-testid="media-stage-video"
                 />
               </>
             )}
           </div>
-          <p className="text-xs text-zinc-500">
-            {documentHidden
-              ? t("mediaStage.previewPausedHint")
-              : (config?.isDesktop ? t("mediaStage.desktopHint") : t("mediaStage.webHint"))}
-          </p>
+          {!immersiveDesktopFullscreen && (
+            <p className="text-xs text-zinc-500">
+              {documentHidden
+                ? t("mediaStage.previewPausedHint")
+                : (config?.isDesktop ? t("mediaStage.desktopHint") : t("mediaStage.webHint"))}
+            </p>
+          )}
         </div>
       </DialogContent>
     </Dialog>

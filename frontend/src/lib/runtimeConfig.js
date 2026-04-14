@@ -8,12 +8,16 @@
  * (at your option) any later version.
  */
 import { isDesktopApp } from "@/lib/desktop";
-
-const INSTANCE_URL_STORAGE_KEY = "singravox.instance_url";
-
-export function normalizeInstanceUrl(value) {
-  return (value || "").trim().replace(/\/+$/, "");
-}
+import {
+  clearActiveInstanceUrl,
+  getActiveInstanceUrl,
+  getReconnectInstanceUrl,
+  normalizeInstanceUrl,
+  rememberConnectedInstance,
+  requiresManualInstanceSelection,
+  setActiveInstanceUrl,
+  setManualInstanceSelectionRequired,
+} from "./instanceManager";
 
 function buildConfig(instanceUrl, platform) {
   const normalizedUrl = normalizeInstanceUrl(instanceUrl);
@@ -31,7 +35,14 @@ function buildConfig(instanceUrl, platform) {
 
 export async function loadRuntimeConfig() {
   if (isDesktopApp()) {
-    const instanceUrl = normalizeInstanceUrl(window.localStorage.getItem(INSTANCE_URL_STORAGE_KEY));
+    let instanceUrl = getActiveInstanceUrl();
+    if (!instanceUrl && !requiresManualInstanceSelection()) {
+      instanceUrl = getReconnectInstanceUrl();
+      if (instanceUrl) {
+        setActiveInstanceUrl(instanceUrl);
+        setManualInstanceSelectionRequired(false);
+      }
+    }
     return buildConfig(instanceUrl, "desktop");
   }
   return buildConfig(window.location.origin, "web");
@@ -39,11 +50,12 @@ export async function loadRuntimeConfig() {
 
 export async function saveDesktopInstanceUrl(instanceUrl) {
   const normalizedUrl = normalizeInstanceUrl(instanceUrl);
-  window.localStorage.setItem(INSTANCE_URL_STORAGE_KEY, normalizedUrl);
+  rememberConnectedInstance(normalizedUrl);
   return buildConfig(normalizedUrl, "desktop");
 }
 
 export async function clearDesktopInstanceUrl() {
-  window.localStorage.removeItem(INSTANCE_URL_STORAGE_KEY);
+  clearActiveInstanceUrl();
+  setManualInstanceSelectionRequired(true);
 }
 

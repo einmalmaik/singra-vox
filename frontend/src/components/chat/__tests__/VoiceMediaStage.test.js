@@ -434,7 +434,9 @@ describe("VoiceMediaStage", () => {
       desktopFullscreenListener?.(true);
     });
 
-    expect(container.textContent).toContain("Vollbild verlassen");
+    expect(container.textContent).toContain("mediaStage.exitFullscreen");
+    expect(container.querySelector("[data-testid='media-stage-dialog']").className).toContain("h-screen");
+    expect(container.querySelector("[data-testid='media-stage-video']").className).toContain("h-screen");
 
     await act(async () => {
       root.render(

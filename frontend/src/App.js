@@ -26,7 +26,11 @@ import MainLayout from "@/pages/MainLayout";
 import SvidRegisterPage from "@/pages/SvidRegisterPage";
 import SvidSetupPage from "@/pages/SvidSetupPage";
 import DesktopInviteBridge from "@/components/invites/DesktopInviteBridge";
-import { UpdateNotification } from "@/components/desktop/UpdateNotification";
+import {
+  DesktopStartupUpdateGate,
+  DesktopUpdateProvider,
+  UpdateNotification,
+} from "@/components/desktop/UpdateNotification";
 import "@/App.css";
 
 function LoadingScreen({ label }) {
@@ -118,7 +122,7 @@ function AppRoutes() {
 
 function AppShell() {
   return (
-    <>
+    <DesktopUpdateProvider>
       <Toaster
         theme="dark"
         position="top-right"
@@ -136,10 +140,11 @@ function AppShell() {
           },
         }}
       />
+      <DesktopStartupUpdateGate />
       <DesktopInviteBridge />
       <UpdateNotification />
       <AppRoutes />
-    </>
+    </DesktopUpdateProvider>
   );
 }
 
