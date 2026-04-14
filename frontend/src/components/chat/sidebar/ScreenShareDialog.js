@@ -88,7 +88,7 @@ export default function ScreenShareDialog({
         {screenShareAudio && (
           <div className="space-y-2 pt-1 border-t border-white/5">
             <div className="flex items-center justify-between text-xs text-zinc-400">
-              <span>{t("channel.shareAudioVolume", { defaultValue: "Audio-Lautstärke" })}</span>
+              <span>{t("channel.shareAudioVolume")}</span>
               <span>{screenShareAudioVolume}%</span>
             </div>
             <Slider

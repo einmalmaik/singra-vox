@@ -40,7 +40,7 @@ export default function ChannelSidebarHeader({
             </>
           ) : (
             <ContextMenuItem disabled className="text-[#71717A] focus:text-[#71717A] focus:bg-transparent cursor-default">
-              {t("common.noActionsAvailable", { defaultValue: "No actions available" })}
+              {t("common.noActionsAvailable")}
             </ContextMenuItem>
           )}
         </ContextMenuContent>

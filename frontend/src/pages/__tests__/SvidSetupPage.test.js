@@ -48,6 +48,12 @@ const mockFlowState = {
   },
 };
 
+const TRANSLATIONS = {
+  "svid.setupTitle": "Singra-ID einrichten",
+  "svid.setupSuccessTitle": "Singra-ID ist eingerichtet",
+  "svid.setupFinalizeRetry": "Verknüpfung erneut versuchen",
+};
+
 jest.mock("react-router-dom", () => ({
   __esModule: true,
   Navigate: () => null,
@@ -55,7 +61,7 @@ jest.mock("react-router-dom", () => ({
 }), { virtual: true });
 
 jest.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key, options = {}) => options.defaultValue || key }),
+  useTranslation: () => ({ t: (key) => TRANSLATIONS[key] || key }),
 }), { virtual: true });
 
 jest.mock("@/components/ui/button", () => ({

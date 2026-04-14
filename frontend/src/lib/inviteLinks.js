@@ -10,6 +10,8 @@
 const PENDING_INVITE_STORAGE_KEY = "singravox.pending_invite";
 const PREFERRED_SERVER_STORAGE_KEY = "singravox.preferred_server_id";
 const AUTO_OPEN_GUARD_PREFIX = "singravox.invite_auto_open.";
+const PENDING_INVITE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const INVITE_META_SEPARATOR = " · ";
 
 export const INVITE_EXPIRY_OPTIONS = [
   { value: "0", label: "Never" },
@@ -144,10 +146,20 @@ export function loadPendingInvite() {
   try {
     const rawValue = storage.getItem(PENDING_INVITE_STORAGE_KEY);
     if (!rawValue) return null;
+
     const parsed = JSON.parse(rawValue);
     const code = normalizeInviteCode(parsed?.code);
-    return code ? { code } : null;
+    const savedAt = Number(parsed?.savedAt);
+    const isFresh = Number.isFinite(savedAt) && (Date.now() - savedAt) <= PENDING_INVITE_MAX_AGE_MS;
+
+    if (!code || !isFresh) {
+      storage.removeItem(PENDING_INVITE_STORAGE_KEY);
+      return null;
+    }
+
+    return { code };
   } catch {
+    storage.removeItem(PENDING_INVITE_STORAGE_KEY);
     return null;
   }
 }
@@ -212,7 +224,7 @@ export function describeInviteUsage(maxUses, uses = 0) {
 
   const remainingUses = Math.max(parsedMaxUses - parsedUses, 0);
   const remainingLabel = remainingUses === 1 ? "1 use left" : `${remainingUses} uses left`;
-  return `${parsedMaxUses} max uses · ${remainingLabel}`;
+  return `${parsedMaxUses} max uses${INVITE_META_SEPARATOR}${remainingLabel}`;
 }
 
 export function describeInviteExpiry(expiresAt) {
@@ -236,7 +248,7 @@ export function formatInviteUsage(t, maxUses, uses = 0) {
   }
 
   const remainingUses = Math.max(parsedMaxUses - parsedUses, 0);
-  return `${t("inviteGenerator.maxUsesCount", { count: parsedMaxUses })} · ${t("inviteGenerator.usesLeft", { count: remainingUses })}`;
+  return `${t("inviteGenerator.maxUsesCount", { count: parsedMaxUses })}${INVITE_META_SEPARATOR}${t("inviteGenerator.usesLeft", { count: remainingUses })}`;
 }
 
 export function formatInviteExpiry(t, expiresAt) {

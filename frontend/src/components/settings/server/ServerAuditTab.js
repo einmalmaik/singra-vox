@@ -38,7 +38,7 @@ export default function ServerAuditTab({ server }) {
                 {t("serverSettings.auditTitle")}
               </h3>
               <p className="mt-1 text-sm text-zinc-500">
-                {t("serverSettings.auditDescription", { defaultValue: "Protokoll aller administrativen Aktionen auf diesem Server." })}
+                {t("serverSettings.auditDescription")}
               </p>
             </div>
             <Button
@@ -47,7 +47,7 @@ export default function ServerAuditTab({ server }) {
               className="h-9 rounded-xl border-white/10 bg-transparent text-zinc-300 hover:bg-white/5 text-xs px-3 transition-colors shrink-0"
               data-testid="refresh-audit-btn"
             >
-              {t("server.refresh", { defaultValue: "Aktualisieren" })}
+              {t("server.refresh")}
             </Button>
           </div>
         </div>

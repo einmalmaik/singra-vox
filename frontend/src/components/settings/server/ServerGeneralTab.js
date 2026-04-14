@@ -99,7 +99,7 @@ export default function ServerGeneralTab({
               {t("server.general")}
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
-              {t("serverSettings.generalHelp", { defaultValue: "Grundlegende Server-Einstellungen bearbeiten." })}
+              {t("serverSettings.generalHelp")}
             </p>
           </div>
         </div>
