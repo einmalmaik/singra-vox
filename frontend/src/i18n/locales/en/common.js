@@ -1,0 +1,30 @@
+const section = {
+  "notNow": "Not now",
+  "settings": "Settings",
+  "loading": "Loading...",
+  "save": "Save",
+  "cancel": "Cancel",
+  "create": "Create",
+  "delete": "Delete",
+  "edit": "Edit",
+  "rename": "Rename",
+  "refresh": "Refresh",
+  "close": "Close",
+  "send": "Send",
+  "update": "Update",
+  "description": "Description",
+  "name": "Name",
+  "color": "Color",
+  "type": "Type",
+  "category": "Category",
+  "noCategory": "No Category",
+  "unknown": "Unknown",
+  "system": "System",
+  "reason": "Reason",
+  "selected": "Selected",
+  "ready": "Ready",
+  "pending": "Pending",
+  "noActionsAvailable": "No actions available"
+};
+
+export default section;

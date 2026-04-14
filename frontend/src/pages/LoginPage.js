@@ -25,9 +25,11 @@ import { toast } from "sonner";
 import { clearPendingInvite, loadPendingInvite, rememberPreferredServer } from "@/lib/inviteLinks";
 import { rememberPendingVerification } from "@/lib/pendingVerification";
 import { clearDesktopInstanceUrl } from "@/lib/runtimeConfig";
+import buildSvidLoginCopy from "@/pages/svid/loginCopy";
 
 export default function LoginPage() {
   const { t } = useTranslation();
+  const svidCopy = useMemo(() => buildSvidLoginCopy(t), [t]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -36,6 +38,25 @@ export default function LoginPage() {
   const { setupStatus, config, disconnectFromInstance } = useRuntime();
   const navigate = useNavigate();
   const pendingInvite = useMemo(() => loadPendingInvite(), []);
+
+  const continuePendingInvite = async () => {
+    if (!pendingInvite?.code) {
+      navigate("/", { replace: true });
+      return;
+    }
+
+    try {
+      const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
+      clearPendingInvite();
+      rememberPreferredServer(inviteResponse.data.server_id);
+      toast.success(t("invite.joinedServer"));
+      navigate("/", { replace: true });
+    } catch (inviteError) {
+      clearPendingInvite();
+      toast.error(formatAppError(t, inviteError, { fallbackKey: "invite.acceptFailed" }));
+      navigate(`/invite/${pendingInvite.code}`, { replace: true, state: { skipAutoAccept: true } });
+    }
+  };
 
   // ── Singra Vox ID login state ────────────────────────────────────────────
   const [showSvidLogin, setShowSvidLogin] = useState(false);
@@ -74,19 +95,8 @@ export default function LoginPage() {
       }
 
       if (pendingInvite?.code) {
-        try {
-          const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
-          clearPendingInvite();
-          rememberPreferredServer(inviteResponse.data.server_id);
-          toast.success(t("invite.joinedServer"));
-          navigate("/", { replace: true });
-          return;
-        } catch (inviteError) {
-          clearPendingInvite();
-          toast.error(formatAppError(t, inviteError, { fallbackKey: "invite.acceptFailed" }));
-          navigate(`/invite/${pendingInvite.code}`, { replace: true, state: { skipAutoAccept: true } });
-          return;
-        }
+        await continuePendingInvite();
+        return;
       }
       navigate("/");
     } catch (err) {
@@ -113,19 +123,8 @@ export default function LoginPage() {
 
       // Handle pending invite after successful 2FA
       if (pendingInvite?.code) {
-        try {
-          const inviteResponse = await api.post(`/invites/${pendingInvite.code}/accept`);
-          clearPendingInvite();
-          rememberPreferredServer(inviteResponse.data.server_id);
-          toast.success(t("invite.joinedServer"));
-          navigate("/", { replace: true });
-          return;
-        } catch (inviteError) {
-          clearPendingInvite();
-          toast.error(formatAppError(t, inviteError, { fallbackKey: "invite.acceptFailed" }));
-          navigate(`/invite/${pendingInvite.code}`, { replace: true, state: { skipAutoAccept: true } });
-          return;
-        }
+        await continuePendingInvite();
+        return;
       }
       navigate("/");
     } catch (err) {
@@ -161,9 +160,9 @@ export default function LoginPage() {
     } catch (err) {
       const detail = err.response?.data?.detail;
       if (typeof detail === "object" && detail?.code === "email_verification_required") {
-        setSvidError("Please verify your email address first.");
+        setSvidError(svidCopy.verifyEmailFirst);
       } else {
-        setSvidError(typeof detail === "string" ? detail : "Login failed. Please check your credentials.");
+        setSvidError(typeof detail === "string" ? detail : svidCopy.loginFailed);
       }
     } finally {
       setSvidLoading(false);
@@ -183,7 +182,7 @@ export default function LoginPage() {
       await loginWithSvid(res2fa.data.access_token);
       navigate("/");
     } catch (err) {
-      setSvidError(err.response?.data?.detail || "Invalid 2FA code.");
+      setSvidError(err.response?.data?.detail || svidCopy.invalid2fa);
     } finally {
       setSvidLoading(false);
     }
@@ -193,18 +192,18 @@ export default function LoginPage() {
   if (requires2FA) {
     return (
       <AuthShell
-        eyebrow="TWO-FACTOR"
-        title={t("svid.twoFactorTitle")}
-        subtitle={t("svid.twoFactorSubtitle")}
+        eyebrow={t("svid.twoFactorEyebrow")}
+        title={svidCopy.twoFactorTitle}
+        subtitle={svidCopy.twoFactorSubtitle}
         icon={Fingerprint}
         sideTitle={setupStatus?.instance_name || "Singra Vox"}
-        sideCopy="Privacy-first communication. Self-hosted. No telemetry."
+        sideCopy={t("svid.twoFactorSideCopy")}
       >
         <div data-testid="svid-2fa-page">
           <form onSubmit={handle2FASubmit} className="space-y-5">
             <LocalizedErrorBanner message={svidError} className="text-red-200" />
             <div className="space-y-2">
-              <Label htmlFor="totp" className="workspace-section-label">{t("svid.authenticatorCode")}</Label>
+              <Label htmlFor="totp" className="workspace-section-label">{svidCopy.authenticatorCode}</Label>
               <Input
                 id="totp"
                 type="text"
@@ -219,7 +218,7 @@ export default function LoginPage() {
                 data-testid="svid-2fa-input"
                 className="h-14 rounded-2xl border-white/10 bg-zinc-950/70 text-center text-2xl font-mono tracking-[0.3em] text-white placeholder:text-zinc-600 focus:border-cyan-400/50 focus:ring-cyan-400/40"
               />
-              <p className="text-xs text-zinc-500 mt-1">{ t("svid.backupCodeHint")}</p>
+              <p className="text-xs text-zinc-500 mt-1">{svidCopy.backupCodeHint}</p>
             </div>
             <Button
               type="submit"
@@ -227,14 +226,14 @@ export default function LoginPage() {
               data-testid="svid-2fa-submit"
               className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300"
             >
-              {svidLoading ? t("svid.verifying") : t("svid.verify")}
+              {svidLoading ? svidCopy.verifying : svidCopy.verify}
             </Button>
             <button
               type="button"
               onClick={() => { setRequires2FA(false); setPendingToken(""); setTotpCode(""); }}
               className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors duration-150 pt-1"
             >
-              <ArrowLeft size={12} /> Back to login
+              <ArrowLeft size={12} /> {svidCopy.backToLogin}
             </button>
           </form>
         </div>
@@ -246,12 +245,12 @@ export default function LoginPage() {
   if (showSvidLogin) {
     return (
       <AuthShell
-        eyebrow="SINGRA VOX ID"
+        eyebrow={t("svid.loginEyebrow")}
         title={t("svid.signInWithSvid")}
         subtitle={t("svid.svidLoginSubtitle")}
         icon={Fingerprint}
         sideTitle={setupStatus?.instance_name || "Singra Vox"}
-        sideCopy="One account, all instances. Privacy-first."
+        sideCopy={t("svid.loginSideCopy")}
       >
         <div data-testid="svid-login-page">
           <form onSubmit={handleSvidLogin} className="space-y-5">
@@ -305,7 +304,7 @@ export default function LoginPage() {
               onClick={() => { setShowSvidLogin(false); setSvidError(""); }}
               className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors duration-150 pt-1"
             >
-              <ArrowLeft size={12} /> Back to instance login
+              <ArrowLeft size={12} /> {svidCopy.backToInstanceLogin}
             </button>
           </form>
         </div>
@@ -319,9 +318,9 @@ export default function LoginPage() {
   if (localRequires2FA) {
     return (
       <AuthShell
-        eyebrow="Two-Factor Authentication"
+        eyebrow={t("auth.enter2FACode")}
         title={t("auth.enter2FACode")}
-        subtitle="Enter the 6-digit code from your authenticator app."
+        subtitle={t("auth.enter2FASubtitle")}
         sideTitle={setupStatus?.instance_name || "Singra Vox"}
       >
         <div className="space-y-5" data-testid="local-2fa-page">
@@ -348,11 +347,13 @@ export default function LoginPage() {
             data-testid="local-2fa-submit-btn"
             className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 shadow-[0_16px_40px_rgba(34,211,238,0.28)] transition hover:bg-cyan-300"
           >
-            {loading ? t("auth.verifying") : t("auth.verify")}
+            {loading
+              ? t("auth.verifyingButton")
+              : t("auth.verifyButton")}
           </Button>
 
           <p className="text-xs text-center text-zinc-500">
-            You can also use a backup code.
+            {t("auth.backupCodeHint")}
           </p>
 
           <button
@@ -360,7 +361,7 @@ export default function LoginPage() {
             onClick={() => { setLocalRequires2FA(false); setLocalPendingUserId(""); setLocalTotpCode(""); setError(""); }}
             className="flex items-center justify-center gap-1.5 w-full text-xs text-zinc-500 hover:text-zinc-300 transition-colors duration-150 pt-1"
           >
-            <ArrowLeft size={12} /> Back to login
+            <ArrowLeft size={12} /> {t("auth.backToLogin")}
           </button>
         </div>
       </AuthShell>

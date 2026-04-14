@@ -427,7 +427,9 @@ export default function VoiceMediaStage({
                   >
                     <div className="flex flex-col items-center gap-3">
                       <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-                      <p className="text-sm text-zinc-400">{t("mediaStage.loading")}</p>
+                      <p className="text-sm text-zinc-400">
+                        {t("mediaStage.loading")}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -439,9 +441,7 @@ export default function VoiceMediaStage({
                     <div className="flex max-w-sm flex-col items-center gap-3 text-center">
                       <MonitorPlay size={32} className="text-zinc-500" />
                       <p className="text-sm text-zinc-400">
-                        {t("mediaStage.unavailable", {
-                          defaultValue: "Stream ist derzeit nicht verfügbar.",
-                        })}
+                        {t("mediaStage.unavailable")}
                       </p>
                     </div>
                   </div>

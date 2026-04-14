@@ -1,0 +1,30 @@
+const section = {
+  "loadServerFailed": "Server konnte nicht geladen werden.",
+  "loadServersFailed": "Server konnten nicht geladen werden.",
+  "loadOlderMessages": "Ältere Nachrichten laden",
+  "loading": "Wird geladen...",
+  "selectChannel": "Wähle einen Kanal, um zu chatten",
+  "welcomeToChannel": "Willkommen in #{{name}}",
+  "startOfChannel": "Das ist der Anfang dieses Kanals.",
+  "edited": "(bearbeitet)",
+  "originalUnavailable": "Ursprüngliche Nachricht nicht verfügbar",
+  "react": "Reagieren",
+  "replyInThread": "Im Thread antworten",
+  "setTopic": "Thema festlegen...",
+  "pinned": "Angepinnt",
+  "pinnedMessages": "Angepinnte Nachrichten",
+  "topicUpdated": "Thema aktualisiert.",
+  "topicUpdateFailed": "Thema konnte nicht aktualisiert werden.",
+  "messagePinned": "Nachricht angepinnt.",
+  "pinFailed": "Nachricht konnte nicht angepinnt werden.",
+  "sendFailed": "Nachricht konnte nicht gesendet werden.",
+  "editFailed": "Nachricht konnte nicht bearbeitet werden.",
+  "deleteFailed": "Nachricht konnte nicht gelöscht werden.",
+  "fileTooLarge": "Datei ist zu groß (max. 10 MB).",
+  "uploadFailed": "Upload fehlgeschlagen.",
+  "typing_one": "{{names}} tippt...",
+  "typing_other": "{{names}} tippen...",
+  "messagePlaceholder": "Nachricht an #{{name}}"
+};
+
+export default section;

@@ -72,7 +72,7 @@ export default function ServerMembersTab({ server, members, roles, capabilities 
               {t("server.members")}
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
-              {members?.length || 0} {t("serverSettings.membersCount", { defaultValue: "Mitglieder" })}
+              {members?.length || 0} {t("serverSettings.membersCount")}
             </p>
           </div>
         </div>

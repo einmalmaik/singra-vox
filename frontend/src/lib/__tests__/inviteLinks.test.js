@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Singra Vox - Privacy-first communication platform
  * Copyright (C) 2026  Maik Haedrich
  *
@@ -10,9 +10,12 @@
 import {
   formatInviteExpiry,
   formatInviteUsage,
+  loadPendingInvite,
   normalizeInstanceUrl,
   parseDesktopInviteLink,
 } from "../inviteLinks";
+
+const PENDING_INVITE_STORAGE_KEY = "singravox.pending_invite";
 
 function translate(key, params = {}) {
   if (key === "inviteGenerator.unlimitedUses") return "Unlimited uses";
@@ -25,6 +28,10 @@ function translate(key, params = {}) {
 }
 
 describe("inviteLinks", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   test("normalizes valid instance URLs and strips credentials and query state", () => {
     expect(normalizeInstanceUrl("https://chat.example.com/base/?foo=bar#frag")).toBe("https://chat.example.com/base");
     expect(normalizeInstanceUrl("ftp://chat.example.com")).toBe("");
@@ -44,8 +51,28 @@ describe("inviteLinks", () => {
 
   test("formats invite usage and expiry through i18n", () => {
     expect(formatInviteUsage(translate, 0, 0)).toBe("Unlimited uses");
-    expect(formatInviteUsage(translate, 5, 2)).toBe("5 max uses · 3 uses left");
+    expect(formatInviteUsage(translate, 5, 2)).toBe("5 max uses \u00b7 3 uses left");
     expect(formatInviteExpiry(translate, null)).toBe("Does not expire");
     expect(formatInviteExpiry(translate, "not-a-date")).toBe("Expires soon");
   });
+
+  test("discards stale pending invites so old desktop launches do not auto-accept later", () => {
+    window.localStorage.setItem(PENDING_INVITE_STORAGE_KEY, JSON.stringify({
+      code: "stale-code",
+      savedAt: Date.now() - (13 * 60 * 60 * 1000),
+    }));
+
+    expect(loadPendingInvite()).toBeNull();
+    expect(window.localStorage.getItem(PENDING_INVITE_STORAGE_KEY)).toBeNull();
+  });
+
+  test("keeps recent pending invites available for active auth flows", () => {
+    window.localStorage.setItem(PENDING_INVITE_STORAGE_KEY, JSON.stringify({
+      code: "https://chat.example.com/invite/fresh-code",
+      savedAt: Date.now() - (5 * 60 * 1000),
+    }));
+
+    expect(loadPendingInvite()).toEqual({ code: "fresh-code" });
+  });
 });
+

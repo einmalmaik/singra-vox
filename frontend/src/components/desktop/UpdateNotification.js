@@ -8,52 +8,14 @@
  * (at your option) any later version.
  */
 import { useTranslation } from "react-i18next";
-import {
-  ArrowDown,
-  ArrowsClockwise,
-  CheckCircle,
-  WarningCircle,
-} from "@phosphor-icons/react";
 import { DesktopUpdateProvider, useDesktopUpdateState } from "./DesktopUpdateState";
-
-const PHASE_CONFIG = {
-  checking: {
-    icon: ArrowsClockwise,
-    iconClass: "text-cyan-400 animate-spin",
-    labelKey: "desktopUpdater.checking",
-    bg: "bg-zinc-900/95 border-cyan-500/20",
-  },
-  available: {
-    icon: ArrowDown,
-    iconClass: "text-cyan-400 animate-bounce",
-    labelKey: "desktopUpdater.available",
-    bg: "bg-zinc-900/95 border-cyan-500/30",
-  },
-  downloading: {
-    icon: ArrowsClockwise,
-    iconClass: "text-cyan-400 animate-spin",
-    labelKey: "desktopUpdater.downloading",
-    bg: "bg-zinc-900/95 border-cyan-500/30",
-  },
-  installing: {
-    icon: ArrowsClockwise,
-    iconClass: "text-cyan-400 animate-spin",
-    labelKey: "desktopUpdater.installing",
-    bg: "bg-zinc-900/95 border-cyan-500/40",
-  },
-  "up-to-date": {
-    icon: CheckCircle,
-    iconClass: "text-emerald-400",
-    labelKey: "desktopUpdater.upToDate",
-    bg: "bg-zinc-900/95 border-emerald-500/20",
-  },
-  error: {
-    icon: WarningCircle,
-    iconClass: "text-amber-400",
-    labelKey: "desktopUpdater.error",
-    bg: "bg-zinc-900/95 border-amber-500/20",
-  },
-};
+import {
+  PHASE_CONFIG,
+  UPDATE_EVENT_NAMES,
+  formatUpdateVersion,
+  getUpdatePhaseLabel,
+  registerUpdateListeners,
+} from "./updateHelpers";
 
 function UpdateProgressBar({ progress, compact = false }) {
   return (
@@ -69,18 +31,17 @@ function UpdateProgressBar({ progress, compact = false }) {
   );
 }
 
-function VersionLabel({ currentVersion, nextVersion }) {
+function VersionLabel({ update }) {
   const { t } = useTranslation();
-  if (!nextVersion) {
+  const versionLabel = formatUpdateVersion(update, t);
+
+  if (!versionLabel) {
     return null;
   }
 
   return (
     <p className="truncate text-xs text-zinc-400">
-      {t("desktopUpdater.versionTransition", {
-        current: currentVersion || "0.0.0",
-        next: nextVersion,
-      })}
+      {versionLabel}
     </p>
   );
 }
@@ -103,8 +64,8 @@ export function DesktopStartupUpdateGate() {
   const config = PHASE_CONFIG[phase] || PHASE_CONFIG.checking;
   const PhaseIcon = config.icon;
   const resolvedMessage = phase === "error"
-    ? (errorMsg || t("desktopUpdater.fallbackError"))
-    : t(config.labelKey);
+    ? (errorMsg || t("updater.unknownError"))
+    : getUpdatePhaseLabel(phase, t);
 
   return (
     <div
@@ -126,21 +87,18 @@ export function DesktopStartupUpdateGate() {
               Singra Vox
             </p>
             <h2 className="mt-1 text-2xl font-bold" style={{ fontFamily: "Manrope" }}>
-              {t("desktopUpdater.startupTitle")}
+              {t("updater.startupTitle")}
             </h2>
           </div>
         </div>
 
-        <p className="text-sm text-zinc-400">{t("desktopUpdater.startupSubtitle")}</p>
+        <p className="text-sm text-zinc-400">{t("updater.startupSubtitle")}</p>
 
         <div className="mt-8 flex items-start gap-4 rounded-3xl border border-white/8 bg-white/[0.03] p-4">
           <PhaseIcon size={22} weight="bold" className={config.iconClass} />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-white">{resolvedMessage}</p>
-            <VersionLabel
-              currentVersion={update?.currentVersion || update?.current_version}
-              nextVersion={update?.version}
-            />
+            <VersionLabel update={update} />
             {phase === "downloading" && <UpdateProgressBar progress={progress} />}
           </div>
         </div>
@@ -171,8 +129,11 @@ export function UpdateNotification() {
 
   const PhaseIcon = config.icon;
   const resolvedMessage = phase === "error"
-    ? (errorMsg || t("desktopUpdater.fallbackError"))
-    : t(config.labelKey);
+    ? (errorMsg || t("updater.unknownError"))
+    : getUpdatePhaseLabel(phase, t);
+  const versionUpdate = phase === "checking" || phase === "up-to-date" || phase === "error"
+    ? null
+    : update;
 
   return (
     <div
@@ -185,10 +146,7 @@ export function UpdateNotification() {
         <PhaseIcon size={18} weight="bold" className={config.iconClass} />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-white">{resolvedMessage}</p>
-          <VersionLabel
-            currentVersion={update?.currentVersion || update?.current_version}
-            nextVersion={phase === "checking" || phase === "up-to-date" || phase === "error" ? null : update?.version}
-          />
+          <VersionLabel update={versionUpdate} />
           {phase === "downloading" && <UpdateProgressBar progress={progress} compact />}
         </div>
       </div>
@@ -196,4 +154,10 @@ export function UpdateNotification() {
   );
 }
 
-export { DesktopUpdateProvider };
+export {
+  DesktopUpdateProvider,
+  UPDATE_EVENT_NAMES,
+  formatUpdateVersion,
+  getUpdatePhaseLabel,
+  registerUpdateListeners,
+};
