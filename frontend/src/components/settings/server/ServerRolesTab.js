@@ -275,8 +275,8 @@ export default function ServerRolesTab({ server, roles }) {
                 {/* Role Hoisting */}
                 <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-zinc-950/60 px-5 py-4" data-testid="role-hoist-toggle">
                   <div>
-                    <p className="text-sm font-medium text-white">{t("serverSettings.hoistRole", { defaultValue: "Separat in Mitgliederliste anzeigen" })}</p>
-                    <p className="mt-0.5 text-xs text-zinc-500">{t("serverSettings.hoistRoleHelp", { defaultValue: "Mitglieder mit dieser Rolle werden in einer eigenen Gruppe angezeigt" })}</p>
+                    <p className="text-sm font-medium text-white">{t("serverSettings.hoistRole")}</p>
+                    <p className="mt-0.5 text-xs text-zinc-500">{t("serverSettings.hoistRoleHelp")}</p>
                   </div>
                   <Switch
                     checked={!!roleDraft.hoist}
@@ -297,7 +297,7 @@ export default function ServerRolesTab({ server, roles }) {
             {/* Permissions grid */}
             <div className="mt-8">
               <p className="text-xs font-bold uppercase tracking-[0.15em] text-zinc-500 mb-4">
-                {t("serverSettings.permissionsTitle", { defaultValue: "Berechtigungen" })}
+                {t("serverSettings.permissionsTitle")}
               </p>
               <div className="grid gap-3 md:grid-cols-2">
                 {Object.entries(permissionLabels).map(([key, label]) => (

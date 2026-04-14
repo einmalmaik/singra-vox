@@ -1,0 +1,30 @@
+const section = {
+  "notNow": "Nicht jetzt",
+  "settings": "Einstellungen",
+  "loading": "Wird geladen...",
+  "save": "Speichern",
+  "cancel": "Abbrechen",
+  "create": "Erstellen",
+  "delete": "Löschen",
+  "edit": "Bearbeiten",
+  "rename": "Umbenennen",
+  "refresh": "Aktualisieren",
+  "close": "Schließen",
+  "send": "Senden",
+  "update": "Aktualisieren",
+  "description": "Beschreibung",
+  "name": "Name",
+  "color": "Farbe",
+  "type": "Typ",
+  "category": "Kategorie",
+  "noCategory": "Keine Kategorie",
+  "unknown": "Unbekannt",
+  "system": "System",
+  "reason": "Grund",
+  "selected": "Ausgewählt",
+  "ready": "Bereit",
+  "pending": "Ausstehend",
+  "noActionsAvailable": "Keine Aktionen verfügbar"
+};
+
+export default section;

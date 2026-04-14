@@ -342,7 +342,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t("memberList.search", { defaultValue: "Mitglieder suchen..." })}
+              placeholder={t("memberList.search")}
               className="w-full bg-zinc-800/60 border border-zinc-700/40 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-cyan-500/40 transition-colors"
               data-testid="member-search-input"
             />
@@ -386,7 +386,7 @@ export default function MemberSidebar({ members, roles, serverId, server, user, 
 
         {groups.length === 0 && searchQuery && (
           <p className="text-xs text-zinc-500 text-center py-8">
-            {t("memberList.noResults", { defaultValue: "Keine Mitglieder gefunden" })}
+            {t("memberList.noResults")}
           </p>
         )}
       </div>

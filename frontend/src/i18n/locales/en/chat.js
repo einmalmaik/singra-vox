@@ -1,0 +1,30 @@
+const section = {
+  "loadServerFailed": "Failed to load server.",
+  "loadServersFailed": "Failed to load servers.",
+  "loadOlderMessages": "Load older messages",
+  "loading": "Loading...",
+  "selectChannel": "Select a channel to start chatting",
+  "welcomeToChannel": "Welcome to #{{name}}",
+  "startOfChannel": "This is the start of the channel.",
+  "edited": "(edited)",
+  "originalUnavailable": "Original message not available",
+  "react": "React",
+  "replyInThread": "Reply in Thread",
+  "setTopic": "Set a topic...",
+  "pinned": "Pinned",
+  "pinnedMessages": "Pinned Messages",
+  "topicUpdated": "Topic updated.",
+  "topicUpdateFailed": "Failed to update topic.",
+  "messagePinned": "Message pinned.",
+  "pinFailed": "Failed to pin message.",
+  "sendFailed": "Failed to send message.",
+  "editFailed": "Failed to edit message.",
+  "deleteFailed": "Failed to delete message.",
+  "fileTooLarge": "File too large (max 10 MB).",
+  "uploadFailed": "Upload failed.",
+  "typing_one": "{{names}} is typing...",
+  "typing_other": "{{names}} are typing...",
+  "messagePlaceholder": "Message #{{name}}"
+};
+
+export default section;

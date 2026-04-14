@@ -377,7 +377,7 @@ export default function AccountSettingsTab({ user, onUserUpdated }) {
                 {savingAccount ? t("settings.saving") : t("settings.saveProfile")}
               </Button>
               <p className="text-xs text-zinc-600">
-                {t("settings.statusChangeHint", { defaultValue: "Status \u00e4nderst du direkt im Statusbereich unten links." })}
+                {t("settings.statusChangeHint")}
               </p>
             </div>
           </div>
@@ -467,7 +467,7 @@ export default function AccountSettingsTab({ user, onUserUpdated }) {
                 >
                   <div className="space-y-1">
                     <p className="text-sm font-semibold text-white">
-                      {t(`settings.sessionPlatform.${session.platform || "web"}`, { defaultValue: session.platform || "web" })}
+                      {session.platform && !["desktop", "web"].includes(session.platform) ? session.platform : t(`settings.sessionPlatform.${session.platform || "web"}`)}
                     </p>
                     <p className="text-xs text-zinc-400">
                       {t("settings.sessionIssuedAt", { value: new Date(session.issued_at).toLocaleString() })}

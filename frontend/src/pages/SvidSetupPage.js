@@ -86,29 +86,25 @@ export default function SvidSetupPage() {
     return (
       <AuthShell
         eyebrow="SINGRA VOX ID"
-        title={t("svid.setupSuccessTitle", { defaultValue: "Singra-ID ist eingerichtet" })}
-        subtitle={t("svid.setupSuccessSubtitle", { defaultValue: "Dein bestehendes Konto ist jetzt mit Singra-ID verbunden." })}
+        title={t("svid.setupSuccessTitle")}
+        subtitle={t("svid.setupSuccessSubtitle")}
         icon={Fingerprint}
         sideTitle="Singra Vox ID"
-        sideCopy={t("svid.setupSuccessSideCopy", {
-          defaultValue: "Deine Server, Einstellungen und Mitgliedschaften auf dieser Instanz bleiben erhalten.",
-        })}
+        sideCopy={t("svid.setupSuccessSideCopy")}
       >
         <div className="space-y-4" data-testid="svid-setup-success">
           <div className="flex items-center justify-center">
             <CheckCircle size={48} className="text-emerald-400" weight="fill" />
           </div>
           <p className="text-center text-sm text-zinc-400">
-            {t("svid.setupSuccessBody", {
-              defaultValue: "Ab jetzt meldest du dich mit deiner Singra-ID an. Freunde und instanzübergreifende Chats sind jetzt verfügbar.",
-            })}
+            {t("svid.setupSuccessBody")}
           </p>
           <Button
             onClick={goBackToWorkspace}
             data-testid="svid-setup-finish"
             className="h-12 w-full rounded-2xl bg-cyan-400 font-semibold text-zinc-950 transition hover:bg-cyan-300"
           >
-            {t("svid.setupSuccessAction", { defaultValue: "Zurück zu Direktnachrichten" })}
+            {t("svid.setupSuccessAction")}
           </Button>
         </div>
       </AuthShell>
@@ -119,22 +115,16 @@ export default function SvidSetupPage() {
     return (
       <AuthShell
         eyebrow="SINGRA VOX ID"
-        title={t("svid.setupFinalizeTitle", { defaultValue: "Singra-ID bestätigt" })}
-        subtitle={t("svid.setupFinalizeSubtitle", {
-          defaultValue: "Deine E-Mail wurde bestätigt. Die Verknüpfung mit deinem bestehenden Konto muss noch abgeschlossen werden.",
-        })}
+        title={t("svid.setupFinalizeTitle")}
+        subtitle={t("svid.setupFinalizeSubtitle")}
         icon={Fingerprint}
         sideTitle="Singra Vox ID"
-        sideCopy={t("svid.setupFinalizeSideCopy", {
-          defaultValue: "Der Bestätigungscode wurde bereits verbraucht. Du kannst die Kontoverknüpfung jetzt direkt erneut versuchen, ohne einen neuen Code anzufordern.",
-        })}
+        sideCopy={t("svid.setupFinalizeSideCopy")}
       >
         <div className="space-y-4" data-testid="svid-setup-retry-linking">
           <LocalizedErrorBanner message={flow.status.error} className="text-red-200" />
           <p className="text-sm text-zinc-400">
-            {t("svid.setupFinalizeHint", {
-              defaultValue: "Falls Avatar-Sync oder Linking kurzzeitig fehlgeschlagen sind, kannst du den Abschluss hier erneut starten.",
-            })}
+            {t("svid.setupFinalizeHint")}
           </p>
           <Button
             type="button"
@@ -145,7 +135,7 @@ export default function SvidSetupPage() {
           >
             {flow.status.verifying
               ? t("svid.verifying")
-              : t("svid.setupFinalizeRetry", { defaultValue: "Verknüpfung erneut versuchen" })}
+              : t("svid.setupFinalizeRetry")}
           </Button>
           <button
             type="button"
@@ -153,7 +143,7 @@ export default function SvidSetupPage() {
             className="flex w-full items-center justify-center gap-1.5 pt-1 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
             data-testid="svid-setup-finalize-back"
           >
-            <ArrowLeft size={12} /> {t("svid.backToLogin", { defaultValue: "ZurÃ¼ck" })}
+            <ArrowLeft size={12} /> {t("svid.backToLogin")}
           </button>
         </div>
       </AuthShell>
@@ -174,9 +164,7 @@ export default function SvidSetupPage() {
         subtitle={t("svid.checkEmailSubtitle", { email: flow.verification.verifyEmail })}
         icon={Fingerprint}
         sideTitle="Singra Vox ID"
-        sideCopy={t("svid.setupVerifySideCopy", {
-          defaultValue: "Bestätige jetzt deine Singra-ID. Danach wird dein bestehendes Instanzkonto direkt verknüpft.",
-        })}
+        sideCopy={t("svid.setupVerifySideCopy")}
       >
         <form onSubmit={flow.actions.handleVerifyCode} className="space-y-4" data-testid="svid-setup-verify-form">
           <LocalizedErrorBanner message={flow.status.error} className="text-red-200" />
@@ -231,7 +219,7 @@ export default function SvidSetupPage() {
               className="flex items-center gap-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
               data-testid="svid-setup-back"
             >
-              <ArrowLeft size={12} /> {t("svid.backToLogin", { defaultValue: "Zurück" })}
+              <ArrowLeft size={12} /> {t("svid.backToLogin")}
             </button>
           </div>
         </form>
@@ -242,27 +230,19 @@ export default function SvidSetupPage() {
   return (
     <AuthShell
       eyebrow="SINGRA VOX ID"
-      title={t("svid.setupTitle", { defaultValue: "Singra-ID einrichten" })}
-      subtitle={t("svid.setupSubtitle", {
-        defaultValue: "Erweitere dein bestehendes Instanzkonto um eine Singra-ID für Freunde und instanzübergreifende Chats.",
-      })}
+      title={t("svid.setupTitle")}
+      subtitle={t("svid.setupSubtitle")}
       icon={Fingerprint}
       sideTitle="Singra Vox ID"
-      sideCopy={t("svid.setupSideCopy", {
-        defaultValue: "Dein aktuelles Konto bleibt erhalten. Du ergänzt nur die globale Identitätsschicht darüber.",
-      })}
+      sideCopy={t("svid.setupSideCopy")}
       sideDetails={[
         {
-          title: t("svid.setupKeepsDataTitle", { defaultValue: "Alles bleibt erhalten" }),
-          description: t("svid.setupKeepsDataCopy", {
-            defaultValue: "Server, Mitgliedschaften, Einstellungen und lokale Daten auf dieser Instanz bleiben unverändert bestehen.",
-          }),
+          title: t("svid.setupKeepsDataTitle"),
+          description: t("svid.setupKeepsDataCopy"),
         },
         {
-          title: t("svid.setupFriendsTitle", { defaultValue: "Freunde & Cross-Instance" }),
-          description: t("svid.setupFriendsCopy", {
-            defaultValue: "Nach der Einrichtung kannst du Freunde hinzufügen und instanzübergreifend chatten, ohne ein zweites lokales Konto zu pflegen.",
-          }),
+          title: t("svid.setupFriendsTitle"),
+          description: t("svid.setupFriendsCopy"),
         },
       ]}
     >
@@ -272,24 +252,18 @@ export default function SvidSetupPage() {
         <div className="grid gap-3">
           <SetupInfoCard
             icon={UsersThree}
-            title={t("svid.setupPreserveTitle", { defaultValue: "Server und Einstellungen bleiben" })}
-            copy={t("svid.setupPreserveCopy", {
-              defaultValue: "Deine aktuellen Server, Mitgliedschaften, Benachrichtigungen und lokalen Einstellungen auf dieser Instanz werden nicht zurückgesetzt.",
-            })}
+            title={t("svid.setupPreserveTitle")}
+            copy={t("svid.setupPreserveCopy")}
           />
           <SetupInfoCard
             icon={LinkIcon}
-            title={t("svid.setupUpgradeTitle", { defaultValue: "Bestehendes Konto wird verknüpft" })}
-            copy={t("svid.setupUpgradeCopy", {
-              defaultValue: "Wir verwenden deine aktuellen Profildaten als Startpunkt und verknüpfen dieses Instanzkonto direkt mit deiner neuen Singra-ID.",
-            })}
+            title={t("svid.setupUpgradeTitle")}
+            copy={t("svid.setupUpgradeCopy")}
           />
           <SetupInfoCard
             icon={ShieldCheck}
-            title={t("svid.setupPrivacyTitle", { defaultValue: "Datenschutz bleibt zuerst" })}
-            copy={t("svid.setupPrivacyCopy", {
-              defaultValue: "Nachrichten, Serverstruktur und Instanzdaten bleiben lokal. Die Singra-ID ergänzt nur die zentrale Identität für Freunde und Anmeldung.",
-            })}
+            title={t("svid.setupPrivacyTitle")}
+            copy={t("svid.setupPrivacyCopy")}
           />
         </div>
 
@@ -354,7 +328,7 @@ export default function SvidSetupPage() {
           >
             {flow.status.loading
               ? t("svid.creatingAccount")
-              : t("svid.setupCreateAction", { defaultValue: "Singra-ID einrichten" })}
+              : t("svid.setupCreateAction")}
           </Button>
 
           <button

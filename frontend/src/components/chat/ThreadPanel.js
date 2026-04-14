@@ -48,11 +48,11 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
 
   // Self-Destruct Timer-Optionen (Minuten)
   const SELF_DESTRUCT_OPTIONS = [
-    { label: t("thread.selfDestruct.off", { defaultValue: "Aus" }), minutes: 0 },
-    { label: t("thread.selfDestruct.1h", { defaultValue: "1 Stunde" }), minutes: 60 },
-    { label: t("thread.selfDestruct.24h", { defaultValue: "24 Stunden" }), minutes: 1440 },
-    { label: t("thread.selfDestruct.7d", { defaultValue: "7 Tage" }), minutes: 10080 },
-    { label: t("thread.selfDestruct.30d", { defaultValue: "30 Tage" }), minutes: 43200 },
+    { label: t("thread.selfDestruct.off"), minutes: 0 },
+    { label: t("thread.selfDestruct.1h"), minutes: 60 },
+    { label: t("thread.selfDestruct.24h"), minutes: 1440 },
+    { label: t("thread.selfDestruct.7d"), minutes: 10080 },
+    { label: t("thread.selfDestruct.30d"), minutes: 43200 },
   ];
 
   // Self-Destruct Timer setzen
@@ -60,8 +60,8 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
     try {
       await api.patch(`/threads/${messageId}/self-destruct`, { duration_minutes: minutes });
       toast.success(minutes > 0
-        ? t("thread.selfDestruct.set", { defaultValue: "Verfallsdatum gesetzt" })
-        : t("thread.selfDestruct.removed", { defaultValue: "Verfallsdatum entfernt" }));
+        ? t("thread.selfDestruct.set")
+        : t("thread.selfDestruct.removed"));
       setSelfDestructMenuOpen(false);
       loadThread();
     } catch (err) {
@@ -261,8 +261,8 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
                   : "text-[#71717A] hover:text-white hover:bg-white/5"
               }`}
               title={selfDestructAt
-                ? `${t("thread.selfDestruct.active", { defaultValue: "Verfällt" })}: ${new Date(selfDestructAt).toLocaleString()}`
-                : t("thread.selfDestruct.set", { defaultValue: "Verfallsdatum setzen" })}
+                ? `${t("thread.selfDestruct.active")}: ${new Date(selfDestructAt).toLocaleString()}`
+                : t("thread.selfDestruct.set")}
               data-testid="thread-self-destruct-btn"
             >
               {selfDestructAt ? <ClockCountdown size={16} weight="fill" /> : <Timer size={16} />}
@@ -287,7 +287,7 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
                 {selfDestructAt && (
                   <div className="px-3 py-1.5 border-t border-[#27272A] mt-1">
                     <p className="text-[10px] text-zinc-500">
-                      {t("thread.selfDestruct.expiresAt", { defaultValue: "Verfällt am" })}:{" "}
+                      {t("thread.selfDestruct.expiresAt")}:{" "}
                       {new Date(selfDestructAt).toLocaleString()}
                     </p>
                   </div>
@@ -306,7 +306,7 @@ export default function ThreadPanel({ messageId, channelId, channel, onClose, on
         <div className="px-4 py-3 bg-amber-900/20 border-b border-amber-500/20">
           <div className="flex items-center gap-2">
             <ClockCountdown size={16} className="text-amber-400 shrink-0" />
-            <p className="text-xs text-amber-300">{t("thread.selfDestruct.expired", { defaultValue: "Dieser Thread ist abgelaufen und wird bald gelöscht." })}</p>
+            <p className="text-xs text-amber-300">{t("thread.selfDestruct.expired")}</p>
           </div>
         </div>
       )}
