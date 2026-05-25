@@ -1,6 +1,6 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 > [!IMPORTANT]
->This Product is a Work in Progress´´
+>This Product is a Work in Progress
 
 # Singra Vox
 
