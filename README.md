@@ -2,6 +2,8 @@
 > [!IMPORTANT]
 >This Product is a Work in Progress
 
+Please don't Use this Product
+
 # Singra Vox
 
 **Privacy-first communication platform.** Self-hosted chat, voice, and encrypted channels – with a central identity system that lets users maintain one account across all instances.
